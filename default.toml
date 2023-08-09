@@ -1,3 +1,4 @@
-debug         = true
-network       = "Testnet"
-starting_head = "HaWkNoZujD1t9ftJAuZH1Wy2xnXrht8qzENZSDrka3y5"
+debug   = true
+network = "Testnet"
+# FARAWAY starting_head = "HaWkNoZujD1t9ftJAuZH1Wy2xnXrht8qzENZSDrka3y5"
+starting_head = "4zwZQzjQDpimeLK3tX39nzok6UjDU9edS57EFhkAa4Sk"

@@ -34,7 +34,7 @@ pub enum SyncData {
 }
 
 // TODO: futures::retry_after(next block time)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LightClient {
     client: rpc::NearRpcClient,
     state: LightClientBlockLiteView,
@@ -130,8 +130,11 @@ impl LightClient {
         }
     }
 
-    pub async fn header(&self) -> &Header {
+    pub fn head(&self) -> &Header {
         &self.state
+    }
+    pub fn header(&self, epoch: CryptoHash) -> Option<&Header> {
+        self.archival_headers.get(&epoch)
     }
 
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {

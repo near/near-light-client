@@ -133,6 +133,7 @@ impl Network {
     }
 }
 
+#[derive(Clone)]
 pub struct NearRpcClient {
     network: Network,
     client: reqwest::Client,
