@@ -39,6 +39,7 @@ pub struct LightClient {
     client: rpc::NearRpcClient,
     state: LightClientBlockLiteView,
     block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>, // TODO can optimise this by short caching these by Pubkey and then storing pointers
+    archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
 }
 
 impl LightClient {
@@ -93,6 +94,7 @@ impl LightClient {
                 inner_lite: starting_head.inner_lite,
             },
             block_producers,
+            archival_headers: Default::default(),
         }
     }
 
@@ -117,6 +119,8 @@ impl LightClient {
                     self.block_producers.insert(epoch, next_bps);
                 }
 
+                self.archival_headers
+                    .insert(self.state.inner_lite.epoch_id, self.state.clone());
                 self.state = state.head.into();
             }
             Ok(true)
