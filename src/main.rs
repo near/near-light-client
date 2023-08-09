@@ -21,7 +21,9 @@ async fn main() -> anyhow::Result<()> {
     setup_exit_handler(shutdown_tx);
 
     let mut client = LightClient::init(&config).await;
-    client.sync().await;
+    while let Ok(true) = client.sync().await {
+        log::info!("Syncing again");
+    }
 
     // This blocks until the shutdown signal is received
     shutdown_rx.recv_async().await;

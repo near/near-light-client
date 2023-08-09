@@ -96,7 +96,7 @@ impl LightClient {
         }
     }
 
-    pub async fn sync(&mut self) -> anyhow::Result<()> {
+    pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
         let mut state: LightClientState = self.state.clone().into();
 
@@ -119,11 +119,11 @@ impl LightClient {
 
                 self.state = state.head.into();
             }
+            Ok(true)
         } else {
             log::info!("No new header found");
+            Ok(false)
         }
-
-        Ok(())
     }
 
     pub async fn header(&self) -> &Header {
