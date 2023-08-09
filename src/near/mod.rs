@@ -12,7 +12,7 @@ use near_primitives_core::hash::CryptoHash;
 use std::collections::HashMap;
 // use views::LightClientBlockLiteView;
 
-mod rpc;
+pub mod rpc;
 
 pub type Header = LightClientBlockLiteView;
 
@@ -70,12 +70,12 @@ impl LightClient {
     pub async fn init(config: &Config) -> Self {
         log::debug!("Bootstrapping light client");
 
-        let client = rpc::NearRpcClient::new();
+        let client = rpc::NearRpcClient::new(config.network.clone());
 
-        // TODO: take from config
         let starting_head = client
-            .fetch_latest_header("BoswxxbPApgouVZNH37jKo6PF9WgrcqqgYjEW8tdXXPU")
-            .await;
+            .fetch_latest_header(&config.starting_head)
+            .await
+            .expect("We need a starting header");
 
         log::info!("Got starting head: {:?}", starting_head.inner_lite.height);
 
@@ -105,17 +105,23 @@ impl LightClient {
             .fetch_latest_header(&format!("{}", state.head.hash()))
             .await;
 
-        let validated = self
-            .block_producers
-            .get(&state.head.inner_lite.epoch_id)
-            .map(|bps| state.validate_and_update_head(&new_header, bps.clone()))
-            .unwrap_or(false);
+        if let Some(new_header) = new_header {
+            let validated = self
+                .block_producers
+                .get(&state.head.inner_lite.epoch_id)
+                .map(|bps| state.validate_and_update_head(&new_header, bps.clone()))
+                .unwrap_or(false);
 
-        if let Some((epoch, next_bps)) = state.next_bps {
-            self.block_producers.insert(epoch, next_bps);
+            if validated {
+                if let Some((epoch, next_bps)) = state.next_bps {
+                    self.block_producers.insert(epoch, next_bps);
+                }
+
+                self.state = state.head.into();
+            }
+        } else {
+            log::info!("No new header found");
         }
-
-        self.state = state.head.into();
 
         Ok(())
     }

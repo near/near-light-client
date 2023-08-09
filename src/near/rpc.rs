@@ -7,14 +7,6 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 
-const NEAR_RPC_ENDPOINT: &str = "https://rpc.mainnet.near.org";
-const NEAR_RPC_ARCHIVE_ENDPOINT: &str = "https://archival-rpc.mainnet.near.org";
-
-const FETCH_TIMEOUT_PERIOD: u64 = 30000; // in milli-seconds
-const LOCK_TIMEOUT_EXPIRATION: u64 = FETCH_TIMEOUT_PERIOD + 1000; // in milli-seconds
-const LOCK_BLOCK_EXPIRATION: u32 = 3; // in block number
-
-// Name your user agent after your app?
 static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 #[derive(Deserialize, Serialize, Default)]
@@ -31,7 +23,7 @@ impl JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method,
             params,
-            id: "bbb".to_string(),
+            id: "pagoda-near-light-client".to_string(),
         }
     }
 }
@@ -45,9 +37,9 @@ impl From<NearRpcRequestParams> for JsonRpcRequest {
 
 #[derive(Deserialize, Serialize)]
 pub struct JsonRpcResult {
+    id: String,
     jsonrpc: String,
     pub result: NearRpcResult,
-    id: String,
 }
 
 impl From<NearRpcResult> for JsonRpcResult {
@@ -113,7 +105,36 @@ impl NearRpcRequestParams {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub enum Network {
+    Mainnet,
+    Testnet,
+    Localnet,
+}
+
+impl Network {
+    fn to_endpoint(&self, params: &NearRpcRequestParams) -> &str {
+        const MAINNET_RPC_ENDPOINT: &str = "https://rpc.mainnet.near.org";
+        const MAINNET_RPC_ARCHIVE_ENDPOINT: &str = "https://archival-rpc.mainnet.near.org";
+        const TESTNET_RPC_ENDPOINT: &str = "https://rpc.testnet.near.org";
+        const TESTNET_RPC_ARCHIVE_ENDPOINT: &str = "https://archival-rpc.testnet.near.org";
+
+        match (self, params) {
+            (Network::Mainnet, NearRpcRequestParams::NextBlock { .. }) => MAINNET_RPC_ENDPOINT,
+            (Network::Mainnet, NearRpcRequestParams::ExperimentalLightClientProof { .. }) => {
+                MAINNET_RPC_ARCHIVE_ENDPOINT
+            }
+            (Network::Testnet, NearRpcRequestParams::NextBlock { .. }) => TESTNET_RPC_ENDPOINT,
+            (Network::Testnet, NearRpcRequestParams::ExperimentalLightClientProof { .. }) => {
+                TESTNET_RPC_ARCHIVE_ENDPOINT
+            }
+            _ => "http://localhost:3030",
+        }
+    }
+}
+
 pub struct NearRpcClient {
+    network: Network,
     client: reqwest::Client,
 }
 
@@ -124,7 +145,7 @@ impl std::fmt::Debug for NearRpcClient {
 }
 
 impl NearRpcClient {
-    pub fn new() -> Self {
+    pub fn new(network: Network) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
@@ -137,17 +158,16 @@ impl NearRpcClient {
             .build()
             .unwrap();
 
-        NearRpcClient { client }
-    }
-    pub fn build_request(&self, body: &JsonRpcRequest) -> RequestBuilder {
-        let endpoint = match body.params {
-            NearRpcRequestParams::NextBlock { .. } => NEAR_RPC_ENDPOINT,
-            NearRpcRequestParams::ExperimentalLightClientProof { .. } => NEAR_RPC_ARCHIVE_ENDPOINT,
-        };
-        self.client.post(endpoint).json(body)
+        NearRpcClient { network, client }
     }
 
-    pub async fn fetch_latest_header(&self, latest_verified: &str) -> LightClientBlockView {
+    pub fn build_request(&self, body: &JsonRpcRequest) -> RequestBuilder {
+        self.client
+            .post(self.network.to_endpoint(&body.params))
+            .json(body)
+    }
+
+    pub async fn fetch_latest_header(&self, latest_verified: &str) -> Option<LightClientBlockView> {
         let request = self.build_request(
             &NearRpcRequestParams::NextBlock {
                 last_block_hash: latest_verified.to_string(),
@@ -169,12 +189,13 @@ impl NearRpcClient {
                 response.status()
             );
         }
+        // log::info!("Response: {:#?}", response.text().await.unwrap());
 
-        let res: JsonRpcResult = response.json().await.unwrap();
-        if let NearRpcResult::NextBlock(block) = res.result {
-            block
+        let res: Option<JsonRpcResult> = response.json().await.ok()?;
+        if let Some(NearRpcResult::NextBlock(block)) = res.map(|r| r.result) {
+            Some(block)
         } else {
-            panic!("Unexpected response from near rpc");
+            None
         }
     }
 }
@@ -187,6 +208,9 @@ mod tests {
         serde_json::from_reader(std::fs::File::open("fixtures/1_current_epoch.json").unwrap())
             .unwrap()
     }
+    fn get_response2() -> JsonRpcResult {
+        serde_json::from_reader(std::fs::File::open("fixtures/rpc_result.json").unwrap()).unwrap()
+    }
 
     #[test]
     fn sanity_test_response() {
@@ -195,7 +219,18 @@ mod tests {
         if let NearRpcResult::NextBlock(..) = res.result {
             assert!(true);
         } else {
-            assert!(false);
+            panic!("Unexpected response from near rpc")
+        }
+    }
+
+    #[test]
+    fn sanity_test_response2() {
+        let res = get_response2();
+        assert_eq!(res.jsonrpc, "2.0");
+        if let NearRpcResult::NextBlock(..) = res.result {
+            assert!(true);
+        } else {
+            panic!("Unexpected response from near rpc")
         }
     }
 
@@ -211,7 +246,7 @@ mod tests {
         log::info!("{}", req);
         assert_eq!(
             req,
-            r#"{"jsonrpc":"2.0","method":"next_light_client_block","params":{"last_block_hash":"2rs9o3B6nAQ3pEfVcBQdLnBqZrfpVuZJeKC8FpTshhua"},"id":"pallet-near"}"#
+            r#"{"jsonrpc":"2.0","method":"next_light_client_block","params":{"last_block_hash":"2rs9o3B6nAQ3pEfVcBQdLnBqZrfpVuZJeKC8FpTshhua"},"id":"pagoda-near-light-client"}"#
         )
     }
 
@@ -233,7 +268,7 @@ mod tests {
         log::info!("{}", req);
         assert_eq!(
             req,
-            r#"{"jsonrpc":"2.0","method":"EXPERIMENTAL_light_client_proof","params":{"type":"receipt","receipt_id":"5TGZe4jsuUGx9A65HNuEMkb3J4vW6Wo2pxDbyzYFrDeC","receiver_id":"7496c752687339dbd12c68535011a8994cfa727f3263bdb65fc879063c4b365a","light_client_head":"14gQvvYkY2MrKxikmSoEF5nmgwnrQZqU6kmfxdaSSS88"},"id":"pallet-near"}"#
+            r#"{"jsonrpc":"2.0","method":"EXPERIMENTAL_light_client_proof","params":{"type":"receipt","receipt_id":"5TGZe4jsuUGx9A65HNuEMkb3J4vW6Wo2pxDbyzYFrDeC","receiver_id":"7496c752687339dbd12c68535011a8994cfa727f3263bdb65fc879063c4b365a","light_client_head":"14gQvvYkY2MrKxikmSoEF5nmgwnrQZqU6kmfxdaSSS88"},"id":"pagoda-near-light-client"}"#
         )
     }
 }

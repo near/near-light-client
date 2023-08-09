@@ -2,10 +2,14 @@ use config::{Config as ConfigTrait, ConfigError, Environment, File};
 use serde::Deserialize;
 use std::env;
 
+use crate::near::rpc::Network;
+
 #[derive(Debug, Deserialize, Clone)]
 #[allow(unused)]
 pub struct Config {
     pub debug: bool,
+    pub starting_head: String,
+    pub network: Network,
 }
 
 impl Config {
