@@ -1,19 +1,18 @@
-use self::{
-    block_header::BlockHeaderInnerLite,
-    views::{BlockHeaderInnerLiteView, LightClientBlockView, ValidatorStakeView},
-};
 use crate::config::Config;
-use block_header::ApprovalInner;
 use borsh::BorshSerialize;
+use near_primitives::{
+    block_header::{ApprovalInner, BlockHeaderInnerLite},
+    views::{
+        validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView,
+        LightClientBlockLiteView, LightClientBlockView,
+    },
+};
 // use flume::{Receiver, Sender};
 use near_primitives_core::hash::CryptoHash;
 use std::collections::HashMap;
-use views::LightClientBlockLiteView;
+// use views::LightClientBlockLiteView;
 
-mod block_header;
-mod merkle;
 mod rpc;
-mod views;
 
 pub type Header = LightClientBlockLiteView;
 
@@ -88,7 +87,11 @@ impl LightClient {
 
         Self {
             client,
-            state: starting_head.into(),
+            state: LightClientBlockLiteView {
+                prev_block_hash: starting_head.prev_block_hash,
+                inner_rest_hash: starting_head.inner_rest_hash,
+                inner_lite: starting_head.inner_lite,
+            },
             block_producers,
         }
     }
@@ -232,17 +235,21 @@ impl LightClientState {
             .iter()
             .zip(epoch_block_producers.iter())
         {
-            total_stake += block_producer.stake();
+            let vs = block_producer.clone().into_validator_stake();
+            let bps_stake = vs.stake();
+            let bps_pk = vs.public_key();
+
+            total_stake += bps_stake;
 
             if let Some(signature) = maybe_signature {
                 log::debug!(
                     "Checking if signature {} and message {:?} was signed by {}",
                     signature,
                     approval_message,
-                    block_producer.public_key()
+                    bps_pk
                 );
-                approved_stake += block_producer.stake();
-                if !signature.verify(&approval_message, &block_producer.public_key()) {
+                approved_stake += bps_stake;
+                if !signature.verify(&approval_message, &bps_pk) {
                     log::warn!("Signature is invalid");
                     return false;
                 }
@@ -271,7 +278,11 @@ impl LightClientState {
         }
 
         let prev_head = self.head.inner_lite.height;
-        self.head = LightClientBlockLiteView::from(block_view.to_owned());
+        self.head = LightClientBlockLiteView {
+            prev_block_hash: block_view.prev_block_hash,
+            inner_rest_hash: block_view.inner_rest_hash,
+            inner_lite: block_view.inner_lite.clone(),
+        };
         let new_head = self.head.inner_lite.height;
         log::info!("prev/current head: {}/{}", prev_head, new_head);
 
@@ -282,14 +293,10 @@ impl LightClientState {
 #[cfg(test)]
 mod tests {
     use super::{
-        block_header::BlockHeaderInnerLite,
         rpc::{JsonRpcResult, NearRpcResult},
-        views::BlockHeaderInnerLiteView,
         *,
     };
-    use borsh::BorshSerialize;
     use core::str::FromStr;
-    use rustc_hex::FromHex;
     use serde_json;
 
     fn get_file(file: &str) -> JsonRpcResult {
@@ -368,6 +375,13 @@ mod tests {
             ), // 3tyxRRBgbYTo5DYd1LpX3EZtEiRYbDAAji6kcsf9QRge
         ]
     }
+    fn view_to_lite_view(h: LightClientBlockView) -> LightClientBlockLiteView {
+        LightClientBlockLiteView {
+            prev_block_hash: h.prev_block_hash,
+            inner_rest_hash: h.inner_rest_hash,
+            inner_lite: h.inner_lite,
+        }
+    }
 
     #[test]
     fn test_headers() {
@@ -375,7 +389,7 @@ mod tests {
         let next_epoch_id = headers_by_epoch[1].1.inner_lite.epoch_id.clone();
 
         let mut state = LightClientState {
-            head: headers_by_epoch[0].1.clone().into(),
+            head: view_to_lite_view(headers_by_epoch[0].1.clone()),
             next_bps: Some((
                 next_epoch_id,
                 headers_by_epoch[0]
@@ -398,7 +412,10 @@ mod tests {
             .unwrap();
         assert!(signature.verify(
             &approval_message,
-            get_previous_previous().next_bps.unwrap()[0].public_key()
+            get_previous_previous().next_bps.unwrap()[0]
+                .clone()
+                .into_validator_stake()
+                .public_key()
         ));
     }
 
@@ -409,7 +426,7 @@ mod tests {
         let next_epoch_id = headers_by_epoch[1].1.inner_lite.epoch_id.clone();
 
         let mut state = LightClientState {
-            head: headers_by_epoch[0].1.clone().into(),
+            head: view_to_lite_view(headers_by_epoch[0].1.clone()),
             next_bps: Some((
                 next_epoch_id,
                 headers_by_epoch[0]
@@ -470,39 +487,12 @@ mod tests {
     // }
 
     #[test]
-    fn test_inner_lite_hash_issue() {
-        let file = "fixtures/well_known_header.json";
-        let prev_hash =
-            CryptoHash::from_str("BUcVEkMq3DcZzDGgeh1sb7FFuD86XYcXpEt25Cf34LuP").unwrap();
-        let well_known_header: BlockHeaderInnerLite =
-            serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap();
-        let well_known_header_view: BlockHeaderInnerLiteView =
-            BlockHeaderInnerLiteView::from(well_known_header.clone());
-
-        // Manual borsh it
-        let view_bytes = well_known_header.try_to_vec().unwrap();
-        let expected: Vec<u8> = "040000000000000000000000000000000000000000000000000000000000000000000000000000009331b2bf4028e466f9d172fcbd0892cc063f0e8a0d8d751205b145c1bf573016a022eda2c13024e2cb4a11d2787b7670508bc627f3ff6c6d65e73ef476cb81ad66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f292500aa8070ffa2c9160f64f9ad70f5c0e8b197af0d1e010a2e202c02f73e86d30a68b1002765501e27e89ea8e5e3226b50d8193eb15f7d80830451f11e91e48a6ed7bda87fdee83803".from_hex().unwrap();
-        assert_eq!(view_bytes, expected);
-
-        let inner_light_hash = CryptoHash::hash_bytes(&view_bytes);
-        let expected =
-            CryptoHash::from_str("6u6qjC19Z2aDWujqdKf52u1FHCQSvpQ1af7Y4fdWKwzU").unwrap();
-        assert_eq!(inner_light_hash, expected);
-        assert_eq!(
-            inner_light_hash,
-            LightClientState::inner_lite_hash(&well_known_header_view)
-        );
-    }
-
-    #[test]
     fn test_can_create_current_hash() {
         let file = "fixtures/well_known_header.json";
         let prev_hash =
             CryptoHash::from_str("BUcVEkMq3DcZzDGgeh1sb7FFuD86XYcXpEt25Cf34LuP").unwrap();
-        let well_known_header: BlockHeaderInnerLite =
-            serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap();
         let well_known_header_view: BlockHeaderInnerLiteView =
-            BlockHeaderInnerLiteView::from(well_known_header.clone());
+            serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap();
 
         let inner_light_hash = LightClientState::inner_lite_hash(&well_known_header_view);
 
@@ -538,10 +528,8 @@ mod tests {
         let file = "fixtures/well_known_header.json";
         let prev_hash =
             CryptoHash::from_str("BUcVEkMq3DcZzDGgeh1sb7FFuD86XYcXpEt25Cf34LuP").unwrap();
-        let well_known_header: BlockHeaderInnerLite =
-            serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap();
         let well_known_header_view: BlockHeaderInnerLiteView =
-            BlockHeaderInnerLiteView::from(well_known_header.clone());
+            serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap();
 
         // Inner rest hashing
         for (inner_rest, expected) in vec![

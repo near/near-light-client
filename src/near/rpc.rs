@@ -1,12 +1,11 @@
 use std::fmt::Formatter;
 
+use near_primitives::views::LightClientBlockView;
 use reqwest::{
     header::{HeaderMap, HeaderValue},
     RequestBuilder,
 };
 use serde::{Deserialize, Serialize};
-
-use super::views::LightClientBlockView;
 
 const NEAR_RPC_ENDPOINT: &str = "https://rpc.mainnet.near.org";
 const NEAR_RPC_ARCHIVE_ENDPOINT: &str = "https://archival-rpc.mainnet.near.org";
