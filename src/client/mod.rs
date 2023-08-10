@@ -1,5 +1,6 @@
 use crate::config::Config;
 use borsh::BorshSerialize;
+use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
 use near_primitives::{
     block_header::{ApprovalInner, BlockHeaderInnerLite},
     views::{
@@ -8,8 +9,8 @@ use near_primitives::{
     },
 };
 // use flume::{Receiver, Sender};
-use near_primitives_core::hash::CryptoHash;
-use std::collections::HashMap;
+use near_primitives_core::{hash::CryptoHash, types::AccountId};
+use std::{collections::HashMap, str::FromStr};
 // use views::LightClientBlockLiteView;
 
 pub mod rpc;
@@ -74,7 +75,7 @@ impl LightClient {
         let client = rpc::NearRpcClient::new(config.network.clone());
 
         let starting_head = client
-            .fetch_latest_header(&config.starting_head)
+            .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
             .await
             .expect("We need a starting header");
 
@@ -104,7 +105,7 @@ impl LightClient {
 
         let new_header = self
             .client
-            .fetch_latest_header(&format!("{}", state.head.hash()))
+            .fetch_latest_header(&CryptoHash::from_str(&format!("{}", state.head.hash())).unwrap())
             .await;
 
         if let Some(new_header) = new_header {
@@ -135,6 +136,21 @@ impl LightClient {
     }
     pub fn header(&self, epoch: CryptoHash) -> Option<&Header> {
         self.archival_headers.get(&epoch)
+    }
+
+    // TODO: memoize these
+    pub async fn get_proof(
+        &self,
+        transaction_id: CryptoHash,
+        sender_id: AccountId,
+    ) -> Option<RpcLightClientExecutionProofResponse> {
+        self.client
+            .fetch_light_client_tx_proof(transaction_id, sender_id, self.state.hash())
+            .await
+    }
+
+    pub fn validate_proof<B>(&self, body: B) -> Option<()> {
+        todo!("Noop validate_proof")
     }
 
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {

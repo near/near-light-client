@@ -12,9 +12,6 @@
       let
         overlays = [ 
           (import rust-overlay) 
-          (self: prevPkgs: {
-              nodejs = prevPkgs.nodejs-16_x;
-          })
         ];
         pkgs = import nixpkgs { inherit system overlays; };
         rustVersion = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml);
@@ -42,16 +39,6 @@
             llvmPackages_11.bintools
             llvmPackages_11.libclang
             protobuf
-
-            go
-			      govendor
-            gopls
-            nodejs_16
-            yarn
-            python3Full
-
-            lazydocker
-
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })

@@ -2,7 +2,7 @@ use config::{Config as ConfigTrait, ConfigError, Environment, File};
 use serde::Deserialize;
 use std::env;
 
-use crate::near::rpc::Network;
+use crate::client::rpc::Network;
 
 #[derive(Debug, Deserialize, Clone)]
 #[allow(unused)]

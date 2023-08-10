@@ -30,16 +30,10 @@ serde_json = "1.0"
 
 # Near specific
 near-crypto          = "0.17.0"
+near-jsonrpc-client  = "0.6.0"
 near-primitives      = "0.17.0"
 near-primitives-core = "0.17.0"
 sha256               = "*"
 
 [dev-dependencies]
 rand = "*"
-# [workspace.metadata]
-
-# [workspace.package]
-
-# [workspace]
-
-# [workspace.dependencies]
