@@ -15,7 +15,7 @@ pub(crate) fn init(client: &LightClient) -> JoinHandle<Result<(), axum::Error>> 
         .with_state(client.clone())
         .route("/header/:epoch", get(header::get_by_epoch))
         .with_state(client.clone())
-        .route("/proof/:transaction", get(proof::get_proof))
+        .route("/proof/:transaction_id/:sender_id", get(proof::get_proof))
         .with_state(client.clone())
         .route("/proof", post(proof::post_proof))
         .with_state(client.clone());
@@ -40,6 +40,7 @@ mod header {
         State(client): State<LightClient>,
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
+        log::info!("get_by_epoch: {:?}", params);
         axum::Json(client.header(params.epoch).cloned())
     }
 
@@ -50,6 +51,7 @@ mod header {
 
 mod proof {
     use axum::Json;
+    use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
     use near_primitives_core::types::AccountId;
 
     use super::*;
@@ -64,6 +66,7 @@ mod proof {
         State(client): State<LightClient>,
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
+        log::info!("get_proof: {:?}", params);
         axum::Json(
             client
                 .get_proof(params.transaction_id, params.sender_id)
@@ -73,7 +76,7 @@ mod proof {
 
     pub(super) async fn post_proof(
         State(client): State<LightClient>,
-        Json(body): Json<Params>,
+        Json(body): Json<RpcLightClientExecutionProofResponse>,
     ) -> impl IntoResponse {
         axum::Json(client.validate_proof(body))
     }

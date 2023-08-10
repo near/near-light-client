@@ -22,8 +22,10 @@ async fn main() -> anyhow::Result<()> {
 
     // TODO extract to sync handler
     let mut client = LightClient::init(&config).await;
-    while let Ok(true) = client.sync().await {
-        log::info!("Syncing again");
+    if !config.debug {
+        while let Ok(true) = client.sync().await {
+            log::info!("Syncing again");
+        }
     }
 
     let webapi = controller::init(&client);
@@ -34,6 +36,10 @@ async fn main() -> anyhow::Result<()> {
     // for tx in to_shutdown {
     //     // tx.send_async(LightClientAction::Shutdown).await;
     // }
+    // Write light client state to disk
+    if config.debug {
+        client.write_state();
+    }
     log::info!("Shutting down due to shutdown signal");
 
     Ok(())

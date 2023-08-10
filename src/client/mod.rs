@@ -3,6 +3,8 @@ use borsh::BorshSerialize;
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
 use near_primitives::{
     block_header::{ApprovalInner, BlockHeaderInnerLite},
+    merkle::{self, compute_root_from_path},
+    transaction::ExecutionOutcome,
     views::{
         validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView,
         LightClientBlockLiteView, LightClientBlockView,
@@ -10,6 +12,7 @@ use near_primitives::{
 };
 // use flume::{Receiver, Sender};
 use near_primitives_core::{hash::CryptoHash, types::AccountId};
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 // use views::LightClientBlockLiteView;
 
@@ -32,6 +35,13 @@ macro_rules! cvec {
 #[derive(Debug)]
 pub enum SyncData {
     Sync { header: LightClientBlockView },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LocalStateCache {
+    pub head: LightClientBlockLiteView,
+    pub block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>,
+    pub archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
 }
 
 // TODO: futures::retry_after(next block time)
@@ -74,6 +84,21 @@ impl LightClient {
 
         let client = rpc::NearRpcClient::new(config.network.clone());
 
+        if config.debug {
+            // load state from file
+            let state: Option<LocalStateCache> = std::fs::read("state.json")
+                .ok()
+                .and_then(|file| serde_json::from_slice(&file).ok());
+            if let Some(state) = state {
+                log::info!("Loaded state from file");
+                return Self {
+                    client,
+                    state: state.head,
+                    block_producers: state.block_producers,
+                    archival_headers: state.archival_headers,
+                };
+            }
+        }
         let starting_head = client
             .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
             .await
@@ -97,6 +122,15 @@ impl LightClient {
             block_producers,
             archival_headers: Default::default(),
         }
+    }
+
+    pub fn write_state(&self) {
+        let state = LocalStateCache {
+            head: self.state.clone(),
+            block_producers: self.block_producers.clone(),
+            archival_headers: self.archival_headers.clone(),
+        };
+        std::fs::write("state.json", serde_json::to_string(&state).unwrap()).unwrap();
     }
 
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
@@ -149,8 +183,35 @@ impl LightClient {
             .await
     }
 
-    pub fn validate_proof<B>(&self, body: B) -> Option<()> {
-        todo!("Noop validate_proof")
+    pub fn validate_proof(&self, body: RpcLightClientExecutionProofResponse) -> bool {
+        let block_hash = body.block_header_lite.hash();
+        assert_eq!(block_hash, body.outcome_proof.block_hash);
+
+        let shard_outcome_root = merkle::compute_root_from_path(
+            &body.outcome_proof.proof,
+            CryptoHash::hash_borsh(&body.outcome_proof.to_hashes()),
+        );
+        log::info!("shard_outcome_root: {:?}", shard_outcome_root);
+
+        let block_outcome =
+            merkle::compute_root_from_path_and_item(&body.outcome_root_proof, shard_outcome_root);
+        log::info!("block_outcome_root: {:?}", block_outcome);
+
+        let shard_execution_outcome =
+            block_outcome == body.block_header_lite.inner_lite.outcome_root;
+
+        let block_verified = merkle::verify_hash(
+            self.head().inner_lite.block_merkle_root,
+            &body.block_proof,
+            block_hash,
+        );
+
+        log::info!(
+            "shard outcome included: {:?}, block included: {:?}",
+            shard_execution_outcome,
+            block_verified
+        );
+        shard_execution_outcome && block_verified
     }
 
     pub async fn shutdown(&mut self) -> anyhow::Result<()> {
@@ -321,53 +382,37 @@ impl LightClientState {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        rpc::{JsonRpcResult, NearRpcResult},
-        *,
-    };
+    use super::*;
     use core::str::FromStr;
+    use near_primitives::{
+        merkle::compute_root_from_path,
+        transaction::{ExecutionMetadata, ExecutionStatus},
+    };
+    use near_primitives_core::profile::ProfileDataV3;
     use serde_json;
 
-    fn get_file(file: &str) -> JsonRpcResult {
+    fn get_file(
+        file: &str,
+    ) -> near_jsonrpc_client::methods::next_light_client_block::RpcLightClientNextBlockResponse
+    {
         serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap()
     }
 
     fn get_previous_header() -> LightClientBlockView {
-        if let NearRpcResult::NextBlock(header) = get_file("fixtures/2_previous_epoch.json").result
-        {
-            header
-        } else {
-            panic!("Expected block header")
-        }
+        get_file("fixtures/2_previous_epoch.json").unwrap()
     }
 
     fn get_next_header() -> LightClientBlockView {
-        if let NearRpcResult::NextBlock(header) = get_file("fixtures/1_current_epoch.json").result {
-            header
-        } else {
-            panic!("Expected block header")
-        }
+        get_file("fixtures/1_current_epoch.json").unwrap()
     }
 
     fn get_previous() -> LightClientBlockView {
-        let s: JsonRpcResult =
-            serde_json::from_reader(std::fs::File::open("fixtures/2_previous_epoch.json").unwrap())
-                .unwrap();
-        if let NearRpcResult::NextBlock(header) = s.result {
-            header
-        } else {
-            panic!("Expected block header")
-        }
+        serde_json::from_reader(std::fs::File::open("fixtures/2_previous_epoch.json").unwrap())
+            .unwrap()
     }
     fn get_previous_previous() -> LightClientBlockView {
-        let s: JsonRpcResult =
-            serde_json::from_reader(std::fs::File::open("fixtures/3_previous_epoch.json").unwrap())
-                .unwrap();
-        if let NearRpcResult::NextBlock(header) = s.result {
-            header
-        } else {
-            panic!("Expected block header")
-        }
+        serde_json::from_reader(std::fs::File::open("fixtures/3_previous_epoch.json").unwrap())
+            .unwrap()
     }
 
     fn get_next_bps() -> Vec<ValidatorStakeView> {
@@ -375,14 +420,8 @@ mod tests {
     }
 
     fn get_current() -> LightClientBlockView {
-        let s: JsonRpcResult =
-            serde_json::from_reader(std::fs::File::open("fixtures/1_current_epoch.json").unwrap())
-                .unwrap();
-        if let NearRpcResult::NextBlock(header) = s.result {
-            header
-        } else {
-            panic!("Expected block header")
-        }
+        serde_json::from_reader(std::fs::File::open("fixtures/1_current_epoch.json").unwrap())
+            .unwrap()
     }
 
     fn get_epochs() -> Vec<(u32, LightClientBlockView, CryptoHash)> {
@@ -591,5 +630,110 @@ mod tests {
             let current_hash = LightClientState::calculate_current_block_hash(&view);
             assert_eq!(current_hash, expected);
         }
+    }
+
+    #[test]
+    fn test_outcome_root_inclusion() {
+        pretty_env_logger::init();
+        let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
+        let body: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
+
+        // If the outcome root of the transaction or receipt is included in block H,
+        // then outcome_proof includes the block hash of H,
+        // as well as the merkle proof of the execution outcome in its given shard.
+
+        //The outcome root in H can be reconstructed by
+        // shard_outcome_root = compute_root(sha256(borsh(execution_outcome)), outcome_proof.proof)
+        let shard_outcome_root =
+            merkle::compute_root_from_path_and_item(&body.outcome_proof.proof, &body.outcome_proof);
+        log::info!("shard_outcome_root: {:?}", shard_outcome_root);
+
+        // block_outcome_root = compute_root(sha256(borsh(shard_outcome_root)), outcome_root_proof)
+        let block_outcome_root =
+            merkle::compute_root_from_path_and_item(&body.outcome_root_proof, shard_outcome_root);
+        log::info!("block_outcome_root: {:?}", block_outcome_root);
+        // This outcome root must match the outcome root in block_header_lite.inner_lite.
+        assert_eq!(
+            body.block_header_lite.inner_lite.outcome_root,
+            block_outcome_root,
+        );
+
+        // let computed_block_hash = body.block_header_lite.hash();
+        // assert_eq!(computed_block_hash, body.outcome_proof.block_hash);
+        // log::info!("computed_block_hash: {:?}", computed_block_hash);
+
+        // // block_merkle_root = compute_root(block_hash, block_proof)
+        // let computed_block_merkle_root =
+        //     merkle::compute_root_from_path_and_item(&body.block_proof, computed_block_hash);
+        // log::info!(
+        //     "computed_block_merkle_root: {:?}",
+        //     computed_block_merkle_root
+        // );
+
+        // let shard_execution_outcome = merkle::verify_path(
+        //     shard_outcome_root,
+        //     &body.outcome_root_proof,
+        //     body.outcome_proof.outcome,
+        // );
+
+        // let block_verified = merkle::verify_path(
+        //     body.block_header_lite.inner_lite.outcome_root,
+        //     &body.block_proof,
+        //     CryptoHash::hash_borsh(shard_outcome_root),
+        // );
+        // log::info!(
+        //     "shard outcome: {:?}, chunk outcome: {:?}",
+        //     shard_execution_outcome,
+        //     block_verified
+        // );
+    }
+
+    #[test]
+    fn test_block_root_inclusion() {
+        pretty_env_logger::init();
+        let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
+        let body: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
+
+        let block_hash = body.block_header_lite.hash();
+        assert_eq!(block_hash, body.outcome_proof.block_hash);
+
+        // block_merkle_root = compute_root(block_hash, block_proof)
+        let block_merkle_root = compute_root_from_path(&body.block_proof, block_hash);
+        log::info!("block_merkle_root: {:?}", block_merkle_root);
+
+        assert!(merkle::verify_hash(
+            body.block_header_lite.inner_lite.block_merkle_root,
+            &body.block_proof,
+            block_hash,
+        ));
+    }
+    #[test]
+    fn test_shard_outcome_root() {
+        pretty_env_logger::init();
+        let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
+        let body: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
+        // shard_outcome_root = compute_root(sha256(borsh(execution_outcome)), outcome_proof.proof)
+
+        println!(
+            "Verifying light client proof for txn id: {:?}",
+            body.outcome_proof.id
+        );
+
+        let outcome_hash = CryptoHash::hash_borsh(&body.outcome_proof.to_hashes());
+        println!("Hash of the outcome is: {:?}", outcome_hash);
+
+        let shard_outcome_root = compute_root_from_path(&body.outcome_proof.proof, outcome_hash);
+        println!("Shard outcome root is: {:?}", shard_outcome_root);
+        let block_outcome_root = compute_root_from_path(
+            &body.outcome_root_proof,
+            CryptoHash::hash_borsh(shard_outcome_root),
+        );
+        println!("Block outcome root is: {:?}", block_outcome_root);
+
+        // let shard_outcome_root =
+        //     merkle::compute_root_from_path_and_item(&body.outcome_root_proof, &outcome);
+        let expected_shard_outcome_root =
+            CryptoHash::from_str("AC7P5WhmY1kFaL7ZWpCToPcQpH4kuxBnzCx53BSWDzY7").unwrap();
+        assert_eq!(shard_outcome_root, expected_shard_outcome_root);
     }
 }
