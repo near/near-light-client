@@ -1,5 +1,6 @@
 use crate::config::Config;
 use borsh::BorshSerialize;
+use flume::{Receiver, Sender};
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
 use near_primitives::{
     block_header::{ApprovalInner, BlockHeaderInnerLite},
@@ -9,16 +10,35 @@ use near_primitives::{
         LightClientBlockLiteView, LightClientBlockView,
     },
 };
-// use flume::{Receiver, Sender};
 use near_primitives_core::{hash::CryptoHash, types::AccountId};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str::FromStr, sync::Arc};
-use tokio::{sync::RwLock, time};
-// use views::LightClientBlockLiteView;
+use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use tokio::time;
 
 pub mod rpc;
 
 pub type Header = LightClientBlockLiteView;
+pub type Proof = RpcLightClientExecutionProofResponse;
+
+pub enum Message {
+    Shutdown(bool, Option<PathBuf>),
+    Head {
+        tx: Sender<Header>,
+    },
+    Archive {
+        tx: Sender<Option<Header>>,
+        epoch: CryptoHash,
+    },
+    GetProof {
+        tx: Sender<Option<Proof>>,
+        transaction_id: CryptoHash,
+        sender_id: AccountId,
+    },
+    ValidateProof {
+        tx: Sender<bool>,
+        proof: Proof,
+    },
+}
 
 // TODO: make configurable
 pub const STATE_PATH: &str = "state.json";
@@ -45,14 +65,13 @@ pub struct LocalStateCache {
 #[derive(Debug, Clone)]
 pub struct LightClient {
     client: rpc::NearRpcClient,
-    state: Arc<RwLock<LightClientBlockLiteView>>,
+    state: LightClientBlockLiteView,
     block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>, // TODO can optimise this by short caching these by Pubkey and then storing pointers
     archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
 }
 
 impl LightClient {
-    pub fn start_sync(self, mut is_fast: bool) -> Self {
-        let mut shadow_client = self.clone();
+    pub fn start(mut self, mut is_fast: bool, rx: Receiver<Message>) {
         tokio::spawn(async move {
             // TODO: make configurable, currently set to ~block time
             let default_duration = time::Duration::from_secs(2);
@@ -64,20 +83,43 @@ impl LightClient {
             };
 
             loop {
-                log::trace!("Syncing");
-                match shadow_client.sync().await {
-                    Err(e) => log::error!("Error syncing: {:?}", e),
-                    Ok(false) if is_fast => {
-                        log::debug!("Slowing down sync interval to {:?}", default_duration);
-                        duration = default_duration;
-                        is_fast = false;
+                tokio::select! {
+                    Ok(msg) = rx.recv_async() => match msg {
+                        Message::Shutdown(is_debug, path) => {
+                            self.shutdown(is_debug, path).await;
+                        }
+                        Message::Head { tx } => {
+                            tx.send_async(self.head().clone()).await;
+                        },
+                        Message::Archive { tx, epoch } => {
+                            tx.send_async(self.header(epoch).cloned()).await;
+                        },
+                        Message::GetProof {
+                            tx,
+                            transaction_id,
+                            sender_id,
+                        } => {
+                            tx.send_async(self.get_proof(transaction_id, sender_id).await).await;
+                        },
+                        Message::ValidateProof { tx, proof } => {
+                            tx.send_async(self.validate_proof(proof).await).await;
+                        }
+                    },
+                    r = self.sync() => {
+                        tokio::time::sleep(duration).await;
+                        match r {
+                            Err(e) => log::error!("Error syncing: {:?}", e),
+                            Ok(false) if is_fast => {
+                                log::debug!("Slowing down sync interval to {:?}", default_duration);
+                                duration = default_duration;
+                                is_fast = false;
+                            }
+                            _ => (),
+                        }
                     }
-                    _ => (),
                 }
-                tokio::time::sleep(duration).await;
             }
         });
-        self
     }
 
     pub async fn init(config: &Config) -> Self {
@@ -94,7 +136,7 @@ impl LightClient {
                 log::info!("Loaded state from file");
                 return Self {
                     client,
-                    state: Arc::new(RwLock::new(state.head)),
+                    state: state.head,
                     block_producers: state.block_producers,
                     archival_headers: state.archival_headers,
                 };
@@ -116,36 +158,19 @@ impl LightClient {
 
         Self {
             client,
-            state: Arc::new(RwLock::new(LightClientBlockLiteView {
+            state: LightClientBlockLiteView {
                 prev_block_hash: starting_head.prev_block_hash,
                 inner_rest_hash: starting_head.inner_rest_hash,
                 inner_lite: starting_head.inner_lite,
-            })),
+            },
             block_producers,
             archival_headers: Default::default(),
         }
     }
 
-    pub async fn write_state(&self, config: &Config) {
-        log::info!("Writing state to file");
-        let head = self.state.read().await;
-        log::debug!("Head: {:?}", head);
-        log::debug!("Block producers: {:?}", self.block_producers.len());
-        let state = LocalStateCache {
-            head: head.clone(),
-            block_producers: self.block_producers.clone(),
-            archival_headers: self.archival_headers.clone(),
-        };
-        std::fs::write(
-            config.state_path.as_ref().unwrap_or(&STATE_PATH.into()),
-            serde_json::to_string(&state).unwrap(),
-        )
-        .unwrap();
-    }
-
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
-        let mut new_state: LightClientState = self.state.read().await.clone().into();
+        let mut new_state: LightClientState = self.state.clone().into();
         log::debug!("Current head: {:#?}", new_state.head.inner_lite);
 
         let new_header = self
@@ -157,7 +182,6 @@ impl LightClient {
 
         if let Some(new_header) = new_header {
             log::debug!("Got new header: {:#?}", new_header.inner_lite);
-            log::debug!("Block producers: {:#?}", self.block_producers.len());
             let validated = self
                 .block_producers
                 .get(&new_state.head.inner_lite.epoch_id)
@@ -177,14 +201,12 @@ impl LightClient {
                     self.block_producers.insert(epoch, next_bps);
                 }
 
-                let mut head = self.state.write().await;
-
                 self.archival_headers
-                    .insert(head.inner_lite.epoch_id, head.clone());
-                *head = new_state.head.into();
+                    .insert(self.state.inner_lite.epoch_id, self.state.clone());
+                self.state = new_state.head.into();
                 Ok(true)
             } else {
-                log::warn!("New header is invalid");
+                log::debug!("New header is invalid");
                 Ok(false)
             }
         } else {
@@ -193,10 +215,10 @@ impl LightClient {
         }
     }
 
-    pub async fn head(&self) -> Header {
-        self.state.read().await.clone()
+    fn head(&self) -> &Header {
+        &self.state
     }
-    pub fn header(&self, epoch: CryptoHash) -> Option<&Header> {
+    fn header(&self, epoch: CryptoHash) -> Option<&Header> {
         self.archival_headers.get(&epoch)
     }
 
@@ -205,17 +227,17 @@ impl LightClient {
         &self,
         transaction_id: CryptoHash,
         sender_id: AccountId,
-    ) -> Option<RpcLightClientExecutionProofResponse> {
+    ) -> Option<Proof> {
         // TODO: we need much more logic here for headers in different epochs & the head
         // since there are race conditions when we come to validate the proof header, we'd need to short-cache the proof validation
-        let last_verified_hash = self.state.read().await.hash();
+        let last_verified_hash = self.state.hash();
 
         self.client
             .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
             .await
     }
 
-    pub async fn validate_proof(&self, body: RpcLightClientExecutionProofResponse) -> bool {
+    pub async fn validate_proof(&self, body: Proof) -> bool {
         let block_hash = body.block_header_lite.hash();
         assert_eq!(block_hash, body.outcome_proof.block_hash);
 
@@ -233,7 +255,7 @@ impl LightClient {
             block_outcome == body.block_header_lite.inner_lite.outcome_root;
 
         let block_verified = merkle::verify_hash(
-            self.head().await.inner_lite.block_merkle_root,
+            self.state.inner_lite.block_merkle_root,
             &body.block_proof,
             block_hash,
         );
@@ -246,7 +268,25 @@ impl LightClient {
         shard_execution_outcome && block_verified
     }
 
-    pub fn shutdown(&self) -> anyhow::Result<()> {
+    pub async fn write_state(&self, path: Option<PathBuf>) {
+        log::info!("Writing state to file");
+        let state = LocalStateCache {
+            head: self.state.clone(),
+            block_producers: self.block_producers.clone(),
+            archival_headers: self.archival_headers.clone(),
+        };
+        std::fs::write(
+            path.as_ref().unwrap_or(&STATE_PATH.into()),
+            serde_json::to_string(&state).unwrap(),
+        )
+        .unwrap();
+    }
+
+    pub async fn shutdown(&self, is_debug: bool, path: Option<PathBuf>) -> anyhow::Result<()> {
+        log::info!("Shutting down light client");
+        if is_debug {
+            self.write_state(path).await;
+        }
         todo!("Deliberate panic here, need to make this graceful");
     }
 }
@@ -388,7 +428,7 @@ impl LightClientState {
                 return false;
             }
 
-            log::debug!("Setting next bps[{:?}]", self.head.inner_lite.next_epoch_id);
+            log::trace!("Setting next bps[{:?}]", self.head.inner_lite.next_epoch_id);
             self.next_bps = Some((
                 self.head.inner_lite.next_epoch_id,
                 next_bps.into_iter().map(|s| s.clone().into()).collect(),
