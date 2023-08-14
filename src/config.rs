@@ -14,7 +14,7 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Result<Self, ConfigError> {
-        let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
+        let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK").unwrap_or_else(|_| "testnet".into());
 
         let s = ConfigTrait::builder()
             // Start off by merging in the "default" configuration file

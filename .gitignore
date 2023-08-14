@@ -1,3 +1,7 @@
 /target
 
 .direnv
+
+local.toml
+
+state.json
