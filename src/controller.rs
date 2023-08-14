@@ -56,11 +56,10 @@ mod header {
 }
 
 mod proof {
+    use super::*;
     use axum::Json;
     use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
     use near_primitives_core::types::AccountId;
-
-    use super::*;
 
     #[derive(Debug, Deserialize, Serialize)]
     pub struct Params {

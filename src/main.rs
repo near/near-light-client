@@ -28,12 +28,15 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = shutdown_rx.recv_async().await {
         log::error!("Error receiving shutdown signal: {}", e);
     };
+    log::info!("Shutting down..");
+
     webapi.abort();
 
     if config.debug {
-        client.write_state().await;
+        client.write_state(&config).await;
     }
-    log::info!("Shutting down..");
+
+    // let _ = client.shutdown();
 
     Ok(())
 }

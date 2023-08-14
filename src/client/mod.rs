@@ -35,11 +35,6 @@ macro_rules! cvec {
 	};
 }
 
-#[derive(Debug)]
-pub enum SyncData {
-    Sync { header: LightClientBlockView },
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LocalStateCache {
     pub head: LightClientBlockLiteView,
@@ -56,25 +51,30 @@ pub struct LightClient {
 }
 
 impl LightClient {
-    pub fn start_sync(self, is_fast: bool) -> Self {
+    pub fn start_sync(self, mut is_fast: bool) -> Self {
         let mut shadow_client = self.clone();
         tokio::spawn(async move {
             // TODO: make configurable, currently set to ~block time
             let default_duration = time::Duration::from_secs(2);
 
-            let mut interval = if is_fast {
-                time::interval(time::Duration::from_millis(100))
+            let mut duration = if is_fast {
+                time::Duration::from_millis(100)
             } else {
-                time::interval(default_duration)
+                default_duration
             };
 
             loop {
-                interval.tick().await;
+                log::trace!("Syncing");
                 match shadow_client.sync().await {
                     Err(e) => log::error!("Error syncing: {:?}", e),
-                    Ok(false) if is_fast => interval = time::interval(default_duration),
+                    Ok(false) if is_fast => {
+                        log::debug!("Slowing down sync interval to {:?}", default_duration);
+                        duration = default_duration;
+                        is_fast = false;
+                    }
                     _ => (),
                 }
+                tokio::time::sleep(duration).await;
             }
         });
         self
@@ -86,9 +86,10 @@ impl LightClient {
         let client = rpc::NearRpcClient::new(config.network.clone());
 
         if config.debug {
-            let state: Option<LocalStateCache> = std::fs::read(STATE_PATH)
-                .ok()
-                .and_then(|file| serde_json::from_slice(&file).ok());
+            let state: Option<LocalStateCache> =
+                std::fs::read(config.state_path.as_ref().unwrap_or(&STATE_PATH.into()))
+                    .ok()
+                    .and_then(|file| serde_json::from_slice(&file).ok());
             if let Some(state) = state {
                 log::info!("Loaded state from file");
                 return Self {
@@ -125,19 +126,27 @@ impl LightClient {
         }
     }
 
-    pub async fn write_state(&self) {
+    pub async fn write_state(&self, config: &Config) {
+        log::info!("Writing state to file");
         let head = self.state.read().await;
+        log::debug!("Head: {:?}", head);
+        log::debug!("Block producers: {:?}", self.block_producers.len());
         let state = LocalStateCache {
             head: head.clone(),
             block_producers: self.block_producers.clone(),
             archival_headers: self.archival_headers.clone(),
         };
-        std::fs::write(STATE_PATH, serde_json::to_string(&state).unwrap()).unwrap();
+        std::fs::write(
+            config.state_path.as_ref().unwrap_or(&STATE_PATH.into()),
+            serde_json::to_string(&state).unwrap(),
+        )
+        .unwrap();
     }
 
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
         let mut new_state: LightClientState = self.state.read().await.clone().into();
+        log::debug!("Current head: {:#?}", new_state.head.inner_lite);
 
         let new_header = self
             .client
@@ -147,14 +156,24 @@ impl LightClient {
             .await;
 
         if let Some(new_header) = new_header {
+            log::debug!("Got new header: {:#?}", new_header.inner_lite);
+            log::debug!("Block producers: {:#?}", self.block_producers.len());
             let validated = self
                 .block_producers
                 .get(&new_state.head.inner_lite.epoch_id)
                 .map(|bps| new_state.validate_and_update_head(&new_header, bps.clone()))
-                .unwrap_or(false);
+                .unwrap_or_else(|| {
+                    log::warn!(
+                        "No block producers found for {:?}",
+                        new_state.head.inner_lite
+                    );
+                    false
+                });
 
             if validated {
+                log::debug!("Validated new header: {:?}", new_header.inner_lite.height);
                 if let Some((epoch, next_bps)) = new_state.next_bps {
+                    log::debug!("storing next bps[{:?}]", epoch);
                     self.block_producers.insert(epoch, next_bps);
                 }
 
@@ -163,10 +182,13 @@ impl LightClient {
                 self.archival_headers
                     .insert(head.inner_lite.epoch_id, head.clone());
                 *head = new_state.head.into();
+                Ok(true)
+            } else {
+                log::warn!("New header is invalid");
+                Ok(false)
             }
-            Ok(true)
         } else {
-            log::info!("No new header found");
+            log::debug!("No new header found");
             Ok(false)
         }
     }
@@ -224,7 +246,7 @@ impl LightClient {
         shard_execution_outcome && block_verified
     }
 
-    pub async fn shutdown(&mut self) -> anyhow::Result<()> {
+    pub fn shutdown(&self) -> anyhow::Result<()> {
         todo!("Deliberate panic here, need to make this graceful");
     }
 }
@@ -301,13 +323,11 @@ impl LightClientState {
     ) -> bool {
         let (_, _, approval_message) = self.reconstruct_light_client_block_view_fields(block_view);
 
-        // (1) The block was already verified
         if block_view.inner_lite.height <= self.head.inner_lite.height {
             log::info!("Block has already been verified");
             return false;
         }
 
-        // (2)
         if ![
             self.head.inner_lite.epoch_id,
             self.head.inner_lite.next_epoch_id,
@@ -318,7 +338,6 @@ impl LightClientState {
             return false;
         }
 
-        // (3) Same as next epoch and no new set, covering N + 2
         if block_view.inner_lite.epoch_id == self.head.inner_lite.next_epoch_id
             && block_view.next_bps.is_none()
         {
@@ -326,7 +345,6 @@ impl LightClientState {
             return false;
         }
 
-        // (4) and (5)
         let mut total_stake = 0;
         let mut approved_stake = 0;
 
@@ -342,7 +360,7 @@ impl LightClientState {
             total_stake += bps_stake;
 
             if let Some(signature) = maybe_signature {
-                log::debug!(
+                log::trace!(
                     "Checking if signature {} and message {:?} was signed by {}",
                     signature,
                     approval_message,
@@ -350,7 +368,7 @@ impl LightClientState {
                 );
                 approved_stake += bps_stake;
                 if !signature.verify(&approval_message, &bps_pk) {
-                    log::warn!("Signature is invalid");
+                    log::debug!("Signature is invalid");
                     return false;
                 }
             }
@@ -359,11 +377,10 @@ impl LightClientState {
 
         let threshold = total_stake * 2 / 3;
         if approved_stake <= threshold {
-            log::warn!("Not enough stake approved");
+            log::debug!("Not enough stake approved");
             return false;
         }
 
-        // (6)
         if let Some(next_bps) = &block_view.next_bps {
             let next_bps_hash = CryptoHash::hash_borsh(&next_bps);
             if next_bps_hash != block_view.inner_lite.next_bp_hash {
@@ -371,6 +388,7 @@ impl LightClientState {
                 return false;
             }
 
+            log::debug!("Setting next bps[{:?}]", self.head.inner_lite.next_epoch_id);
             self.next_bps = Some((
                 self.head.inner_lite.next_epoch_id,
                 next_bps.into_iter().map(|s| s.clone().into()).collect(),
@@ -384,7 +402,7 @@ impl LightClientState {
             inner_lite: block_view.inner_lite.clone(),
         };
         let new_head = self.head.inner_lite.height;
-        log::info!("prev/current head: {}/{}", prev_head, new_head);
+        log::debug!("prev/current head: {}/{}", prev_head, new_head);
 
         true
     }
@@ -398,7 +416,6 @@ mod tests {
         merkle::compute_root_from_path,
         transaction::{ExecutionMetadata, ExecutionStatus},
     };
-    use near_primitives_core::profile::ProfileDataV3;
     use serde_json;
 
     fn get_file(

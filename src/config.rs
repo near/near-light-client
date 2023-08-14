@@ -1,6 +1,6 @@
 use config::{Config as ConfigTrait, ConfigError, Environment, File};
 use serde::Deserialize;
-use std::env;
+use std::{env, path::PathBuf};
 
 use crate::client::rpc::Network;
 
@@ -8,6 +8,7 @@ use crate::client::rpc::Network;
 #[allow(unused)]
 pub struct Config {
     pub debug: bool,
+    pub state_path: Option<PathBuf>,
     pub starting_head: String,
     pub network: Network,
 }
