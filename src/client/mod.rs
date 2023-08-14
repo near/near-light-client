@@ -224,7 +224,7 @@ impl LightClient {
 
     // TODO: memoize these
     pub async fn get_proof(
-        &self,
+        &mut self,
         transaction_id: CryptoHash,
         sender_id: AccountId,
     ) -> Option<Proof> {
@@ -235,9 +235,14 @@ impl LightClient {
         self.client
             .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
             .await
+            .map(|proof| {
+                self.archival_headers
+                    .insert(proof.outcome_proof.block_hash, self.state.clone());
+                proof
+            })
     }
 
-    pub async fn validate_proof(&self, body: Proof) -> bool {
+    pub async fn validate_proof(&mut self, body: Proof) -> bool {
         let block_hash = body.block_header_lite.hash();
         assert_eq!(block_hash, body.outcome_proof.block_hash);
 
@@ -254,11 +259,36 @@ impl LightClient {
         let shard_execution_outcome =
             block_outcome == body.block_header_lite.inner_lite.outcome_root;
 
-        let block_verified = merkle::verify_hash(
+        let mut block_verified = merkle::verify_hash(
             self.state.inner_lite.block_merkle_root,
             &body.block_proof,
             block_hash,
         );
+
+        // Functionality to cover race conditions between previously synced heads since the current head may of changed
+        // since the proof was generated
+        if !block_verified {
+            self.archival_headers
+                .get_mut(&body.outcome_proof.block_hash)
+                .and_then(|archive| {
+                    log::info!(
+                        "Trying to verify against archival header: {:?}",
+                        archive.inner_lite.height
+                    );
+                    if merkle::verify_hash(
+                        archive.inner_lite.block_merkle_root,
+                        &body.block_proof,
+                        block_hash,
+                    ) {
+                        log::info!("Verified against archival header");
+                        block_verified = true;
+                        Some(archive.inner_lite.block_merkle_root)
+                    } else {
+                        None
+                    }
+                })
+                .and_then(|r| self.archival_headers.remove(&r));
+        }
 
         log::info!(
             "shard outcome included: {:?}, block included: {:?}",
