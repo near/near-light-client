@@ -171,7 +171,7 @@ impl LightClient {
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
         let mut new_state: LightClientState = self.state.clone().into();
-        log::debug!("Current head: {:#?}", new_state.head.inner_lite);
+        log::trace!("Current head: {:#?}", new_state.head.inner_lite);
 
         let new_header = self
             .client
@@ -181,7 +181,7 @@ impl LightClient {
             .await;
 
         if let Some(new_header) = new_header {
-            log::debug!("Got new header: {:#?}", new_header.inner_lite);
+            log::trace!("Got new header: {:#?}", new_header.inner_lite);
             let validated = self
                 .block_producers
                 .get(&new_state.head.inner_lite.epoch_id)
@@ -210,7 +210,7 @@ impl LightClient {
                 Ok(false)
             }
         } else {
-            log::debug!("No new header found");
+            log::trace!("No new header found");
             Ok(false)
         }
     }
