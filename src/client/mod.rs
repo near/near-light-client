@@ -3,8 +3,7 @@ use borsh::BorshSerialize;
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
 use near_primitives::{
     block_header::{ApprovalInner, BlockHeaderInnerLite},
-    merkle::{self, compute_root_from_path},
-    transaction::ExecutionOutcome,
+    merkle::{self},
     views::{
         validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView,
         LightClientBlockLiteView, LightClientBlockView,
@@ -13,12 +12,16 @@ use near_primitives::{
 // use flume::{Receiver, Sender};
 use near_primitives_core::{hash::CryptoHash, types::AccountId};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tokio::{sync::RwLock, time};
 // use views::LightClientBlockLiteView;
 
 pub mod rpc;
 
 pub type Header = LightClientBlockLiteView;
+
+// TODO: make configurable
+pub const STATE_PATH: &str = "state.json";
 
 macro_rules! cvec {
 	($($x:expr),*) => {
@@ -44,40 +47,38 @@ pub struct LocalStateCache {
     pub archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
 }
 
-// TODO: futures::retry_after(next block time)
 #[derive(Debug, Clone)]
 pub struct LightClient {
     client: rpc::NearRpcClient,
-    state: LightClientBlockLiteView,
+    state: Arc<RwLock<LightClientBlockLiteView>>,
     block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>, // TODO can optimise this by short caching these by Pubkey and then storing pointers
     archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
 }
 
 impl LightClient {
-    // pub fn spawn(mut self, nrx: Receiver<Action>, htx: Sender<hbar::Action>) {
-    //     tokio::spawn(async move {
-    //         while let Ok(msg) = nrx.recv_async().await {
-    //             match msg {
-    //                 Action::GetHeader => {
-    //                     log::info!("GetHeader message received");
-    //                     let last_header = self.get_header().await?;
-    //                     log::info!("sending header: {:?}", last_header);
-    //                     htx.send(hbar::Action::Publish(super::Header::Near(last_header)));
-    //                 }
-    //                 Action::Shutdown => {
-    //                     log::info!("Shutdown message received");
-    //                     self.shutdown().await?;
-    //                     break;
-    //                 }
-    //                 Action::GetProof => {
-    //                     todo!("Noop getproof")
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-    //         Ok::<(), anyhow::Error>(())
-    //     });
-    // }
+    pub fn start_sync(self, is_fast: bool) -> Self {
+        let mut shadow_client = self.clone();
+        tokio::spawn(async move {
+            // TODO: make configurable, currently set to ~block time
+            let default_duration = time::Duration::from_secs(2);
+
+            let mut interval = if is_fast {
+                time::interval(time::Duration::from_millis(100))
+            } else {
+                time::interval(default_duration)
+            };
+
+            loop {
+                interval.tick().await;
+                match shadow_client.sync().await {
+                    Err(e) => log::error!("Error syncing: {:?}", e),
+                    Ok(false) if is_fast => interval = time::interval(default_duration),
+                    _ => (),
+                }
+            }
+        });
+        self
+    }
 
     pub async fn init(config: &Config) -> Self {
         log::debug!("Bootstrapping light client");
@@ -85,20 +86,20 @@ impl LightClient {
         let client = rpc::NearRpcClient::new(config.network.clone());
 
         if config.debug {
-            // load state from file
-            let state: Option<LocalStateCache> = std::fs::read("state.json")
+            let state: Option<LocalStateCache> = std::fs::read(STATE_PATH)
                 .ok()
                 .and_then(|file| serde_json::from_slice(&file).ok());
             if let Some(state) = state {
                 log::info!("Loaded state from file");
                 return Self {
                     client,
-                    state: state.head,
+                    state: Arc::new(RwLock::new(state.head)),
                     block_producers: state.block_producers,
                     archival_headers: state.archival_headers,
                 };
             }
         }
+
         let starting_head = client
             .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
             .await
@@ -114,49 +115,54 @@ impl LightClient {
 
         Self {
             client,
-            state: LightClientBlockLiteView {
+            state: Arc::new(RwLock::new(LightClientBlockLiteView {
                 prev_block_hash: starting_head.prev_block_hash,
                 inner_rest_hash: starting_head.inner_rest_hash,
                 inner_lite: starting_head.inner_lite,
-            },
+            })),
             block_producers,
             archival_headers: Default::default(),
         }
     }
 
-    pub fn write_state(&self) {
+    pub async fn write_state(&self) {
+        let head = self.state.read().await;
         let state = LocalStateCache {
-            head: self.state.clone(),
+            head: head.clone(),
             block_producers: self.block_producers.clone(),
             archival_headers: self.archival_headers.clone(),
         };
-        std::fs::write("state.json", serde_json::to_string(&state).unwrap()).unwrap();
+        std::fs::write(STATE_PATH, serde_json::to_string(&state).unwrap()).unwrap();
     }
 
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
-        let mut state: LightClientState = self.state.clone().into();
+        let mut new_state: LightClientState = self.state.read().await.clone().into();
 
         let new_header = self
             .client
-            .fetch_latest_header(&CryptoHash::from_str(&format!("{}", state.head.hash())).unwrap())
+            .fetch_latest_header(
+                &CryptoHash::from_str(&format!("{}", new_state.head.hash())).unwrap(),
+            )
             .await;
 
         if let Some(new_header) = new_header {
             let validated = self
                 .block_producers
-                .get(&state.head.inner_lite.epoch_id)
-                .map(|bps| state.validate_and_update_head(&new_header, bps.clone()))
+                .get(&new_state.head.inner_lite.epoch_id)
+                .map(|bps| new_state.validate_and_update_head(&new_header, bps.clone()))
                 .unwrap_or(false);
 
             if validated {
-                if let Some((epoch, next_bps)) = state.next_bps {
+                if let Some((epoch, next_bps)) = new_state.next_bps {
                     self.block_producers.insert(epoch, next_bps);
                 }
 
+                let mut head = self.state.write().await;
+
                 self.archival_headers
-                    .insert(self.state.inner_lite.epoch_id, self.state.clone());
-                self.state = state.head.into();
+                    .insert(head.inner_lite.epoch_id, head.clone());
+                *head = new_state.head.into();
             }
             Ok(true)
         } else {
@@ -165,8 +171,8 @@ impl LightClient {
         }
     }
 
-    pub fn head(&self) -> &Header {
-        &self.state
+    pub async fn head(&self) -> Header {
+        self.state.read().await.clone()
     }
     pub fn header(&self, epoch: CryptoHash) -> Option<&Header> {
         self.archival_headers.get(&epoch)
@@ -178,12 +184,16 @@ impl LightClient {
         transaction_id: CryptoHash,
         sender_id: AccountId,
     ) -> Option<RpcLightClientExecutionProofResponse> {
+        // TODO: we need much more logic here for headers in different epochs & the head
+        // since there are race conditions when we come to validate the proof header, we'd need to short-cache the proof validation
+        let last_verified_hash = self.state.read().await.hash();
+
         self.client
-            .fetch_light_client_tx_proof(transaction_id, sender_id, self.state.hash())
+            .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
             .await
     }
 
-    pub fn validate_proof(&self, body: RpcLightClientExecutionProofResponse) -> bool {
+    pub async fn validate_proof(&self, body: RpcLightClientExecutionProofResponse) -> bool {
         let block_hash = body.block_header_lite.hash();
         assert_eq!(block_hash, body.outcome_proof.block_hash);
 
@@ -201,7 +211,7 @@ impl LightClient {
             block_outcome == body.block_header_lite.inner_lite.outcome_root;
 
         let block_verified = merkle::verify_hash(
-            self.head().inner_lite.block_merkle_root,
+            self.head().await.inner_lite.block_merkle_root,
             &body.block_proof,
             block_hash,
         );

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::client::LightClient;
 use axum::{
     extract::{Path, State},
@@ -9,7 +11,11 @@ use near_primitives_core::hash::CryptoHash;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
-pub(crate) fn init(client: &LightClient) -> JoinHandle<Result<(), axum::Error>> {
+type ClientState = Arc<LightClient>;
+
+// TODO: refactor to channels, call the client with a oneshot channel
+
+pub(crate) fn init(client: ClientState) -> JoinHandle<Result<(), axum::Error>> {
     let controller = Router::new()
         .route("/head", get(header::get_head))
         .with_state(client.clone())
@@ -37,15 +43,15 @@ mod header {
     }
 
     pub(super) async fn get_by_epoch(
-        State(client): State<LightClient>,
+        State(client): State<ClientState>,
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
         log::info!("get_by_epoch: {:?}", params);
         axum::Json(client.header(params.epoch).cloned())
     }
 
-    pub(super) async fn get_head(State(client): State<LightClient>) -> impl IntoResponse {
-        axum::Json(client.head().clone())
+    pub(super) async fn get_head(State(client): State<ClientState>) -> impl IntoResponse {
+        axum::Json(client.head().await)
     }
 }
 
@@ -63,7 +69,7 @@ mod proof {
     }
 
     pub(super) async fn get_proof(
-        State(client): State<LightClient>,
+        State(client): State<ClientState>,
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
         log::info!("get_proof: {:?}", params);
@@ -75,9 +81,9 @@ mod proof {
     }
 
     pub(super) async fn post_proof(
-        State(client): State<LightClient>,
+        State(client): State<ClientState>,
         Json(body): Json<RpcLightClientExecutionProofResponse>,
     ) -> impl IntoResponse {
-        axum::Json(client.validate_proof(body))
+        axum::Json(client.validate_proof(body).await)
     }
 }

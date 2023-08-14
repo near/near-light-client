@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use crate::client::LightClient;
 
 mod client;
 mod config;
 mod controller;
+
+pub struct ShutdownMsg;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -11,36 +15,25 @@ async fn main() -> anyhow::Result<()> {
 
     let config = config::Config::new()?;
 
-    // let (gtx, grx) = flume::bounded::<LightClientAction>(128);
-    // let (ntx, nrx) = flume::bounded::<LightClientAction>(128);
     let (shutdown_tx, shutdown_rx) = flume::unbounded::<bool>();
-
     // Collect all the clients to shutdown
     // TODO: make this just take a list of sender Into<ShutdownMessage> or smth
     // let to_shutdown = vec![ntx.clone()];
     setup_exit_handler(shutdown_tx);
 
-    // TODO extract to sync handler
-    let mut client = LightClient::init(&config).await;
-    if !config.debug {
-        while let Ok(true) = client.sync().await {
-            log::info!("Syncing again");
-        }
-    }
-
-    let webapi = controller::init(&client);
+    let client = Arc::new(LightClient::init(&config).await.start_sync(false));
+    let webapi = controller::init(client.clone());
 
     // This blocks until the shutdown signal is received
-    shutdown_rx.recv_async().await;
+    if let Err(e) = shutdown_rx.recv_async().await {
+        log::error!("Error receiving shutdown signal: {}", e);
+    };
     webapi.abort();
-    // for tx in to_shutdown {
-    //     // tx.send_async(LightClientAction::Shutdown).await;
-    // }
-    // Write light client state to disk
+
     if config.debug {
-        client.write_state();
+        client.write_state().await;
     }
-    log::info!("Shutting down due to shutdown signal");
+    log::info!("Shutting down..");
 
     Ok(())
 }
