@@ -4,6 +4,7 @@ use client::Message;
 mod client;
 mod config;
 mod controller;
+mod erasure;
 
 pub struct ShutdownMsg;
 

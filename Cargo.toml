@@ -34,6 +34,7 @@ near-jsonrpc-client  = "0.6.0"
 near-primitives      = "0.17.0"
 near-primitives-core = "0.17.0"
 sha256               = "*"
+reed-solomon-erasure = "6.0.0"
 
 [dev-dependencies]
 rand = "*"
