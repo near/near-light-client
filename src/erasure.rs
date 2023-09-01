@@ -1,41 +1,53 @@
-use reed_solomon_erasure::{
-    galois_8::{ReedSolomon, ShardByShard},
-    shards,
-};
+use reed_solomon_novelpoly::WrappedShard;
 
-pub struct ErasureKind<const SHARDS: usize>();
+pub struct Erasure<const VALIDATORS: usize>();
 
-impl<const SHARDS: usize> ErasureKind<SHARDS> {
-    pub fn create_rs<const LEN: usize>(data: impl Into<[u8; LEN]>) -> anyhow::Result<()> {
-        let parity_shards = (SHARDS / 2) + 1;
-        let r = ReedSolomon::new(SHARDS, parity_shards)?;
-        let mut sbs = ShardByShard::new(&r);
+impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
+    pub fn encodify(data: &[u8]) -> anyhow::Result<Vec<WrappedShard>> {
+        Ok(reed_solomon_novelpoly::encode(data, VALIDATORS)?)
+    }
 
-        let mut shards = shards!(
-            [0u8, 1, 2, 3, 4],
-            [5, 6, 7, 8, 9],
-            // say we don't have the 3rd data shard yet
-            // and we want to fill it in later
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0]
-        );
-        let mut shards = vec![vec![]];
+    pub fn recover(data: Vec<Option<WrappedShard>>) -> anyhow::Result<Vec<u8>> {
+        Ok(reed_solomon_novelpoly::reconstruct(data, VALIDATORS)?)
+    }
+}
 
-        let data: [u8; LEN] = data.into();
-        data.chunks(256)
-            .map(TryInto::<[u8; 256]>::try_into)
-            .map(|x| x.unwrap())
-            .enumerate()
-            .for_each(|(_idx, next)| shards.push(next.to_vec()));
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        sbs.encode(shards)?;
+    #[test]
+    fn test_encode_recover() {
+        let e = Erasure::<4>::encodify(b"hello").unwrap();
 
-        // while !sbs.parity_ready
-        // (0..parity_shards)
-        //     .into_iter()
-        //     .for_each(|_| shards.push([0u8; 256].to_vec()));
+        let recover = Erasure::<4>::recover(e.clone().into_iter().map(Some).collect()).unwrap();
 
-        Ok(())
+        assert!(recover.starts_with(b"hello"));
+    }
+
+    #[test]
+    fn test_encode_recover_one_third() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let mut codewords: Vec<Option<WrappedShard>> = Erasure::<N>::encodify(data)
+            .unwrap()
+            .into_iter()
+            .map(Some)
+            .collect();
+        println!("codewords {:#?}({})", codewords, codewords.len());
+
+        codewords[0] = None;
+        codewords[1] = None;
+        codewords[2] = None;
+        codewords[N - 3] = None;
+        codewords[N - 2] = None;
+        codewords[N - 1] = None;
+        println!("codewords {:#?}({})", codewords, codewords.len());
+
+        let recover = Erasure::<N>::recover(codewords).unwrap();
+        println!("recover {:?}", recover);
+        assert!(recover.starts_with(data));
     }
 }
