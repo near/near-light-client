@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, State},
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -11,20 +12,18 @@ use tokio::task::JoinHandle;
 
 use crate::client::Message;
 
-// TODO: refactor to channels, call the client with a oneshot channel
-
 type ClientState = flume::Sender<Message>;
 
 pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> {
     let controller = Router::new()
         .route("/head", get(header::get_head))
-        .with_state((ctx.clone(), flume::bounded(32)))
+        .with_state((ctx.clone(), flume::bounded(64)))
         .route("/header/:epoch", get(header::get_by_epoch))
-        .with_state((ctx.clone(), flume::bounded(32)))
+        .with_state((ctx.clone(), flume::bounded(64)))
         .route("/proof/:transaction_id/:sender_id", get(proof::get_proof))
         .with_state((ctx.clone(), flume::bounded(32)))
         .route("/proof", post(proof::post_proof))
-        .with_state((ctx.clone(), flume::bounded(32)));
+        .with_state((ctx.clone(), flume::bounded(64)));
 
     tokio::spawn(async {
         let r = axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
@@ -35,9 +34,8 @@ pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> 
 }
 
 mod header {
-    use near_primitives::views::LightClientBlockLiteView;
-
     use super::*;
+    use near_primitives::views::LightClientBlockLiteView;
 
     pub type HeadChannel = (
         flume::Sender<LightClientBlockLiteView>,
@@ -59,30 +57,40 @@ mod header {
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
         log::info!("get_by_epoch: {:?}", params);
-        client
+        if let Err(e) = client
             .send_async(Message::Archive {
                 tx,
                 epoch: params.epoch,
             })
-            .await;
+            .await
+        {
+            log::error!("Failed to send get_by_epoch: {:?}", e);
+        }
 
-        axum::Json(rx.recv_async().await.expect("Failed to recv"))
+        rx.recv_async().await.map(axum::Json).map_err(|_| {
+            log::error!("Failed to receive result, channel closed");
+            internal_server_error()
+        })
     }
 
     pub(super) async fn get_head(
         State((client, (tx, rx))): State<(ClientState, HeadChannel)>,
     ) -> impl IntoResponse {
         log::info!("get_head");
-        client.send_async(Message::Head { tx }).await;
+        if let Err(e) = client.send_async(Message::Head { tx }).await {
+            log::error!("Failed to send get_head: {:?}", e);
+        }
 
-        axum::Json(rx.recv_async().await.expect("Failed to recv"))
+        rx.recv_async().await.map(axum::Json).map_err(|_| {
+            log::error!("Failed to receive result, channel closed");
+            internal_server_error()
+        })
     }
 }
 
 mod proof {
-    use crate::client::Proof;
-
     use super::*;
+    use crate::client::Proof;
     use axum::Json;
     use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
     use near_primitives_core::types::AccountId;
@@ -101,15 +109,20 @@ mod proof {
         Path(params): Path<Params>,
     ) -> impl IntoResponse {
         log::info!("get_proof: {:?}", params);
-        client
+        if let Err(e) = client
             .send_async(Message::GetProof {
                 tx,
                 transaction_id: params.transaction_id,
                 sender_id: params.sender_id,
             })
-            .await;
-
-        axum::Json(rx.recv_async().await.expect("Failed to recv"))
+            .await
+        {
+            log::error!("Failed to send get_proof: {:?}", e);
+        }
+        rx.recv_async().await.map(axum::Json).map_err(|_| {
+            log::error!("Failed to receive result, channel closed");
+            internal_server_error()
+        })
     }
 
     pub(super) async fn post_proof(
@@ -117,10 +130,22 @@ mod proof {
         Json(proof): Json<RpcLightClientExecutionProofResponse>,
     ) -> impl IntoResponse {
         log::info!("post_proof: {:?}", proof);
-        client
+        if let Err(e) = client
             .send_async(Message::ValidateProof { tx, proof })
-            .await;
+            .await
+        {
+            log::error!("Failed to send post_proof: {:?}", e);
+        }
 
-        axum::Json(rx.recv_async().await.expect("Failed to recv"))
+        rx.recv_async().await.map(axum::Json).map_err(|_| {
+            log::error!("Failed to receive result, channel closed");
+            internal_server_error()
+        })
     }
+}
+
+fn internal_server_error() -> impl IntoResponse {
+    let mut r = Response::new("Error".to_string());
+    *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+    r
 }

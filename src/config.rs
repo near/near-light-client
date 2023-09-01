@@ -18,7 +18,6 @@ impl Config {
         let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK").unwrap_or_else(|_| "testnet".into());
 
         let s = ConfigTrait::builder()
-            // Start off by merging in the "default" configuration file
             .add_source(File::with_name("default"))
             .add_source(File::with_name(&format!("{}", run_mode)).required(false))
             // This file shouldn't be checked in to git
@@ -27,7 +26,6 @@ impl Config {
             .add_source(Environment::with_prefix("RELAYER"))
             .build()?;
 
-        // You can deserialize (and thus freeze) the entire configuration as
         let r = s.try_deserialize();
 
         log::debug!("Config: {:#?}", r);

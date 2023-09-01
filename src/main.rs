@@ -20,7 +20,6 @@ async fn main() -> anyhow::Result<()> {
     LightClient::init(&config).await.start(true, crx);
     let webapi = controller::init(ctx.clone());
 
-    // This blocks until the shutdown signal is received
     if let Ok(_) = tokio::signal::ctrl_c().await {
         log::info!("Shutting down due to ctrlc");
         let _ = ctx.send(Message::Shutdown(config.debug, config.state_path));
