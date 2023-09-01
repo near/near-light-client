@@ -88,10 +88,27 @@ mod tests {
         const N: usize = 8;
 
         let codewords = Erasure::<N>::encodify(data).unwrap();
-        let (root, path) = codewords.merklize();
+        let (root, _path) = codewords.merklize();
+
+        println!("root {:?}", root);
+    }
+    #[test]
+    fn test_path_len() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let codewords = Erasure::<N>::encodify(data).unwrap();
+        let (_root, path) = codewords.merklize();
 
         println!("path {:?}", path.len());
-        println!("proof size {}", std::mem::size_of_val(&*path));
-        println!("root {:?}", root);
+        let size = std::mem::size_of_val(&*path);
+        println!("proof size {}", size);
+        // TODO: conservative proof reduction
+        assert!(size < 3000);
+        // TODO: around half
+        assert!(size < ((data.len() * 2) * 8 * 2));
+        // TODO: optimistic reduction
+        assert!(size < ((data.len() * 2) * 8));
     }
 }
