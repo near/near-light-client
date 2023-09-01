@@ -1,14 +1,37 @@
+use near_primitives::merkle::{self, MerklePath};
+use near_primitives_core::{hash::CryptoHash, types::MerkleHash};
 use reed_solomon_novelpoly::WrappedShard;
 
-pub struct Erasure<const VALIDATORS: usize>();
+pub struct Erasure<const VALIDATORS: usize> {
+    shards: Vec<Option<WrappedShard>>,
+}
 
 impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
-    pub fn encodify(data: &[u8]) -> anyhow::Result<Vec<WrappedShard>> {
-        Ok(reed_solomon_novelpoly::encode(data, VALIDATORS)?)
+    pub fn encodify(data: &[u8]) -> anyhow::Result<Self> {
+        Ok(Self {
+            shards: reed_solomon_novelpoly::encode(data, VALIDATORS)?
+                .into_iter()
+                .map(Some)
+                .collect(),
+        })
     }
 
-    pub fn recover(data: Vec<Option<WrappedShard>>) -> anyhow::Result<Vec<u8>> {
-        Ok(reed_solomon_novelpoly::reconstruct(data, VALIDATORS)?)
+    pub fn recover(&self) -> anyhow::Result<Vec<u8>> {
+        Ok(reed_solomon_novelpoly::reconstruct(
+            self.shards.clone(),
+            VALIDATORS,
+        )?)
+    }
+
+    pub fn merklize(&self) -> (CryptoHash, Vec<MerklePath>) {
+        let flattened_data: Vec<Vec<u8>> = self
+            .shards
+            .clone()
+            .into_iter()
+            .filter(|s| s.is_some())
+            .map(|x| x.unwrap().into_inner())
+            .collect();
+        merkle::merklize(&flattened_data)
     }
 }
 
@@ -20,7 +43,7 @@ mod tests {
     fn test_encode_recover() {
         let e = Erasure::<4>::encodify(b"hello").unwrap();
 
-        let recover = Erasure::<4>::recover(e.clone().into_iter().map(Some).collect()).unwrap();
+        let recover = e.recover().unwrap();
 
         assert!(recover.starts_with(b"hello"));
     }
@@ -31,23 +54,54 @@ mod tests {
         println!("original {:?}", data);
         const N: usize = 8;
 
-        let mut codewords: Vec<Option<WrappedShard>> = Erasure::<N>::encodify(data)
-            .unwrap()
-            .into_iter()
-            .map(Some)
-            .collect();
-        println!("codewords {:#?}({})", codewords, codewords.len());
+        let mut codewords = Erasure::<N>::encodify(data).unwrap();
 
-        codewords[0] = None;
-        codewords[1] = None;
-        codewords[2] = None;
-        codewords[N - 3] = None;
-        codewords[N - 2] = None;
-        codewords[N - 1] = None;
-        println!("codewords {:#?}({})", codewords, codewords.len());
+        println!(
+            "codewords {:#?}({})",
+            codewords.shards,
+            codewords.shards.len()
+        );
 
-        let recover = Erasure::<N>::recover(codewords).unwrap();
+        codewords.shards[0] = None;
+        codewords.shards[1] = None;
+        codewords.shards[2] = None;
+        codewords.shards[N - 3] = None;
+        codewords.shards[N - 2] = None;
+        codewords.shards[N - 1] = None;
+        println!(
+            "codewords {:#?}({})",
+            codewords.shards,
+            codewords.shards.len()
+        );
+
+        let recover = codewords.recover().unwrap();
         println!("recover {:?}", recover);
-        assert!(recover.starts_with(data));
+    }
+
+    #[test]
+    fn test_root() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let codewords = Erasure::<N>::encodify(data).unwrap();
+        let (root, _path) = codewords.merklize();
+
+        println!("root {:?}", root);
+    }
+
+    #[test]
+    fn test_path_len() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let codewords = Erasure::<N>::encodify(data).unwrap();
+        let (_root, path) = codewords.merklize();
+
+        println!("path {:#?}", path);
+        let size = std::mem::size_of_val(&*path);
+        println!("proof size {}", size);
+        assert_eq!(size, 192);
     }
 }

@@ -39,12 +39,11 @@
             llvmPackages_11.bintools
             llvmPackages_11.libclang
             protobuf
+
+            nodejs-20
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })
-          ];
-          permittedInsecurePackages = [
-                "nodejs-16.20.1"
           ];
 
         };
