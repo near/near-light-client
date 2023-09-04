@@ -1,5 +1,5 @@
 use crate::{client::error::Error, config::Config};
-use borsh::BorshSerialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use flume::{Receiver, Sender};
 use near_crypto::Signature;
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
@@ -15,8 +15,8 @@ use near_primitives_core::{
     hash::CryptoHash,
     types::{AccountId, BlockHeight},
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use sled::Tree;
+use std::{path::PathBuf, str::FromStr};
 use tokio::time;
 
 pub mod error;
@@ -55,7 +55,6 @@ pub enum Message {
     },
 }
 
-// TODO: remove this hack, use sled or rocks instead
 pub const STATE_PATH: &str = "state.json";
 
 macro_rules! cvec {
@@ -70,19 +69,18 @@ macro_rules! cvec {
 	};
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LocalStateCache {
-    pub head: LightClientBlockLiteView,
-    pub block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>,
-    pub archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
-}
-
 #[derive(Debug, Clone)]
 pub struct LightClient {
     client: rpc::NearRpcClient,
-    state: LightClientBlockLiteView,
-    block_producers: HashMap<CryptoHash, Vec<ValidatorStakeView>>, // TODO can optimise this by short caching these by Pubkey and then storing pointers
-    archival_headers: HashMap<CryptoHash, LightClientBlockLiteView>,
+    store: sled::Db,
+    head: LightClientBlockLiteView,
+    block_producers: Tree,
+    archival_headers: Tree,
+}
+
+pub enum TreeKind {
+    BlockProducers,
+    ArchivalHeaders,
 }
 
 impl LightClient {
@@ -100,14 +98,14 @@ impl LightClient {
             loop {
                 tokio::select! {
                     Ok(msg) = rx.recv_async() => match msg {
-                        Message::Shutdown(is_debug, path) => {
-                            self.shutdown(is_debug, path).await;
+                        Message::Shutdown(is_debug, _path) => {
+                            self.shutdown(is_debug).await;
                         }
                         Message::Head { tx } => {
                             tx.send_async(self.head().clone()).await;
                         },
                         Message::Archive { tx, epoch } => {
-                            tx.send_async(self.header(epoch).cloned()).await;
+                            tx.send_async(self.header(epoch)).await;
                         },
                         Message::GetProof {
                             tx,
@@ -140,50 +138,74 @@ impl LightClient {
             }
         });
     }
+    pub fn get<K: AsRef<[u8]>, T: BorshDeserialize>(&self, key: K, kind: TreeKind) -> Option<T> {
+        let tree = match kind {
+            TreeKind::BlockProducers => &self.block_producers,
+            TreeKind::ArchivalHeaders => &self.archival_headers,
+        };
+        tree.get(key)
+            .ok()
+            .unwrap_or_default()
+            .and_then(|v| BorshDeserialize::try_from_slice(&v).ok())
+    }
+    pub fn insert<K: AsRef<[u8]>, T: BorshSerialize>(
+        &mut self,
+        key: K,
+        value: &T,
+        kind: TreeKind,
+    ) -> anyhow::Result<()> {
+        let tree = match kind {
+            TreeKind::BlockProducers => &self.block_producers,
+            TreeKind::ArchivalHeaders => &self.archival_headers,
+        };
+        Ok(tree
+            .insert(key, BorshSerialize::try_to_vec(value)?)
+            .map(|_| ())?)
+    }
 
-    pub async fn init(config: &Config) -> Self {
-        log::debug!("Bootstrapping light client");
-
+    pub async fn init(config: &Config) -> anyhow::Result<Self> {
+        let sled = sled::open(config.state_path.clone().unwrap_or(STATE_PATH.into()))
+            .expect("Failed to open store");
         let client = rpc::NearRpcClient::new(config.network.clone());
 
-        if config.debug {
-            let state: Option<LocalStateCache> =
-                std::fs::read(config.state_path.as_ref().unwrap_or(&STATE_PATH.into()))
-                    .ok()
-                    .and_then(|file| serde_json::from_slice(&file).ok());
-            if let Some(state) = state {
-                log::info!("Loaded state from file");
-                return Self {
-                    client,
-                    state: state.head,
-                    block_producers: state.block_producers,
-                    archival_headers: state.archival_headers,
-                };
-            }
-        }
+        let head = sled.get("head")?;
+        let block_producers = sled.open_tree("bps")?;
+        let archival_headers = sled.open_tree("archive")?;
 
-        let starting_head = client
-            .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
-            .await
-            .expect("We need a starting header");
+        if let Some(head) = head {
+            let head: LightClientBlockLiteView =
+                borsh::BorshDeserialize::try_from_slice(&head).expect("Failed to deserialize head");
+            Ok(Self {
+                client,
+                store: sled,
+                head,
+                block_producers,
+                archival_headers,
+            })
+        } else {
+            let starting_head = client
+                .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
+                .await
+                .expect("We need a starting header");
 
-        log::info!("Got starting head: {:?}", starting_head.inner_lite.height);
+            log::info!("Got starting head: {:?}", starting_head.inner_lite.height);
 
-        let mut block_producers = HashMap::new();
-        block_producers.insert(
-            starting_head.inner_lite.epoch_id,
-            starting_head.next_bps.clone().unwrap(),
-        );
+            block_producers.insert(
+                starting_head.inner_lite.epoch_id,
+                borsh::to_vec(&starting_head.next_bps.clone().unwrap())?,
+            )?;
 
-        Self {
-            client,
-            state: LightClientBlockLiteView {
-                prev_block_hash: starting_head.prev_block_hash,
-                inner_rest_hash: starting_head.inner_rest_hash,
-                inner_lite: starting_head.inner_lite,
-            },
-            block_producers,
-            archival_headers: Default::default(),
+            Ok(Self {
+                client,
+                store: sled,
+                head: LightClientBlockLiteView {
+                    prev_block_hash: starting_head.prev_block_hash,
+                    inner_rest_hash: starting_head.inner_rest_hash,
+                    inner_lite: starting_head.inner_lite,
+                },
+                block_producers,
+                archival_headers,
+            })
         }
     }
 
@@ -192,7 +214,7 @@ impl LightClient {
     // Remove mutability
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
-        let mut new_state: LightClientState = self.state.clone().into();
+        let mut new_state: LightClientState = self.head.clone().into();
         log::trace!("Current head: {:#?}", new_state.head.inner_lite);
 
         let new_header = self
@@ -205,11 +227,14 @@ impl LightClient {
         if let Some(new_header) = new_header {
             log::trace!("Got new header: {:#?}", new_header.inner_lite);
             let validated = self
-                .block_producers
-                .get(&new_state.head.inner_lite.epoch_id)
+                .get::<_, Vec<ValidatorStakeView>>(
+                    &new_state.head.inner_lite.epoch_id,
+                    TreeKind::BlockProducers,
+                )
                 .and_then(|bps| {
                     new_state
                         .validate_and_update_head(&new_header, bps.clone())
+                        .map_err(|x| log::trace!("Failed to validate header: {:?}", x))
                         .ok()
                 });
 
@@ -217,12 +242,16 @@ impl LightClient {
                 log::debug!("Validated new header: {:?}", new_header.inner_lite.height);
                 if let Some((epoch, next_bps)) = new_state.next_bps {
                     log::debug!("storing next bps[{:?}]", epoch);
-                    self.block_producers.insert(epoch, next_bps);
+                    self.insert(epoch, &next_bps, TreeKind::BlockProducers)?;
                 }
 
-                self.archival_headers
-                    .insert(self.state.inner_lite.epoch_id, self.state.clone());
-                self.state = new_state.head.into();
+                self.insert(
+                    self.head.inner_lite.epoch_id,
+                    &self.head.clone(),
+                    TreeKind::ArchivalHeaders,
+                )?;
+                self.head = new_state.head.into();
+                self.store.insert("head", self.head.try_to_vec()?)?;
                 Ok(true)
             } else {
                 log::debug!("New header is invalid");
@@ -235,10 +264,11 @@ impl LightClient {
     }
 
     fn head(&self) -> &Header {
-        &self.state
+        &self.head
     }
-    fn header(&self, epoch: CryptoHash) -> Option<&Header> {
-        self.archival_headers.get(&epoch)
+
+    fn header(&self, epoch: CryptoHash) -> Option<Header> {
+        self.get::<_, LightClientBlockLiteView>(&epoch, TreeKind::ArchivalHeaders)
     }
 
     // TODO: memoize these in a real cache
@@ -249,16 +279,19 @@ impl LightClient {
     ) -> Option<Proof> {
         // TODO: we need much more logic here for headers in different epochs & the head
         // since there are race conditions when we come to validate the proof header, we'd need to short-cache the proof validation
-        let last_verified_hash = self.state.hash();
+        let last_verified_hash = self.head.hash();
 
         self.client
             .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
             .await
             .map(|proof| {
-                // TODO: use real cache, dont just dump in archive
-                // same for below
-                self.archival_headers
-                    .insert(proof.outcome_proof.block_hash, self.state.clone());
+                if let Err(e) = self.insert(
+                    proof.outcome_proof.block_hash,
+                    &self.head.clone(),
+                    TreeKind::ArchivalHeaders,
+                ) {
+                    log::warn!("Failed to insert archival header: {:?}", e)
+                }
                 proof
             })
     }
@@ -268,13 +301,18 @@ impl LightClient {
         receipt_id: CryptoHash,
         receiver_id: AccountId,
     ) -> Option<Proof> {
-        let last_verified_hash = self.state.hash();
+        let last_verified_hash = self.head.hash();
         self.client
             .fetch_light_client_receipt_proof(receipt_id, receiver_id, last_verified_hash)
             .await
             .map(|proof| {
-                self.archival_headers
-                    .insert(proof.outcome_proof.block_hash, self.state.clone());
+                if let Err(e) = self.insert(
+                    proof.outcome_proof.block_hash,
+                    &self.head.clone(),
+                    TreeKind::ArchivalHeaders,
+                ) {
+                    log::warn!("Failed to insert archival header: {:?}", e)
+                }
                 proof
             })
     }
@@ -298,7 +336,7 @@ impl LightClient {
             block_outcome == body.block_header_lite.inner_lite.outcome_root;
 
         let mut block_verified = merkle::verify_hash(
-            self.state.inner_lite.block_merkle_root,
+            self.head.inner_lite.block_merkle_root,
             &body.block_proof,
             block_hash,
         );
@@ -306,26 +344,32 @@ impl LightClient {
         // Functionality to cover race conditions between previously synced heads since the current head may of changed
         // since the proof was generated
         if !block_verified {
-            self.archival_headers
-                .get_mut(&body.outcome_proof.block_hash)
-                .and_then(|archive| {
-                    log::debug!(
-                        "Trying to verify against archival header: {:?}",
-                        archive.inner_lite.height
-                    );
-                    if merkle::verify_hash(
-                        archive.inner_lite.block_merkle_root,
-                        &body.block_proof,
-                        block_hash,
-                    ) {
-                        log::debug!("Verified against archival header");
-                        block_verified = true;
-                        Some(archive.inner_lite.block_merkle_root)
-                    } else {
-                        None
-                    }
-                })
-                .and_then(|r| self.archival_headers.remove(&r));
+            self.get::<_, LightClientBlockLiteView>(
+                &body.outcome_proof.block_hash,
+                TreeKind::ArchivalHeaders,
+            )
+            .and_then(|archive| {
+                log::debug!(
+                    "Trying to verify against archival header: {:?}",
+                    archive.inner_lite.height
+                );
+                if merkle::verify_hash(
+                    archive.inner_lite.block_merkle_root,
+                    &body.block_proof,
+                    block_hash,
+                ) {
+                    log::debug!("Verified against archival header");
+                    block_verified = true;
+                    Some(archive.inner_lite.block_merkle_root)
+                } else {
+                    None
+                }
+            })
+            .map(|r| {
+                if let Err(e) = self.archival_headers.remove(&r) {
+                    log::warn!("Failed to remove archival header: {:?}", e)
+                }
+            });
         }
 
         log::debug!(
@@ -336,26 +380,14 @@ impl LightClient {
         shard_execution_outcome && block_verified
     }
 
-    // TODO: get rid of this entirely
-    pub async fn write_state(&self, path: Option<PathBuf>) {
-        log::debug!("Writing state to file");
-        let state = LocalStateCache {
-            head: self.state.clone(),
-            block_producers: self.block_producers.clone(),
-            archival_headers: self.archival_headers.clone(),
-        };
-        std::fs::write(
-            path.as_ref().unwrap_or(&STATE_PATH.into()),
-            serde_json::to_string(&state).unwrap(),
-        )
-        .unwrap();
-    }
-
-    pub async fn shutdown(&self, is_debug: bool, path: Option<PathBuf>) -> anyhow::Result<()> {
+    pub async fn shutdown(&self, is_debug: bool) -> anyhow::Result<()> {
         log::info!("Shutting down light client");
-        if is_debug {
-            self.write_state(path).await;
+        if let Err(e) = self.store.insert("head", self.head.try_to_vec()?) {
+            log::warn!("Failed to insert head: {:?}", e)
         }
+        log::info!("Head: {:?}", self.head.inner_lite.height);
+        self.store.flush_async().await?;
+        log::info!("Flushed store");
         todo!("Deliberate panic here, need to make this graceful");
     }
 }
@@ -478,7 +510,7 @@ impl LightClientState {
             total_stake += bps_stake;
 
             if let Some(signature) = maybe_signature {
-                log::debug!(
+                log::trace!(
                     "Checking if signature {} and message {:?} was signed by {}",
                     signature,
                     approval_message,
@@ -578,33 +610,23 @@ mod tests {
     use near_primitives::merkle::compute_root_from_path;
     use serde_json;
 
-    fn fixture(
-        file: &str,
-    ) -> near_jsonrpc_client::methods::next_light_client_block::RpcLightClientNextBlockResponse
-    {
+    fn fixture(file: &str) -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap()
     }
 
     fn get_previous_header() -> LightClientBlockView {
-        fixture("fixtures/2_previous_epoch.json").unwrap()
-    }
-    #[test]
-    fn test_gph() {
-        get_previous_header();
+        fixture("fixtures/2_previous_epoch.json")
     }
 
     fn get_previous() -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open("fixtures/2_previous_epoch.json").unwrap())
-            .unwrap()
+        fixture("fixtures/2_previous_epoch.json")
     }
     fn get_previous_previous() -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open("fixtures/3_previous_epoch.json").unwrap())
-            .unwrap()
+        fixture("fixtures/3_previous_epoch.json")
     }
 
     fn get_current() -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open("fixtures/1_current_epoch.json").unwrap())
-            .unwrap()
+        fixture("fixtures/1_current_epoch.json")
     }
 
     fn get_epochs() -> Vec<(u32, LightClientBlockView, CryptoHash)> {
@@ -695,7 +717,7 @@ mod tests {
     }
     #[test]
     fn test_blackbox_validate() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
         let headers_by_epoch = get_epochs();
 
         let (mut state, next_header) = bootstrap_state();
@@ -710,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_validate_already_verified() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
         assert_eq!(
             LightClientState::ensure_not_already_verified(
                 &bootstrap_state().0.head,
@@ -721,7 +743,7 @@ mod tests {
     }
     #[test]
     fn test_validate_bad_epoch() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
         assert_eq!(
             LightClientState::ensure_epoch_is_current_or_next(
                 &bootstrap_state().0.head,
@@ -733,7 +755,7 @@ mod tests {
 
     #[test]
     fn test_next_epoch_bps() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (state, mut next_block) = bootstrap_state();
         next_block.next_bps = None;
@@ -750,9 +772,8 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signature() {
-        pretty_env_logger::init();
-
-        let (state, next_block) = bootstrap_state();
+        pretty_env_logger::try_init().ok();
+        let (_, next_block) = bootstrap_state();
         let headers_by_epoch = get_epochs();
 
         assert_eq!(
@@ -767,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signatures_no_approved_stake() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (mut state, mut next_block) = bootstrap_state();
         let headers_by_epoch = get_epochs();
@@ -797,7 +818,7 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signatures_stake_isnt_sufficient() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (mut state, next_block) = bootstrap_state();
         let headers_by_epoch = get_epochs();
@@ -841,7 +862,7 @@ mod tests {
             LightClientState::ensure_if_next_epoch_contains_next_bps(
                 &state.head,
                 &next_block.inner_lite.epoch_id,
-                &next_block.next_bps
+                &None
             ),
             Err(Error::BlockMissingNextBps)
         );
@@ -849,7 +870,7 @@ mod tests {
 
     #[test]
     fn test_next_bps_invalid_hash() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (_, next_header) = bootstrap_state();
 
@@ -864,7 +885,7 @@ mod tests {
 
     #[test]
     fn test_next_bps() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (_, next_block) = bootstrap_state();
 
@@ -880,7 +901,7 @@ mod tests {
 
     #[test]
     fn test_next_bps_noop() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
 
         let (_, next_block) = bootstrap_state();
 
@@ -971,7 +992,7 @@ mod tests {
 
     #[test]
     fn test_shard_outcome_root() {
-        pretty_env_logger::init();
+        pretty_env_logger::try_init().ok();
         let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
         let body: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
         // shard_outcome_root = compute_root(sha256(borsh(execution_outcome)), outcome_proof.proof)

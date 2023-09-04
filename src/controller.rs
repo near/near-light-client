@@ -109,14 +109,20 @@ mod proof {
     pub type ValidateProofChannel = (flume::Sender<bool>, flume::Receiver<bool>);
 
     #[derive(Debug, Deserialize, Serialize)]
-    pub struct Params {
+    pub struct TransactionParams {
         transaction_id: CryptoHash,
         sender_id: AccountId,
     }
 
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct ReceiptParams {
+        receipt_id: CryptoHash,
+        receiver_id: AccountId,
+    }
+
     pub(super) async fn get_tx_proof(
         State((client, (tx, rx))): State<(ClientState, ProofChannel)>,
-        Path(params): Path<Params>,
+        Path(params): Path<TransactionParams>,
     ) -> impl IntoResponse {
         log::debug!("get_proof: {:?}", params);
         if let Err(e) = client
@@ -139,15 +145,15 @@ mod proof {
 
     pub(super) async fn get_receipt_proof(
         State((client, (tx, rx))): State<(ClientState, ProofChannel)>,
-        Path(params): Path<Params>,
+        Path(params): Path<ReceiptParams>,
     ) -> impl IntoResponse {
         log::debug!("get_proof: {:?}", params);
         if let Err(e) = client
             .send_async(Message::GetProof {
                 tx,
                 proof: ProofType::Receipt {
-                    receipt_id: params.transaction_id,
-                    receiver_id: params.sender_id,
+                    receipt_id: params.receipt_id,
+                    receiver_id: params.receiver_id,
                 },
             })
             .await

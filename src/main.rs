@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (ctx, crx) = flume::bounded::<Message>(256);
 
-    LightClient::init(&config).await.start(true, crx);
+    LightClient::init(&config).await?.start(true, crx);
     let webapi = controller::init(ctx.clone());
 
     if let Ok(_) = tokio::signal::ctrl_c().await {

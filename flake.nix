@@ -40,7 +40,6 @@
             llvmPackages_11.libclang
             protobuf
 
-            nodejs-20
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })
