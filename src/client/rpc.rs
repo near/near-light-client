@@ -1,5 +1,3 @@
-use std::{fmt::Formatter, str::FromStr};
-
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
@@ -7,6 +5,7 @@ use near_jsonrpc_client::{
 use near_primitives::{types::TransactionOrReceiptId, views::LightClientBlockView};
 use near_primitives_core::{hash::CryptoHash, types::AccountId};
 use serde::Deserialize;
+use std::fmt::Formatter;
 
 #[derive(Debug, Clone, Deserialize)]
 pub enum Network {
