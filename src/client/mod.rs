@@ -1,6 +1,7 @@
-use crate::config::Config;
+use crate::{client::error::Error, config::Config};
 use borsh::BorshSerialize;
 use flume::{Receiver, Sender};
+use near_crypto::Signature;
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
 use near_primitives::{
     block_header::{ApprovalInner, BlockHeaderInnerLite},
@@ -10,11 +11,15 @@ use near_primitives::{
         LightClientBlockLiteView, LightClientBlockView,
     },
 };
-use near_primitives_core::{hash::CryptoHash, types::AccountId};
+use near_primitives_core::{
+    hash::CryptoHash,
+    types::{AccountId, BlockHeight},
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 use tokio::time;
 
+pub mod error;
 pub mod rpc;
 
 pub type Header = LightClientBlockLiteView;
@@ -202,16 +207,13 @@ impl LightClient {
             let validated = self
                 .block_producers
                 .get(&new_state.head.inner_lite.epoch_id)
-                .map(|bps| new_state.validate_and_update_head(&new_header, bps.clone()))
-                .unwrap_or_else(|| {
-                    log::warn!(
-                        "No block producers found for {:?}",
-                        new_state.head.inner_lite
-                    );
-                    false
+                .and_then(|bps| {
+                    new_state
+                        .validate_and_update_head(&new_header, bps.clone())
+                        .ok()
                 });
 
-            if validated {
+            if validated.is_some() {
                 log::debug!("Validated new header: {:?}", new_header.inner_lite.height);
                 if let Some((epoch, next_bps)) = new_state.next_bps {
                     log::debug!("storing next bps[{:?}]", epoch);
@@ -423,42 +425,51 @@ impl LightClientState {
         )
     }
 
-    pub fn validate_and_update_head(
-        &mut self,
-        block_view: &LightClientBlockView,
-        epoch_block_producers: Vec<ValidatorStakeView>,
-    ) -> bool {
-        let (_, _, approval_message) = self.reconstruct_light_client_block_view_fields(block_view);
-
-        if block_view.inner_lite.height <= self.head.inner_lite.height {
-            log::debug!("Block has already been verified");
-            return false;
+    pub fn ensure_not_already_verified(
+        head: &LightClientBlockLiteView,
+        block_height: &BlockHeight,
+    ) -> Result<(), Error> {
+        if block_height <= &head.inner_lite.height {
+            Err(Error::BlockAlreadyVerified)
+        } else {
+            Ok(())
         }
+    }
 
-        if ![
-            self.head.inner_lite.epoch_id,
-            self.head.inner_lite.next_epoch_id,
-        ]
-        .contains(&block_view.inner_lite.epoch_id)
-        {
+    pub fn ensure_epoch_is_current_or_next(
+        head: &LightClientBlockLiteView,
+        epoch_id: &CryptoHash,
+    ) -> Result<(), Error> {
+        if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(&epoch_id) {
             log::debug!("Block is not in the current or next epoch");
-            return false;
+            Err(Error::BlockNotCurrentOrNextEpoch)
+        } else {
+            Ok(())
         }
+    }
 
-        if block_view.inner_lite.epoch_id == self.head.inner_lite.next_epoch_id
-            && block_view.next_bps.is_none()
-        {
+    pub fn ensure_if_next_epoch_contains_next_bps(
+        head: &LightClientBlockLiteView,
+        epoch_id: &CryptoHash,
+        next_bps: &Option<Vec<ValidatorStakeView>>,
+    ) -> Result<(), Error> {
+        if &head.inner_lite.next_epoch_id == epoch_id && next_bps.is_none() {
             log::debug!("Block is in the next epoch but no new set");
-            return false;
+            Err(Error::BlockMissingNextBps)
+        } else {
+            Ok(())
         }
+    }
 
+    pub fn validate_signatures(
+        signatures: &[Option<Signature>],
+        epoch_block_producers: Vec<ValidatorStakeView>,
+        approval_message: &[u8],
+    ) -> Result<(u128, u128), Error> {
         let mut total_stake = 0;
         let mut approved_stake = 0;
 
-        for (maybe_signature, block_producer) in block_view
-            .approvals_after_next
-            .iter()
-            .zip(epoch_block_producers.iter())
+        for (maybe_signature, block_producer) in signatures.iter().zip(epoch_block_producers.iter())
         {
             let vs = block_producer.clone().into_validator_stake();
             let bps_stake = vs.stake();
@@ -467,34 +478,79 @@ impl LightClientState {
             total_stake += bps_stake;
 
             if let Some(signature) = maybe_signature {
-                log::trace!(
+                log::debug!(
                     "Checking if signature {} and message {:?} was signed by {}",
                     signature,
                     approval_message,
                     bps_pk
                 );
-                approved_stake += bps_stake;
-                if !signature.verify(&approval_message, &bps_pk) {
+                if !signature.verify(&approval_message, bps_pk) {
                     log::debug!("Signature is invalid");
-                    return false;
+                    return Err(Error::SignatureInvalid);
                 }
+                approved_stake += bps_stake;
             }
         }
-        log::debug!("All signatures are valid");
+        Ok((total_stake, approved_stake))
+    }
 
+    pub fn ensure_stake_is_sufficient(
+        total_stake: &u128,
+        approved_stake: &u128,
+    ) -> Result<(), Error> {
         let threshold = total_stake * 2 / 3;
-        if approved_stake <= threshold {
-            log::debug!("Not enough stake approved");
-            return false;
-        }
 
-        if let Some(next_bps) = &block_view.next_bps {
+        if approved_stake <= &threshold {
+            log::debug!("Not enough stake approved");
+            Err(Error::NotEnoughApprovedStake)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn ensure_next_bps_is_valid(
+        expected_hash: &CryptoHash,
+        next_bps: &Option<Vec<ValidatorStakeView>>,
+    ) -> Result<Vec<ValidatorStakeView>, Error> {
+        if let Some(next_bps) = next_bps {
             let next_bps_hash = CryptoHash::hash_borsh(&next_bps);
-            if next_bps_hash != block_view.inner_lite.next_bp_hash {
+            if &next_bps_hash != expected_hash {
                 log::warn!("Next block producers hash is invalid");
-                return false;
+                return Err(Error::NextBpsInvalid);
             }
 
+            Ok(next_bps.into_iter().cloned().map(|s| s.into()).collect())
+        } else {
+            // No new bps
+            Ok(Default::default())
+        }
+    }
+
+    pub fn validate_and_update_head(
+        &mut self,
+        block_view: &LightClientBlockView,
+        epoch_block_producers: Vec<ValidatorStakeView>,
+    ) -> Result<(), Error> {
+        let (_, _, approval_message) = self.reconstruct_light_client_block_view_fields(block_view);
+
+        Self::ensure_not_already_verified(&self.head, &block_view.inner_lite.height)?;
+        Self::ensure_epoch_is_current_or_next(&self.head, &block_view.inner_lite.epoch_id)?;
+        Self::ensure_if_next_epoch_contains_next_bps(
+            &self.head,
+            &block_view.inner_lite.epoch_id,
+            &block_view.next_bps,
+        )?;
+        let (total_stake, approved_stake) = Self::validate_signatures(
+            &block_view.approvals_after_next,
+            epoch_block_producers,
+            &approval_message,
+        )?;
+        Self::ensure_stake_is_sufficient(&total_stake, &approved_stake)?;
+
+        if let Ok(next_bps) = Self::ensure_next_bps_is_valid(
+            &block_view.inner_lite.next_bp_hash,
+            &block_view.next_bps,
+        ) {
             log::trace!("Setting next bps[{:?}]", self.head.inner_lite.next_epoch_id);
             self.next_bps = Some((
                 self.head.inner_lite.next_epoch_id,
@@ -511,7 +567,7 @@ impl LightClientState {
         let new_head = self.head.inner_lite.height;
         log::debug!("prev/current head: {}/{}", prev_head, new_head);
 
-        true
+        Ok(())
     }
 }
 
@@ -519,10 +575,7 @@ impl LightClientState {
 mod tests {
     use super::*;
     use core::str::FromStr;
-    use near_primitives::{
-        merkle::compute_root_from_path,
-        transaction::{ExecutionMetadata, ExecutionStatus},
-    };
+    use near_primitives::merkle::compute_root_from_path;
     use serde_json;
 
     fn fixture(
@@ -625,31 +678,225 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_validate() {
-        pretty_env_logger::init();
+    fn bootstrap_state() -> (LightClientState, LightClientBlockView) {
         let headers_by_epoch = get_epochs();
         let next_epoch_id = headers_by_epoch[1].1.inner_lite.epoch_id.clone();
+        let new_header = headers_by_epoch[1].1.clone();
 
-        let mut state = LightClientState {
-            head: view_to_lite_view(headers_by_epoch[0].1.clone()),
-            next_bps: Some((
-                next_epoch_id,
-                headers_by_epoch[0]
-                    .1
-                    .next_bps
-                    .clone()
-                    .unwrap()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-            )),
-        };
+        (
+            LightClientState {
+                head: view_to_lite_view(headers_by_epoch[0].1.clone()),
+                next_bps: Some((
+                    next_epoch_id,
+                    headers_by_epoch[0]
+                        .1
+                        .next_bps
+                        .clone()
+                        .unwrap()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                )),
+            },
+            new_header,
+        )
+    }
+    #[test]
+    fn test_blackbox_validate() {
+        pretty_env_logger::init();
+        let headers_by_epoch = get_epochs();
 
-        assert!(state.validate_and_update_head(
-            &headers_by_epoch[1].1.clone(),
+        let (mut state, next_header) = bootstrap_state();
+
+        state
+            .validate_and_update_head(
+                &next_header,
+                headers_by_epoch[0].1.next_bps.clone().unwrap(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_validate_already_verified() {
+        pretty_env_logger::init();
+        assert_eq!(
+            LightClientState::ensure_not_already_verified(
+                &bootstrap_state().0.head,
+                &BlockHeight::MIN
+            ),
+            Err(Error::BlockAlreadyVerified)
+        );
+    }
+    #[test]
+    fn test_validate_bad_epoch() {
+        pretty_env_logger::init();
+        assert_eq!(
+            LightClientState::ensure_epoch_is_current_or_next(
+                &bootstrap_state().0.head,
+                &CryptoHash::hash_bytes(b"bogus hash")
+            ),
+            Err(Error::BlockNotCurrentOrNextEpoch)
+        );
+    }
+
+    #[test]
+    fn test_next_epoch_bps() {
+        pretty_env_logger::init();
+
+        let (state, mut next_block) = bootstrap_state();
+        next_block.next_bps = None;
+
+        assert_eq!(
+            LightClientState::ensure_if_next_epoch_contains_next_bps(
+                &state.head,
+                &next_block.inner_lite.epoch_id,
+                &next_block.next_bps
+            ),
+            Err(Error::BlockMissingNextBps)
+        );
+    }
+
+    #[test]
+    fn test_next_invalid_signature() {
+        pretty_env_logger::init();
+
+        let (mut state, mut next_block) = bootstrap_state();
+        let headers_by_epoch = get_epochs();
+
+        assert_eq!(
+            LightClientState::validate_signatures(
+                &next_block.approvals_after_next,
+                headers_by_epoch[0].1.next_bps.clone().unwrap(),
+                &b"bogus approval message"[..]
+            ),
+            Err(Error::SignatureInvalid)
+        );
+    }
+
+    #[test]
+    fn test_next_invalid_signatures_no_approved_stake() {
+        pretty_env_logger::init();
+
+        let (mut state, mut next_block) = bootstrap_state();
+        let headers_by_epoch = get_epochs();
+
+        let (_, _, approval_message) =
+            state.reconstruct_light_client_block_view_fields(&next_block);
+
+        next_block.approvals_after_next = next_block
+            .approvals_after_next
+            .iter()
+            .cloned()
+            .map(|mut x| None)
+            .collect();
+
+        let (total_stake, approved_stake) = LightClientState::validate_signatures(
+            &next_block.approvals_after_next,
             headers_by_epoch[0].1.next_bps.clone().unwrap(),
-        ));
+            &approval_message,
+        )
+        .unwrap();
+
+        assert_eq!(
+            (total_stake, approved_stake),
+            (512915271547861520119028536348929, 0)
+        );
+    }
+
+    #[test]
+    fn test_next_invalid_signatures_stake_isnt_sufficient() {
+        pretty_env_logger::init();
+
+        let (mut state, mut next_block) = bootstrap_state();
+        let headers_by_epoch = get_epochs();
+
+        let (_, _, approval_message) =
+            state.reconstruct_light_client_block_view_fields(&next_block);
+
+        let (total_stake, approved_stake) = LightClientState::validate_signatures(
+            &next_block.approvals_after_next,
+            headers_by_epoch[0].1.next_bps.clone().unwrap(),
+            &approval_message,
+        )
+        .unwrap();
+
+        assert_eq!(
+            (total_stake, approved_stake),
+            (
+                512915271547861520119028536348929,
+                345140782903867823005444871054881
+            )
+        );
+
+        assert!(
+            LightClientState::ensure_stake_is_sufficient(&total_stake, &approved_stake).is_ok()
+        );
+
+        assert_eq!(
+            LightClientState::ensure_stake_is_sufficient(
+                &total_stake,
+                &((total_stake * 2) / 3 - 1)
+            ),
+            Err(Error::NotEnoughApprovedStake)
+        );
+    }
+
+    #[test]
+    fn test_next_invalid_bps_stake() {
+        let (state, mut next_block) = bootstrap_state();
+
+        assert_eq!(
+            LightClientState::ensure_if_next_epoch_contains_next_bps(
+                &state.head,
+                &next_block.inner_lite.epoch_id,
+                &next_block.next_bps
+            ),
+            Err(Error::BlockMissingNextBps)
+        );
+    }
+
+    #[test]
+    fn test_next_bps_invalid_hash() {
+        pretty_env_logger::init();
+
+        let (_, next_header) = bootstrap_state();
+
+        assert_eq!(
+            LightClientState::ensure_next_bps_is_valid(
+                &CryptoHash::hash_borsh(b"invalid"),
+                &next_header.next_bps
+            ),
+            Err(Error::NextBpsInvalid)
+        );
+    }
+
+    #[test]
+    fn test_next_bps() {
+        pretty_env_logger::init();
+
+        let (_, next_block) = bootstrap_state();
+
+        assert_eq!(
+            LightClientState::ensure_next_bps_is_valid(
+                &next_block.inner_lite.next_bp_hash,
+                &next_block.next_bps
+            )
+            .unwrap(),
+            next_block.next_bps.unwrap()
+        );
+    }
+
+    #[test]
+    fn test_next_bps_noop() {
+        pretty_env_logger::init();
+
+        let (_, next_block) = bootstrap_state();
+
+        assert_eq!(
+            LightClientState::ensure_next_bps_is_valid(&next_block.inner_lite.next_bp_hash, &None)
+                .unwrap(),
+            vec![]
+        );
     }
 
     #[test]

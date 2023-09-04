@@ -1,4 +1,4 @@
-use near_primitives::merkle::{self, MerklePath, PartialMerkleTree};
+use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
 
