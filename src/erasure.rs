@@ -1,6 +1,10 @@
+use self::store::Store;
+use jmt::{KeyHash, RootHash};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
+
+mod store;
 
 /// Here we provide a module which can create optimal erasure codes for a given number of expected code validators.
 ///
@@ -38,6 +42,27 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
             .map(|x| x.unwrap().into_inner())
             .collect();
         merkle::merklize(&flattened_data)
+    }
+
+    pub fn merklize2(&self, store: &Store) -> RootHash {
+        let tree = store.tree();
+
+        let flattened_data: Vec<(KeyHash, Option<Vec<u8>>)> = self
+            .shards
+            .clone()
+            .into_iter()
+            .filter(|s| s.is_some())
+            .map(|x| x.unwrap().into_inner())
+            .map(|blob| (KeyHash(CryptoHash::hash_bytes(&blob).0), Some(blob)))
+            .collect();
+        let (root, proof, _) = tree.put_value_set_with_proof(flattened_data, 1).unwrap();
+        let size = std::mem::size_of_val(&proof);
+        println!("proof {:?}", proof);
+        // mem is lying here and just giving us the reference size, since merkle is private we
+        // won't be able to get the actual size this way.
+        println!("proof size {}", size);
+
+        root
     }
 }
 
@@ -109,5 +134,19 @@ mod tests {
         let size = std::mem::size_of_val(&*path);
         println!("proof size {}", size);
         assert_eq!(size, 192);
+    }
+
+    #[test]
+    fn test_path_len2() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = Store::new(&tmpdir.path().into());
+
+        let codewords = Erasure::<N>::encodify(data).unwrap();
+        let root = codewords.merklize2(&db);
+        println!("root {:?}", root);
     }
 }
