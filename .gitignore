@@ -4,4 +4,4 @@
 
 local.toml
 
-state.json
+db.sled/
