@@ -20,6 +20,17 @@ pub mod rpc;
 pub type Header = LightClientBlockLiteView;
 pub type Proof = RpcLightClientExecutionProofResponse;
 
+pub enum ProofType {
+    Transaction {
+        transaction_id: CryptoHash,
+        sender_id: AccountId,
+    },
+    Receipt {
+        receipt_id: CryptoHash,
+        receiver_id: AccountId,
+    },
+}
+
 pub enum Message {
     Shutdown(bool, Option<PathBuf>),
     Head {
@@ -31,8 +42,7 @@ pub enum Message {
     },
     GetProof {
         tx: Sender<Option<Proof>>,
-        transaction_id: CryptoHash,
-        sender_id: AccountId,
+        proof: ProofType,
     },
     ValidateProof {
         tx: Sender<bool>,
@@ -40,7 +50,7 @@ pub enum Message {
     },
 }
 
-// TODO: make configurable
+// TODO: remove this hack, use sled or rocks instead
 pub const STATE_PATH: &str = "state.json";
 
 macro_rules! cvec {
@@ -96,11 +106,15 @@ impl LightClient {
                         },
                         Message::GetProof {
                             tx,
-                            transaction_id,
-                            sender_id,
+                            proof: ProofType::Transaction { transaction_id, sender_id }
                         } => {
-                            tx.send_async(self.get_proof(transaction_id, sender_id).await).await;
+                            tx.send_async(self.get_transaction_proof(transaction_id, sender_id).await).await;
                         },
+                        Message::GetProof {
+                            tx, proof: ProofType::Receipt { receipt_id, receiver_id }
+                        } => {
+                            tx.send_async(self.get_transaction_proof(receipt_id, receiver_id).await).await;
+                        }
                         Message::ValidateProof { tx, proof } => {
                             tx.send_async(self.validate_proof(proof).await).await;
                         }
@@ -168,6 +182,9 @@ impl LightClient {
         }
     }
 
+    // TODO: remove all panics here
+    // Try to optimise
+    // Remove mutability
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
         // TODO: refactor
         let mut new_state: LightClientState = self.state.clone().into();
@@ -222,8 +239,8 @@ impl LightClient {
         self.archival_headers.get(&epoch)
     }
 
-    // TODO: memoize these
-    pub async fn get_proof(
+    // TODO: memoize these in a real cache
+    pub async fn get_transaction_proof(
         &mut self,
         transaction_id: CryptoHash,
         sender_id: AccountId,
@@ -236,12 +253,31 @@ impl LightClient {
             .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
             .await
             .map(|proof| {
+                // TODO: use real cache, dont just dump in archive
+                // same for below
                 self.archival_headers
                     .insert(proof.outcome_proof.block_hash, self.state.clone());
                 proof
             })
     }
 
+    pub async fn get_receipt_proof(
+        &mut self,
+        receipt_id: CryptoHash,
+        receiver_id: AccountId,
+    ) -> Option<Proof> {
+        let last_verified_hash = self.state.hash();
+        self.client
+            .fetch_light_client_receipt_proof(receipt_id, receiver_id, last_verified_hash)
+            .await
+            .map(|proof| {
+                self.archival_headers
+                    .insert(proof.outcome_proof.block_hash, self.state.clone());
+                proof
+            })
+    }
+
+    // TODO: no panic
     pub async fn validate_proof(&mut self, body: Proof) -> bool {
         let block_hash = body.block_header_lite.hash();
         assert_eq!(block_hash, body.outcome_proof.block_hash);
@@ -250,11 +286,11 @@ impl LightClient {
             &body.outcome_proof.proof,
             CryptoHash::hash_borsh(&body.outcome_proof.to_hashes()),
         );
-        log::info!("shard_outcome_root: {:?}", shard_outcome_root);
+        log::debug!("shard_outcome_root: {:?}", shard_outcome_root);
 
         let block_outcome =
             merkle::compute_root_from_path_and_item(&body.outcome_root_proof, shard_outcome_root);
-        log::info!("block_outcome_root: {:?}", block_outcome);
+        log::debug!("block_outcome_root: {:?}", block_outcome);
 
         let shard_execution_outcome =
             block_outcome == body.block_header_lite.inner_lite.outcome_root;
@@ -271,7 +307,7 @@ impl LightClient {
             self.archival_headers
                 .get_mut(&body.outcome_proof.block_hash)
                 .and_then(|archive| {
-                    log::info!(
+                    log::debug!(
                         "Trying to verify against archival header: {:?}",
                         archive.inner_lite.height
                     );
@@ -280,7 +316,7 @@ impl LightClient {
                         &body.block_proof,
                         block_hash,
                     ) {
-                        log::info!("Verified against archival header");
+                        log::debug!("Verified against archival header");
                         block_verified = true;
                         Some(archive.inner_lite.block_merkle_root)
                     } else {
@@ -290,7 +326,7 @@ impl LightClient {
                 .and_then(|r| self.archival_headers.remove(&r));
         }
 
-        log::info!(
+        log::debug!(
             "shard outcome included: {:?}, block included: {:?}",
             shard_execution_outcome,
             block_verified
@@ -298,8 +334,9 @@ impl LightClient {
         shard_execution_outcome && block_verified
     }
 
+    // TODO: get rid of this entirely
     pub async fn write_state(&self, path: Option<PathBuf>) {
-        log::info!("Writing state to file");
+        log::debug!("Writing state to file");
         let state = LocalStateCache {
             head: self.state.clone(),
             block_producers: self.block_producers.clone(),
@@ -394,7 +431,7 @@ impl LightClientState {
         let (_, _, approval_message) = self.reconstruct_light_client_block_view_fields(block_view);
 
         if block_view.inner_lite.height <= self.head.inner_lite.height {
-            log::info!("Block has already been verified");
+            log::debug!("Block has already been verified");
             return false;
         }
 
@@ -404,14 +441,14 @@ impl LightClientState {
         ]
         .contains(&block_view.inner_lite.epoch_id)
         {
-            log::info!("Block is not in the current or next epoch");
+            log::debug!("Block is not in the current or next epoch");
             return false;
         }
 
         if block_view.inner_lite.epoch_id == self.head.inner_lite.next_epoch_id
             && block_view.next_bps.is_none()
         {
-            log::info!("Block is in the next epoch but no new set");
+            log::debug!("Block is in the next epoch but no new set");
             return false;
         }
 
