@@ -82,4 +82,25 @@ impl NearRpcClient {
                 .ok()?,
         )
     }
+    pub async fn fetch_light_client_receipt_proof(
+        &self,
+        receipt_id: CryptoHash,
+        receiver_id: AccountId,
+        latest_verified: CryptoHash,
+    ) -> Option<RpcLightClientExecutionProofResponse> {
+        Some(
+            self.client
+                .call(
+                    methods::light_client_proof::RpcLightClientExecutionProofRequest {
+                        id: TransactionOrReceiptId::Receipt {
+                            receipt_id,
+                            receiver_id,
+                        },
+                        light_client_head: latest_verified,
+                    },
+                )
+                .await
+                .ok()?,
+        )
+    }
 }

@@ -1,7 +1,13 @@
-use near_primitives::merkle::{self, MerklePath};
-use near_primitives_core::{hash::CryptoHash, types::MerkleHash};
+use near_primitives::merkle::{self, MerklePath, PartialMerkleTree};
+use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
 
+/// Here we provide a module which can create optimal erasure codes for a given number of expected code validators.
+///
+/// We also provide merkleization functionality to generate a succint commitment to the erasure
+/// coding scheme.
+///
+/// Note: the current merkleization is not optimal, we can do better.
 pub struct Erasure<const VALIDATORS: usize> {
     shards: Vec<Option<WrappedShard>>,
 }
