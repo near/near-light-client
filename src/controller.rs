@@ -154,6 +154,10 @@ mod proof {
         {
             log::error!("Failed to send get_proof: {:?}", e);
         }
+        rx.recv_async().await.map(axum::Json).map_err(|_| {
+            log::error!("Failed to receive result, channel closed");
+            internal_server_error()
+        })
     }
 
     pub(super) async fn post_proof(

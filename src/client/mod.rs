@@ -118,7 +118,7 @@ impl LightClient {
                         Message::GetProof {
                             tx, proof: ProofType::Receipt { receipt_id, receiver_id }
                         } => {
-                            tx.send_async(self.get_transaction_proof(receipt_id, receiver_id).await).await;
+                            tx.send_async(self.get_receipt_proof(receipt_id, receiver_id).await).await;
                         }
                         Message::ValidateProof { tx, proof } => {
                             tx.send_async(self.validate_proof(proof).await).await;
@@ -593,10 +593,6 @@ mod tests {
         get_previous_header();
     }
 
-    fn get_next_header() -> LightClientBlockView {
-        fixture("fixtures/1_current_epoch.json").unwrap()
-    }
-
     fn get_previous() -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open("fixtures/2_previous_epoch.json").unwrap())
             .unwrap()
@@ -604,10 +600,6 @@ mod tests {
     fn get_previous_previous() -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open("fixtures/3_previous_epoch.json").unwrap())
             .unwrap()
-    }
-
-    fn get_next_bps() -> Vec<ValidatorStakeView> {
-        get_previous().next_bps.unwrap()
     }
 
     fn get_current() -> LightClientBlockView {
@@ -760,7 +752,7 @@ mod tests {
     fn test_next_invalid_signature() {
         pretty_env_logger::init();
 
-        let (mut state, mut next_block) = bootstrap_state();
+        let (state, next_block) = bootstrap_state();
         let headers_by_epoch = get_epochs();
 
         assert_eq!(
@@ -787,7 +779,7 @@ mod tests {
             .approvals_after_next
             .iter()
             .cloned()
-            .map(|mut x| None)
+            .map(|_| None)
             .collect();
 
         let (total_stake, approved_stake) = LightClientState::validate_signatures(
@@ -807,7 +799,7 @@ mod tests {
     fn test_next_invalid_signatures_stake_isnt_sufficient() {
         pretty_env_logger::init();
 
-        let (mut state, mut next_block) = bootstrap_state();
+        let (mut state, next_block) = bootstrap_state();
         let headers_by_epoch = get_epochs();
 
         let (_, _, approval_message) =
@@ -843,7 +835,7 @@ mod tests {
 
     #[test]
     fn test_next_invalid_bps_stake() {
-        let (state, mut next_block) = bootstrap_state();
+        let (state, next_block) = bootstrap_state();
 
         assert_eq!(
             LightClientState::ensure_if_next_epoch_contains_next_bps(
