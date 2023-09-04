@@ -1,6 +1,10 @@
+use self::store::Store;
+use jmt::{KeyHash, RootHash};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
+
+mod store;
 
 /// Here we provide a module which can create optimal erasure codes for a given number of expected code validators.
 ///
@@ -32,15 +36,34 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
     // TODO: don't clone
     // TODO: cannot use a standard merkle tree here, the proofs are huge
     pub fn merklize(&self) -> (CryptoHash, Vec<MerklePath>) {
-        let flattened_data: Vec<u8> = self
+        let flattened_data: Vec<Vec<u8>> = self
             .shards
             .clone()
             .into_iter()
             .filter(|s| s.is_some())
             .map(|x| x.unwrap().into_inner())
-            .flatten()
             .collect();
         merkle::merklize(&flattened_data)
+    }
+
+    pub fn merklize2(&self) -> RootHash {
+        let store = Store::new(&"/tmp/jellyfish".to_string().into());
+        let tree = store.tree();
+
+        let flattened_data: Vec<(KeyHash, Option<Vec<u8>>)> = self
+            .shards
+            .clone()
+            .into_iter()
+            .filter(|s| s.is_some())
+            .map(|x| x.unwrap().into_inner())
+            .map(|blob| (KeyHash(CryptoHash::hash_bytes(&blob).0), Some(blob)))
+            .collect();
+        let (root, proof, _) = tree.put_value_set_with_proof(flattened_data, 1).unwrap();
+        let size = std::mem::size_of_val(&proof);
+        println!("proof {:?}", proof);
+        println!("proof size {}", size);
+
+        root
     }
 }
 
@@ -116,5 +139,14 @@ mod tests {
         assert!(size < ((data.len() * 2) * 8 * 2));
         // TODO: optimistic reduction
         assert!(size < ((data.len() * 2) * 8));
+    }
+    #[test]
+    fn test_path_len2() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        println!("original {:?}", data);
+        const N: usize = 8;
+
+        let codewords = Erasure::<N>::encodify(data).unwrap();
+        let root = codewords.merklize2();
     }
 }

@@ -30,12 +30,17 @@ serde      = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 
 # Near specific
-near-crypto            = "0.17.0"
-near-jsonrpc-client    = "0.6.0"
-near-primitives        = "0.17.0"
-near-primitives-core   = "0.17.0"
+near-crypto          = "0.17.0"
+near-jsonrpc-client  = "0.6.0"
+near-primitives      = "0.17.0"
+near-primitives-core = "0.17.0"
+
+# Cryptography
+jmt                    = "*"
 reed-solomon-novelpoly = "1.0.1"
 sha256                 = "*"
+sha3                   = "*"
 
 [dev-dependencies]
 rand = "*"
+tempfile = "*"
