@@ -1,6 +1,12 @@
+use self::commit::{init_trusted_setup, Commitment};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
+use rust_kzg_blst::types::{fft_settings::FsFFTSettings, kzg_settings::FsKZGSettings};
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+
+pub mod commit;
 
 /// Here we provide a module which can create optimal erasure codes for a given number of expected code validators.
 ///
@@ -9,7 +15,7 @@ use reed_solomon_novelpoly::WrappedShard;
 ///
 /// Note: the current merkleization is not optimal, we can do better.
 pub struct Erasure<const VALIDATORS: usize> {
-    shards: Vec<Option<WrappedShard>>,
+    pub shards: Vec<Option<WrappedShard>>,
 }
 
 impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
@@ -22,27 +28,91 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
         })
     }
 
-    pub fn recover(&self) -> anyhow::Result<Vec<u8>> {
+    pub fn recover(self) -> anyhow::Result<Vec<u8>> {
         Ok(reed_solomon_novelpoly::reconstruct(
-            self.shards.clone(),
+            self.shards,
             VALIDATORS,
         )?)
     }
 
     pub fn merklize(&self) -> (CryptoHash, Vec<MerklePath>) {
-        let flattened_data: Vec<Vec<u8>> = self
-            .shards
+        merkle::merklize(&self.shards_to_bytes())
+    }
+
+    pub fn shards_to_bytes(&self) -> Vec<Vec<u8>> {
+        self.shards
             .clone()
             .into_iter()
-            .filter(|s| s.is_some())
-            .map(|x| x.unwrap().into_inner())
-            .collect();
-        merkle::merklize(&flattened_data)
+            .filter_map(|s| s)
+            .map(|x| x.into_inner())
+            .collect()
     }
+
+    pub fn encoded_to_commitment(&self) -> anyhow::Result<Commitment> {
+        // TODO: pass this around
+        let ts = init_trusted_setup("trusted-setup");
+
+        commit::Commitment::new(
+            &ts,
+            self.shards_to_bytes()
+                .into_iter()
+                .map(|mut shard| {
+                    // Resize the shard blob from 6 bytes to 8 to build a valid scalar
+                    shard.resize(8, 0);
+                    shard
+                })
+                .flatten()
+                .collect::<Vec<u8>>(),
+        )
+    }
+    pub fn prove_commitment(commitment: Commitment) -> commit::Proof {
+        // TODO: pass this around
+        let ts = init_trusted_setup("trusted-setup");
+        commit::Proof::from(&ts, commitment)
+    }
+    pub fn verify_proof(proof: commit::Proof) -> bool {
+        let ts = init_trusted_setup("trusted-setup");
+        proof.verify(&ts)
+    }
+}
+
+impl<const VALIDATORS: usize> From<ExternalErasure> for Erasure<VALIDATORS> {
+    fn from(value: ExternalErasure) -> Self {
+        Self {
+            shards: value
+                .shards
+                .into_iter()
+                .map(|shard| {
+                    if !shard.is_empty() {
+                        Some(WrappedShard::new(shard))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BlobData {
+    #[serde_as(as = "serde_with::hex::Hex")]
+    pub data: Vec<u8>,
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExternalErasure {
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    pub shards: Vec<Vec<u8>>,
 }
 
 #[cfg(test)]
 mod tests {
+    use kzg::Fr;
+    use rust_kzg_blst::types::fr::FsFr;
+
     use super::*;
 
     #[test]
@@ -109,5 +179,50 @@ mod tests {
         let size = std::mem::size_of_val(&*path);
         println!("proof size {}", size);
         assert_eq!(size, 192);
+    }
+
+    // FIXME: this only works for small datasets where each shard is < 8 bytes right now
+    #[test]
+    fn test_blackbox_commit_to_rs_blobs() {
+        let data = b"he1lohe2lohe3lohe4lohe5lohe6lohe7lohe8lo";
+        let codewords = Erasure::<32>::encodify(data).unwrap();
+        println!(
+            "codewords {:?}({})",
+            codewords
+                .shards_to_bytes()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<u8>>()
+                .len(),
+            codewords.shards.len(),
+        );
+
+        let ts = commit::init_trusted_setup("trusted-setup");
+
+        let commit = commit::Commitment::new(
+            &ts,
+            codewords
+                .shards_to_bytes()
+                .into_iter()
+                .map(|mut shard| {
+                    // Resize the shard blob from 6 bytes to 8 to build a valid scalar
+                    shard.resize(8, 0);
+                    shard
+                })
+                .flatten()
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap();
+        println!("commit {:?}", commit);
+        let proof = commit::Proof::from(&ts, commit);
+        assert!(proof.verify(&ts))
+    }
+
+    #[test]
+    fn test_scalar() {
+        let mut bytes = b"hello123";
+        let bytes: [u8; 8] = bytes[..].try_into().unwrap();
+
+        let scalar = FsFr::from_u64(u64::from_be_bytes(bytes));
     }
 }

@@ -11,6 +11,7 @@ pub struct Config {
     pub state_path: Option<PathBuf>,
     pub starting_head: String,
     pub network: Network,
+    pub trusted_setup_path: Option<PathBuf>,
 }
 
 impl Config {
