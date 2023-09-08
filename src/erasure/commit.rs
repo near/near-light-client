@@ -10,7 +10,7 @@ use rust_kzg_blst::{
         compute_kzg_proof_rust, evaluate_polynomial_in_evaluation_form_rust,
         load_trusted_setup_filename_rust, verify_kzg_proof_rust,
     },
-    types::{fr::FsFr, g1::FsG1, kzg_settings::FsKZGSettings, poly::FsPoly},
+    types::{fr::FsFr, g1::FsG1, kzg_settings::FsKZGSettings},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -62,12 +62,12 @@ pub struct Proof {
     pub proof: FsG1,
     pub z_fr: FsFr,
     pub y_fr: FsFr,
-    pub commitment: Commitment,
+    pub commitment: FsG1,
 }
 
 impl Proof {
     pub fn from(trusted_setup: &FsKZGSettings, commitment: Commitment) -> Self {
-        let z_fr = trusted_setup.get_roots_of_unity_at(5); // TODO: pickat random
+        let z_fr = trusted_setup.get_roots_of_unity_at(5); // TODO: pick many at random
         let poly = blob_to_polynomial_rust(&commitment.blob);
         let (proof, computed_y) = compute_kzg_proof_rust(&commitment.blob, &z_fr, trusted_setup);
         let y_fr = evaluate_polynomial_in_evaluation_form_rust(&poly, &z_fr, trusted_setup);
@@ -78,12 +78,12 @@ impl Proof {
             proof,
             z_fr,
             y_fr,
-            commitment,
+            commitment: commitment.commitment,
         }
     }
     pub fn verify(&self, trusted_setup: &FsKZGSettings) -> bool {
         match verify_kzg_proof_rust(
-            &self.commitment.commitment,
+            &self.commitment,
             &self.z_fr,
             &self.y_fr,
             &self.proof,
@@ -107,7 +107,8 @@ pub struct ProofExternal {
     pub z_fr: [u8; 32],
     #[serde_as(as = "serde_with::hex::Hex")]
     pub y_fr: [u8; 32],
-    pub commitment: CommitmentExternal,
+    #[serde_as(as = "serde_with::hex::Hex")]
+    pub commitment: [u8; 48],
 }
 
 impl From<Proof> for ProofExternal {
@@ -116,15 +117,7 @@ impl From<Proof> for ProofExternal {
             proof: p.proof.to_bytes(),
             z_fr: p.z_fr.to_bytes(),
             y_fr: p.y_fr.to_bytes(),
-            commitment: CommitmentExternal {
-                commitment: p.commitment.commitment.to_bytes(),
-                blob: p
-                    .commitment
-                    .blob
-                    .iter()
-                    .map(|x| x.to_bytes())
-                    .collect::<Vec<[u8; 32]>>(),
-            },
+            commitment: p.commitment.to_bytes(),
         }
     }
 }

@@ -257,15 +257,7 @@ mod erasure {
             proof: FsG1::from_bytes(&c.proof[..]).unwrap(),
             z_fr: FsFr::from_bytes(&c.z_fr[..]).unwrap(),
             y_fr: FsFr::from_bytes(&c.y_fr[..]).unwrap(),
-            commitment: Commitment {
-                commitment: FsG1::from_bytes(&c.commitment.commitment[..]).unwrap(),
-                blob: c
-                    .commitment
-                    .blob
-                    .iter()
-                    .map(|b| FsFr::from_bytes(&b[..]).unwrap())
-                    .collect(),
-            },
+            commitment: FsG1::from_bytes(&c.commitment[..]).unwrap(),
         });
         axum::Json(verified)
     }

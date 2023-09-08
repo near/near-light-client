@@ -2,7 +2,6 @@ use self::commit::{init_trusted_setup, Commitment};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
-use rust_kzg_blst::types::{fft_settings::FsFFTSettings, kzg_settings::FsKZGSettings};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -205,7 +204,9 @@ mod tests {
                 .shards_to_bytes()
                 .into_iter()
                 .map(|mut shard| {
-                    // Resize the shard blob from 6 bytes to 8 to build a valid scalar
+                    // TODO: Resize the shard blob from 6 bytes to 8 to build a valid scalar
+                    // This is a hack for demos, we need to construct fields without relying
+                    // on shard count
                     shard.resize(8, 0);
                     shard
                 })
@@ -220,9 +221,9 @@ mod tests {
 
     #[test]
     fn test_scalar() {
-        let mut bytes = b"hello123";
+        let bytes = b"hello123";
         let bytes: [u8; 8] = bytes[..].try_into().unwrap();
 
-        let scalar = FsFr::from_u64(u64::from_be_bytes(bytes));
+        FsFr::from_u64(u64::from_be_bytes(bytes));
     }
 }
