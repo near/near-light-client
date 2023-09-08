@@ -247,6 +247,10 @@ mod erasure {
                 internal_server_error()
             })
     }
+    // TODO: these endpoints shouldnt be decoding from request, refactor to From/Tryfrom in the
+    // module
+    // TODO: remove panics
+    // TODO: implement multiproof
     pub(super) async fn prove_commitment(State(ts): State<Arc<FsKZGSettings>>, Json(c): Json<CommitmentExternal>) -> impl IntoResponse {
         log::debug!("prove commitment {:?}", c);
         let proof = crate::erasure::Erasure::<VALIDATORS>::prove_commitment(Commitment {
@@ -260,14 +264,16 @@ mod erasure {
         axum::Json(ProofExternal::from(proof))
     }
 
-    pub(super) async fn verify_proof(State(ts): State<Arc<FsKZGSettings>>, Json(c): Json<ProofExternal>) -> impl IntoResponse {
+    pub(super) async fn verify_proof(State(ts): State<Arc<FsKZGSettings>>, Json(c): Json<Vec<ProofExternal>>) -> impl IntoResponse {
         log::debug!("prove commitment {:?}", c);
-        let verified = crate::erasure::Erasure::<VALIDATORS>::verify_proof(Proof {
+        let batches: Vec<Proof> = c.into_iter().map(|c| (Proof {
             proof: FsG1::from_bytes(&c.proof[..]).unwrap(),
             z_fr: FsFr::from_bytes(&c.z_fr[..]).unwrap(),
             y_fr: FsFr::from_bytes(&c.y_fr[..]).unwrap(),
             commitment: FsG1::from_bytes(&c.commitment[..]).unwrap(),
-        }, ts);
+        })).collect();
+
+        let verified = crate::erasure::Erasure::<VALIDATORS>::verify_proof(&batches, ts);
         axum::Json(verified)
     }
 }

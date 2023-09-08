@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use self::commit::{init_trusted_setup, Commitment};
+use self::commit::{init_trusted_setup, Commitment, Proof};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
@@ -67,8 +67,8 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
     pub fn prove_commitment(commitment: Commitment, ts: Arc<FsKZGSettings>) -> commit::Proof {
         commit::Proof::from(&ts, commitment)
     }
-    pub fn verify_proof(proof: commit::Proof, ts: Arc<FsKZGSettings>) -> bool {
-        proof.verify(&ts)
+    pub fn verify_proof(proofs: &[commit::Proof], ts: Arc<FsKZGSettings>) -> bool {
+        Proof::verify_batch(proofs, &ts)
     }
 }
 

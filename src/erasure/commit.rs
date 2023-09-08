@@ -8,7 +8,7 @@ use rust_kzg_blst::{
     eip_4844::{
         blob_to_kzg_commitment_rust, blob_to_polynomial_rust, bytes_to_blob,
         compute_kzg_proof_rust, evaluate_polynomial_in_evaluation_form_rust,
-        load_trusted_setup_filename_rust, verify_kzg_proof_rust,
+        load_trusted_setup_filename_rust, verify_kzg_proof_batch, verify_kzg_proof_rust,
     },
     types::{fr::FsFr, g1::FsG1, kzg_settings::FsKZGSettings},
 };
@@ -95,6 +95,14 @@ impl Proof {
                 false
             }
         }
+    }
+    pub fn verify_batch(proofs: &[Self], trusted_setup: &FsKZGSettings) -> bool {
+        let commitments = proofs.iter().map(|p| p.commitment).collect::<Vec<FsG1>>();
+        let zs = proofs.iter().map(|p| p.z_fr).collect::<Vec<FsFr>>();
+        let ys = proofs.iter().map(|p| p.y_fr).collect::<Vec<FsFr>>();
+        let proofs = proofs.iter().map(|p| p.proof).collect::<Vec<FsG1>>();
+
+        verify_kzg_proof_batch(&commitments, &zs, &ys, &proofs, trusted_setup)
     }
 }
 
