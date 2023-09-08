@@ -64,8 +64,8 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
                 .collect::<Vec<u8>>(),
         )
     }
-    pub fn prove_commitment(commitment: Commitment, ts: Arc<FsKZGSettings>) -> commit::Proof {
-        commit::Proof::from(&ts, commitment)
+    pub fn prove_commitment(commitment: Commitment, ts: Arc<FsKZGSettings>) -> Vec<commit::Proof> {
+        commit::Proof::prove(&ts, commitment)
     }
     pub fn verify_proof(proofs: &[commit::Proof], ts: Arc<FsKZGSettings>) -> bool {
         Proof::verify_batch(proofs, &ts)
@@ -213,7 +213,7 @@ mod tests {
         .unwrap();
         println!("commit {:?}", commit);
         let proof = commit::Proof::from(&ts, commit);
-        assert!(proof.verify(&ts))
+        assert!(Proof::verify_batch(&[proof], &ts))
     }
 
     #[test]

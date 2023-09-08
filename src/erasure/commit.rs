@@ -4,6 +4,7 @@ use kzg::{
     eip_4844::{BYTES_PER_BLOB, TRUSTED_SETUP_PATH},
     Fr, KZGSettings, G1,
 };
+use rand::{Rng, SeedableRng};
 use rust_kzg_blst::{
     eip_4844::{
         blob_to_kzg_commitment_rust, blob_to_polynomial_rust, bytes_to_blob,
@@ -66,8 +67,12 @@ pub struct Proof {
 }
 
 impl Proof {
+    // Dead, replaced with multiproofs TODO: remove
     pub fn from(trusted_setup: &FsKZGSettings, commitment: Commitment) -> Self {
-        let z_fr = trusted_setup.get_roots_of_unity_at(5); // TODO: pick many at random
+        // Generate 8 random numbers between 0..25
+        let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
+
+        let z_fr = trusted_setup.get_roots_of_unity_at(rng.gen_range(0..25));
         let poly = blob_to_polynomial_rust(&commitment.blob);
         let (proof, computed_y) = compute_kzg_proof_rust(&commitment.blob, &z_fr, trusted_setup);
         let y_fr = evaluate_polynomial_in_evaluation_form_rust(&poly, &z_fr, trusted_setup);
@@ -81,20 +86,29 @@ impl Proof {
             commitment: commitment.commitment,
         }
     }
-    pub fn verify(&self, trusted_setup: &FsKZGSettings) -> bool {
-        match verify_kzg_proof_rust(
-            &self.commitment,
-            &self.z_fr,
-            &self.y_fr,
-            &self.proof,
-            trusted_setup,
-        ) {
-            Ok(eval) => eval,
-            Err(e) => {
-                println!("Error verifying proof: {}", e);
-                false
+    pub fn prove(trusted_setup: &FsKZGSettings, commitment: Commitment) -> Vec<Self> {
+        let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
+
+        let mut proofs = Vec::new();
+
+        for _ in 0..8 {
+            let z_fr = trusted_setup.get_roots_of_unity_at(rng.gen_range(0..25));
+            let poly = blob_to_polynomial_rust(&commitment.blob);
+            let (proof, computed_y) =
+                compute_kzg_proof_rust(&commitment.blob, &z_fr, trusted_setup);
+            let y_fr = evaluate_polynomial_in_evaluation_form_rust(&poly, &z_fr, trusted_setup);
+
+            // Compare the recently evaluated y to the computed y
+            if y_fr.equals(&computed_y) {
+                proofs.push(Self {
+                    proof,
+                    z_fr,
+                    y_fr,
+                    commitment: commitment.commitment,
+                })
             }
         }
+        proofs
     }
     pub fn verify_batch(proofs: &[Self], trusted_setup: &FsKZGSettings) -> bool {
         let commitments = proofs.iter().map(|p| p.commitment).collect::<Vec<FsG1>>();
@@ -171,6 +185,6 @@ mod tests {
 
         let proof = Proof::from(&setup, commitment);
 
-        assert!(proof.verify(&setup));
+        assert!(Proof::verify_batch(&[proof], &setup));
     }
 }
