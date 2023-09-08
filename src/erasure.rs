@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use self::commit::{init_trusted_setup, Commitment};
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
+use rust_kzg_blst::types::kzg_settings::FsKZGSettings;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -47,10 +50,7 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
             .collect()
     }
 
-    pub fn encoded_to_commitment(&self) -> anyhow::Result<Commitment> {
-        // TODO: pass this around
-        let ts = init_trusted_setup("trusted-setup");
-
+    pub fn encoded_to_commitment(&self, ts: Arc<FsKZGSettings>) -> anyhow::Result<Commitment> {
         commit::Commitment::new(
             &ts,
             self.shards_to_bytes()
@@ -64,13 +64,10 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
                 .collect::<Vec<u8>>(),
         )
     }
-    pub fn prove_commitment(commitment: Commitment) -> commit::Proof {
-        // TODO: pass this around
-        let ts = init_trusted_setup("trusted-setup");
+    pub fn prove_commitment(commitment: Commitment, ts: Arc<FsKZGSettings>) -> commit::Proof {
         commit::Proof::from(&ts, commitment)
     }
-    pub fn verify_proof(proof: commit::Proof) -> bool {
-        let ts = init_trusted_setup("trusted-setup");
+    pub fn verify_proof(proof: commit::Proof, ts: Arc<FsKZGSettings>) -> bool {
         proof.verify(&ts)
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -7,6 +9,7 @@ use axum::{
 };
 use flume::Sender;
 use near_primitives_core::hash::CryptoHash;
+use rust_kzg_blst::types::kzg_settings::FsKZGSettings;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
@@ -14,7 +17,7 @@ use crate::client::Message;
 
 type ClientState = flume::Sender<Message>;
 
-pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> {
+pub(crate) fn init(ctx: Sender<Message>, trusted_setup: Arc<FsKZGSettings>) -> JoinHandle<Result<(), axum::Error>> {
     let proof_channel = flume::bounded(64);
 
     let controller = Router::new()
@@ -35,10 +38,15 @@ pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> 
         .route("/proof", post(proof::post_proof))
         .with_state((ctx.clone(), flume::bounded(64)))
         .route("/blob/encode", post(erasure::encode))
+        .with_state(trusted_setup.clone())
         .route("/blob/decode", post(erasure::decode))
+        .with_state(trusted_setup.clone())
         .route("/blob/commit", post(erasure::commit))
+        .with_state(trusted_setup.clone())
         .route("/blob/commit/prove", post(erasure::prove_commitment))
-        .route("/blob/commit/verify", post(erasure::verify_proof));
+        .with_state(trusted_setup.clone())
+        .route("/blob/commit/verify", post(erasure::verify_proof))
+        .with_state(trusted_setup.clone());
 
     tokio::spawn(async {
         let r = axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
@@ -227,18 +235,19 @@ mod erasure {
                 internal_server_error()
             })
     }
-    pub(super) async fn commit(Json(blobs): Json<ExternalErasure>) -> impl IntoResponse {
+
+    pub(super) async fn commit(State(ts): State<Arc<FsKZGSettings>>, Json(blobs): Json<ExternalErasure>) -> impl IntoResponse {
         log::debug!("commit blobs {:?}", blobs);
         let erasure = crate::erasure::Erasure::<VALIDATORS>::from(blobs);
         erasure
-            .encoded_to_commitment()
+            .encoded_to_commitment(ts)
             .map(|c| axum::Json(CommitmentExternal::from(c)))
             .map_err(|e| {
                 log::error!("Failed to encode: {:?}", e);
                 internal_server_error()
             })
     }
-    pub(super) async fn prove_commitment(Json(c): Json<CommitmentExternal>) -> impl IntoResponse {
+    pub(super) async fn prove_commitment(State(ts): State<Arc<FsKZGSettings>>, Json(c): Json<CommitmentExternal>) -> impl IntoResponse {
         log::debug!("prove commitment {:?}", c);
         let proof = crate::erasure::Erasure::<VALIDATORS>::prove_commitment(Commitment {
             commitment: FsG1::from_bytes(&c.commitment[..]).unwrap(),
@@ -247,18 +256,18 @@ mod erasure {
                 .iter()
                 .map(|b| FsFr::from_bytes(&b[..]).unwrap())
                 .collect(),
-        });
+        }, ts);
         axum::Json(ProofExternal::from(proof))
     }
 
-    pub(super) async fn verify_proof(Json(c): Json<ProofExternal>) -> impl IntoResponse {
+    pub(super) async fn verify_proof(State(ts): State<Arc<FsKZGSettings>>, Json(c): Json<ProofExternal>) -> impl IntoResponse {
         log::debug!("prove commitment {:?}", c);
         let verified = crate::erasure::Erasure::<VALIDATORS>::verify_proof(Proof {
             proof: FsG1::from_bytes(&c.proof[..]).unwrap(),
             z_fr: FsFr::from_bytes(&c.z_fr[..]).unwrap(),
             y_fr: FsFr::from_bytes(&c.y_fr[..]).unwrap(),
             commitment: FsG1::from_bytes(&c.commitment[..]).unwrap(),
-        });
+        }, ts);
         axum::Json(verified)
     }
 }
