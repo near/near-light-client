@@ -15,15 +15,16 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Result<Self, ConfigError> {
-        let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK").unwrap_or_else(|_| "testnet".into());
+        let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK").unwrap_or_else(|_| "Testnet".into());
+        let default_path = env::var("NEAR_LIGHT_CLIENT_CONFIG_FILE").unwrap_or_else(|_| "default".to_string());
 
         let s = ConfigTrait::builder()
-            .add_source(File::with_name("default"))
+            .add_source(File::with_name(&default_path))
             .add_source(File::with_name(&format!("{}", run_mode)).required(false))
             // This file shouldn't be checked in to git
             .add_source(File::with_name("local").required(false))
             // Eg.. `RELAYER_DEBUG=1 ./target/app` would set the `debug` key
-            .add_source(Environment::with_prefix("RELAYER"))
+            .add_source(Environment::with_prefix("NEAR_LIGHT_CLIENT"))
             .build()?;
 
         let r = s.try_deserialize();
