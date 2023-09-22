@@ -11,7 +11,6 @@ pub struct ShutdownMsg;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
-    // tracing_subscriber::fmt::init();
 
     let config = config::Config::new()?;
 
