@@ -172,7 +172,10 @@ mod proof {
     ) -> impl IntoResponse {
         log::debug!("post_proof: {:?}", proof);
         if let Err(e) = client
-            .send_async(Message::ValidateProof { tx, proof })
+            .send_async(Message::ValidateProof {
+                tx,
+                proof: Box::new(proof),
+            })
             .await
         {
             log::error!("Failed to send post_proof: {:?}", e);

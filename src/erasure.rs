@@ -8,10 +8,12 @@ use reed_solomon_novelpoly::WrappedShard;
 /// coding scheme.
 ///
 /// Note: the current merkleization is not optimal, we can do better.
+#[allow(unused)]
 pub struct Erasure<const VALIDATORS: usize> {
     shards: Vec<Option<WrappedShard>>,
 }
 
+#[allow(unused)]
 impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
     pub fn encodify(data: &[u8]) -> anyhow::Result<Self> {
         Ok(Self {

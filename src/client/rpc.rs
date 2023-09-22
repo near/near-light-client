@@ -66,20 +66,18 @@ impl NearRpcClient {
         sender_id: AccountId,
         latest_verified: CryptoHash,
     ) -> Option<RpcLightClientExecutionProofResponse> {
-        Some(
-            self.client
-                .call(
-                    methods::light_client_proof::RpcLightClientExecutionProofRequest {
-                        id: TransactionOrReceiptId::Transaction {
-                            transaction_hash: transaction_id,
-                            sender_id: sender_id,
-                        },
-                        light_client_head: latest_verified,
+        self.client
+            .call(
+                methods::light_client_proof::RpcLightClientExecutionProofRequest {
+                    id: TransactionOrReceiptId::Transaction {
+                        transaction_hash: transaction_id,
+                        sender_id,
                     },
-                )
-                .await
-                .ok()?,
-        )
+                    light_client_head: latest_verified,
+                },
+            )
+            .await
+            .ok()
     }
     pub async fn fetch_light_client_receipt_proof(
         &self,
@@ -87,19 +85,17 @@ impl NearRpcClient {
         receiver_id: AccountId,
         latest_verified: CryptoHash,
     ) -> Option<RpcLightClientExecutionProofResponse> {
-        Some(
-            self.client
-                .call(
-                    methods::light_client_proof::RpcLightClientExecutionProofRequest {
-                        id: TransactionOrReceiptId::Receipt {
-                            receipt_id,
-                            receiver_id,
-                        },
-                        light_client_head: latest_verified,
+        self.client
+            .call(
+                methods::light_client_proof::RpcLightClientExecutionProofRequest {
+                    id: TransactionOrReceiptId::Receipt {
+                        receipt_id,
+                        receiver_id,
                     },
-                )
-                .await
-                .ok()?,
-        )
+                    light_client_head: latest_verified,
+                },
+            )
+            .await
+            .ok()
     }
 }

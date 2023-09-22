@@ -20,7 +20,7 @@ impl Config {
 
         let s = ConfigTrait::builder()
             .add_source(File::with_name(&default_path))
-            .add_source(File::with_name(&format!("{}", run_mode)).required(false))
+            .add_source(File::with_name(&run_mode.to_string()).required(false))
             // This file shouldn't be checked in to git
             .add_source(File::with_name("local").required(false))
             // Eg.. `RELAYER_DEBUG=1 ./target/app` would set the `debug` key

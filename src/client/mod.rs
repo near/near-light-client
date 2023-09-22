@@ -37,7 +37,7 @@ pub enum ProofType {
 }
 
 pub enum Message {
-    Shutdown(bool, Option<PathBuf>),
+    Shutdown(Option<PathBuf>),
     Head {
         tx: Sender<Header>,
     },
@@ -51,7 +51,7 @@ pub enum Message {
     },
     ValidateProof {
         tx: Sender<bool>,
-        proof: Proof,
+        proof: Box<Proof>,
     },
 }
 
@@ -98,28 +98,40 @@ impl LightClient {
             loop {
                 tokio::select! {
                     Ok(msg) = rx.recv_async() => match msg {
-                        Message::Shutdown(is_debug, _path) => {
-                            self.shutdown(is_debug).await;
+                        Message::Shutdown(_path) => {
+                            if let Err(e) = self.shutdown().await {
+                                log::error!("Failed to shutdown: {:?}", e);
+                            }
                         }
                         Message::Head { tx } => {
-                            tx.send_async(self.head().clone()).await;
+                            if let Err(e) = tx.send_async(self.head().clone()).await {
+                                log::error!("Failed to send head: {:?}", e);
+                            }
                         },
                         Message::Archive { tx, epoch } => {
-                            tx.send_async(self.header(epoch)).await;
+                            if let Err(e) = tx.send_async(self.header(epoch)).await {
+                                log::error!("Failed to send archival header: {:?}", e);
+                    }
                         },
                         Message::GetProof {
                             tx,
                             proof: ProofType::Transaction { transaction_id, sender_id }
                         } => {
-                            tx.send_async(self.get_transaction_proof(transaction_id, sender_id).await).await;
+                            if let Err(e) = tx.send_async(self.get_transaction_proof(transaction_id, sender_id).await).await {
+                                log::error!("Failed to send proof: {:?}", e);
+                    }
                         },
                         Message::GetProof {
                             tx, proof: ProofType::Receipt { receipt_id, receiver_id }
                         } => {
-                            tx.send_async(self.get_receipt_proof(receipt_id, receiver_id).await).await;
+                            if let Err(e) = tx.send_async(self.get_receipt_proof(receipt_id, receiver_id).await).await {
+                                log::error!("Failed to send proof: {:?}", e);
+                            }
                         }
                         Message::ValidateProof { tx, proof } => {
-                            tx.send_async(self.validate_proof(proof).await).await;
+                            if let Err(e) = tx.send_async(self.validate_proof(*proof).await).await {
+                                log::error!("Failed to send validation result: {:?}", e);
+                            }
                         }
                     },
                     r = self.sync() => {
@@ -250,7 +262,7 @@ impl LightClient {
                     &self.head.clone(),
                     TreeKind::ArchivalHeaders,
                 )?;
-                self.head = new_state.head.into();
+                self.head = new_state.head;
                 self.store.insert("head", self.head.try_to_vec()?)?;
                 Ok(true)
             } else {
@@ -324,7 +336,7 @@ impl LightClient {
 
         let shard_outcome_root = merkle::compute_root_from_path(
             &body.outcome_proof.proof,
-            CryptoHash::hash_borsh(&body.outcome_proof.to_hashes()),
+            CryptoHash::hash_borsh(body.outcome_proof.to_hashes()),
         );
         log::debug!("shard_outcome_root: {:?}", shard_outcome_root);
 
@@ -343,33 +355,35 @@ impl LightClient {
 
         // Functionality to cover race conditions between previously synced heads since the current head may of changed
         // since the proof was generated
+        // FIXME: bug here if the same proof is requested
         if !block_verified {
-            self.get::<_, LightClientBlockLiteView>(
-                &body.outcome_proof.block_hash,
-                TreeKind::ArchivalHeaders,
-            )
-            .and_then(|archive| {
-                log::debug!(
-                    "Trying to verify against archival header: {:?}",
-                    archive.inner_lite.height
-                );
-                if merkle::verify_hash(
-                    archive.inner_lite.block_merkle_root,
-                    &body.block_proof,
-                    block_hash,
-                ) {
-                    log::debug!("Verified against archival header");
-                    block_verified = true;
-                    Some(archive.inner_lite.block_merkle_root)
-                } else {
-                    None
-                }
-            })
-            .map(|r| {
-                if let Err(e) = self.archival_headers.remove(&r) {
+            if let Some(r) = self
+                .get::<_, LightClientBlockLiteView>(
+                    &body.outcome_proof.block_hash,
+                    TreeKind::ArchivalHeaders,
+                )
+                .and_then(|archive| {
+                    log::debug!(
+                        "Trying to verify against archival header: {:?}",
+                        archive.inner_lite.height
+                    );
+                    if merkle::verify_hash(
+                        archive.inner_lite.block_merkle_root,
+                        &body.block_proof,
+                        block_hash,
+                    ) {
+                        log::debug!("Verified against archival header");
+                        block_verified = true;
+                        Some(archive.inner_lite.block_merkle_root)
+                    } else {
+                        None
+                    }
+                })
+            {
+                if let Err(e) = self.archival_headers.remove(r) {
                     log::warn!("Failed to remove archival header: {:?}", e)
                 }
-            });
+            }
         }
 
         log::debug!(
@@ -380,7 +394,7 @@ impl LightClient {
         shard_execution_outcome && block_verified
     }
 
-    pub async fn shutdown(&self, is_debug: bool) -> anyhow::Result<()> {
+    pub async fn shutdown(&self) -> anyhow::Result<()> {
         log::info!("Shutting down light client");
         if let Err(e) = self.store.insert("head", self.head.try_to_vec()?) {
             log::warn!("Failed to insert head: {:?}", e)
@@ -418,8 +432,8 @@ impl LightClientState {
         CryptoHash::hash_bytes(&cvec!(
             CryptoHash::hash_bytes(&cvec!(inner_light_hash.0, block_view.inner_rest_hash.0))
                 .as_bytes()
-                .to_vec(),
-            block_view.prev_block_hash.as_bytes().to_vec()
+                .as_ref(),
+            block_view.prev_block_hash.as_bytes().as_ref()
         ))
     }
 
@@ -472,7 +486,7 @@ impl LightClientState {
         head: &LightClientBlockLiteView,
         epoch_id: &CryptoHash,
     ) -> Result<(), Error> {
-        if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(&epoch_id) {
+        if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(epoch_id) {
             log::debug!("Block is not in the current or next epoch");
             Err(Error::BlockNotCurrentOrNextEpoch)
         } else {
@@ -516,7 +530,7 @@ impl LightClientState {
                     approval_message,
                     bps_pk
                 );
-                if !signature.verify(&approval_message, bps_pk) {
+                if !signature.verify(approval_message, bps_pk) {
                     log::debug!("Signature is invalid");
                     return Err(Error::SignatureInvalid);
                 }
@@ -545,13 +559,13 @@ impl LightClientState {
         next_bps: &Option<Vec<ValidatorStakeView>>,
     ) -> Result<Vec<ValidatorStakeView>, Error> {
         if let Some(next_bps) = next_bps {
-            let next_bps_hash = CryptoHash::hash_borsh(&next_bps);
+            let next_bps_hash = CryptoHash::hash_borsh(next_bps);
             if &next_bps_hash != expected_hash {
                 log::warn!("Next block producers hash is invalid");
                 return Err(Error::NextBpsInvalid);
             }
 
-            Ok(next_bps.into_iter().cloned().map(|s| s.into()).collect())
+            Ok(next_bps.clone())
         } else {
             // No new bps
             Ok(Default::default())
@@ -584,10 +598,7 @@ impl LightClientState {
             &block_view.next_bps,
         ) {
             log::trace!("Setting next bps[{:?}]", self.head.inner_lite.next_epoch_id);
-            self.next_bps = Some((
-                self.head.inner_lite.next_epoch_id,
-                next_bps.into_iter().map(|s| s.clone().into()).collect(),
-            ));
+            self.next_bps = Some((self.head.inner_lite.next_epoch_id, next_bps));
         }
 
         let prev_head = self.head.inner_lite.height;
