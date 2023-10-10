@@ -160,6 +160,7 @@ impl LightClient {
             .unwrap_or_default()
             .and_then(|v| BorshDeserialize::try_from_slice(&v).ok())
     }
+
     pub fn insert<K: AsRef<[u8]>, T: BorshSerialize>(
         &mut self,
         key: K,
@@ -221,18 +222,17 @@ impl LightClient {
         }
     }
 
-    // TODO: remove all panics here
-    // Try to optimise
-    // Remove mutability
+    // TODO: Try to optimise
+    // TODO: Remove mutability return
     pub async fn sync(&mut self) -> anyhow::Result<bool> {
-        // TODO: refactor
         let mut new_state: LightClientState = self.head.clone().into();
         log::trace!("Current head: {:#?}", new_state.head.inner_lite);
 
         let new_header = self
             .client
             .fetch_latest_header(
-                &CryptoHash::from_str(&format!("{}", new_state.head.hash())).unwrap(),
+                &CryptoHash::from_str(&format!("{}", new_state.head.hash()))
+                    .map_err(|e| anyhow::anyhow!("Failed to parse hash: {:?}", e))?,
             )
             .await;
 
@@ -623,10 +623,6 @@ mod tests {
 
     fn fixture(file: &str) -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap()
-    }
-
-    fn get_previous_header() -> LightClientBlockView {
-        fixture("fixtures/2_previous_epoch.json")
     }
 
     fn get_previous() -> LightClientBlockView {
