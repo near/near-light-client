@@ -18,6 +18,7 @@ pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> 
     let proof_channel = flume::bounded(64);
 
     let controller = Router::new()
+        .route("/health", get(health_check))
         .route("/head", get(header::get_head))
         .with_state((ctx.clone(), flume::bounded(64)))
         .route("/header/:epoch", get(header::get_by_epoch))
@@ -41,6 +42,10 @@ pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> 
             .await;
         r.map_err(|e| todo!("{:?}", e))
     })
+}
+
+async fn health_check() -> StatusCode {
+    StatusCode::OK
 }
 
 mod header {
