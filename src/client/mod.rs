@@ -111,7 +111,7 @@ impl LightClient {
                         Message::Archive { tx, epoch } => {
                             if let Err(e) = tx.send_async(self.header(epoch)).await {
                                 log::error!("Failed to send archival header: {:?}", e);
-                    }
+                            }
                         },
                         Message::GetProof {
                             tx,
@@ -119,7 +119,7 @@ impl LightClient {
                         } => {
                             if let Err(e) = tx.send_async(self.get_transaction_proof(transaction_id, sender_id).await).await {
                                 log::error!("Failed to send proof: {:?}", e);
-                    }
+                            }
                         },
                         Message::GetProof {
                             tx, proof: ProofType::Receipt { receipt_id, receiver_id }
