@@ -2,8 +2,8 @@ name: "Deploying Light Client"
 
 on:
   push:
-    # branches:
-    #   - main
+     branches:
+       - main
 
 jobs:
   git-submodules-update:
