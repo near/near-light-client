@@ -1,0 +1,36 @@
+name: "Deploying Light Client"
+
+on:
+  push:
+    # branches:
+    #   - main
+
+jobs:
+  git-submodules-update:
+    name: "Build and deploy Light Client"
+    permissions:
+      contents: read
+      packages: write
+    runs-on:
+      group: ubuntu-22.04-8core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}          
+
+      - name: Build "light-client" Docker image and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          file: Dockerfile
+          tags: |
+            ghcr.io/near/near-light-client/light-client:${{ github.sha }}
+            ghcr.io/near/near-light-client/light-client:latest
+
