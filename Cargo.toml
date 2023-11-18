@@ -22,7 +22,7 @@ reqwest = { version = "0.11.17", features = [ "gzip", "brotli", "deflate", "json
 tokio   = { version = "1", features = [ "full" ] }
 
 # Codec
-borsh      = { version = "0.10.2", features = [ "rc" ] }
+borsh      = { version = "1.0.0", features = [ "rc" ] }
 hex        = { version = "0.4", features = [ "serde" ] }
 prost      = "0.11"
 rustc-hex  = "2.1.0"
