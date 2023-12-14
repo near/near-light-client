@@ -20,6 +20,7 @@ use std::{path::PathBuf, str::FromStr};
 use tokio::time;
 
 pub mod error;
+pub mod proof;
 pub mod rpc;
 
 pub type Header = LightClientBlockLiteView;
@@ -129,23 +130,23 @@ impl LightClient {
                             }
                         }
                         Message::ValidateProof { tx, proof } => {
-                            if let Err(e) = tx.send_async(self.validate_proof(*proof).await).await {
+                            if let Err(e) = tx.send_async(self.verify_proof(*proof).await).await {
                                 log::error!("Failed to send validation result: {:?}", e);
                             }
                         }
                     },
-                    r = self.sync() => {
-                        tokio::time::sleep(duration).await;
-                        match r {
-                            Err(e) => log::error!("Error syncing: {:?}", e),
-                            Ok(false) if is_fast => {
-                                log::debug!("Slowing down sync interval to {:?}", default_duration);
-                                duration = default_duration;
-                                is_fast = false;
-                            }
-                            _ => (),
-                        }
-                    }
+                    // r = self.sync() => {
+                    //     tokio::time::sleep(duration).await;
+                    //     match r {
+                    //         Err(e) => log::error!("Error syncing: {:?}", e),
+                    //         Ok(false) if is_fast => {
+                    //             log::debug!("Slowing down sync interval to {:?}", default_duration);
+                    //             duration = default_duration;
+                    //             is_fast = false;
+                    //         }
+                    //         _ => (),
+                    //     }
+                    // }
                 }
             }
         });
@@ -330,22 +331,20 @@ impl LightClient {
     }
 
     // TODO: no panic
-    pub async fn validate_proof(&mut self, body: Proof) -> bool {
+    pub async fn verify_proof(&mut self, body: Proof) -> bool {
         let block_hash = body.block_header_lite.hash();
         assert_eq!(block_hash, body.outcome_proof.block_hash);
 
-        let shard_outcome_root = merkle::compute_root_from_path(
+        let outcome_root = merkle::compute_root_from_path(
             &body.outcome_proof.proof,
             CryptoHash::hash_borsh(body.outcome_proof.to_hashes()),
         );
-        log::debug!("shard_outcome_root: {:?}", shard_outcome_root);
 
-        let block_outcome =
-            merkle::compute_root_from_path_and_item(&body.outcome_root_proof, shard_outcome_root);
-        log::debug!("block_outcome_root: {:?}", block_outcome);
+        let outcome_root =
+            merkle::compute_root_from_path_and_item(&body.outcome_root_proof, outcome_root);
+        log::debug!("outcome_root: {:?}", outcome_root);
 
-        let shard_execution_outcome =
-            block_outcome == body.block_header_lite.inner_lite.outcome_root;
+        let outcome_root_matches = outcome_root == body.block_header_lite.inner_lite.outcome_root;
 
         let mut block_verified = merkle::verify_hash(
             self.head.inner_lite.block_merkle_root,
@@ -388,10 +387,10 @@ impl LightClient {
 
         log::debug!(
             "shard outcome included: {:?}, block included: {:?}",
-            shard_execution_outcome,
+            outcome_root_matches,
             block_verified
         );
-        shard_execution_outcome && block_verified
+        outcome_root_matches && block_verified
     }
 
     pub async fn shutdown(&self) -> anyhow::Result<()> {
@@ -447,6 +446,7 @@ impl LightClientState {
             current_block_hash.0
         ))
     }
+
     fn reconstruct_light_client_block_view_fields(
         &mut self,
         block_view: &LightClientBlockView,
@@ -619,7 +619,7 @@ mod tests {
     use super::*;
     use core::str::FromStr;
     use near_primitives::merkle::compute_root_from_path;
-    use serde_json;
+    use serde_json::{self, json};
 
     fn fixture(file: &str) -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open(file).unwrap()).unwrap()
@@ -1023,5 +1023,124 @@ mod tests {
         let expected_shard_outcome_root =
             CryptoHash::from_str("AC7P5WhmY1kFaL7ZWpCToPcQpH4kuxBnzCx53BSWDzY7").unwrap();
         assert_eq!(shard_outcome_root, expected_shard_outcome_root);
+    }
+
+    #[test]
+    fn test_root() {
+        let root = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
+
+        let old_block_hash = "7xTJs2wYhLcWKsT2Vcf4HPcXVdKKxTAPFTphhEhf3AxW";
+        let old_proof = json!([
+        {
+            "direction": "Left",
+            "hash": "GCvcb8M3qHWtvmSdEZFUWcTd6TwifECQZbV932S3AJzj"
+        },
+        {
+            "direction": "Left",
+            "hash": "RYJXmEszufH799Rzsu669aUo96YCPqN8K93DWVYoj7A"
+        },
+        {
+            "direction": "Left",
+            "hash": "C1epDr3Zy7sBLJcrwN1q8JNqCRbL9ZwGXdUdudMkKgZK"
+        },
+        {
+            "direction": "Right",
+            "hash": "4S5gtNEiMPPLzSZ2HKQr62PEFa2sFKyGWZ3Hzm3wmmZv"
+        },
+        {
+            "direction": "Left",
+            "hash": "3xo4CBANUZFc8bpX1X4cZHd9uEMJtxagxYjq5N9XGkF6"
+        },
+        {
+            "direction": "Right",
+            "hash": "2ZecgrRDh4i7CcxHsS6NMRTMvd5NCxo3Mjx8prho7Gd8"
+        },
+        {
+            "direction": "Left",
+            "hash": "51BaXGWzouQPb1dme26UmDZQ4PAJqUmcU3utoyKwQs3Z"
+        },
+        {
+            "direction": "Left",
+            "hash": "3R2JTnndX74J1zYCnWPM4JdKvTrMwW8Tj3N7tcCmMPr5"
+        },
+        {
+            "direction": "Right",
+            "hash": "74pTjaUkKY42tqDSy3wjRmH8X7bkjoiQiQ4AibnvShF2"
+        },
+        {
+            "direction": "Right",
+            "hash": "FVKmSZx11uW5itjGZf6B3aCs7JRcL2i51Jb9VVeeY6QP"
+        },
+        {
+            "direction": "Right",
+            "hash": "CQoiwaCYqcJxZTT9bqceKTGUffZiKQNKPf6YUvXihEQJ"
+        },
+        {
+            "direction": "Right",
+            "hash": "DntvNk8Ugyu6ZdAUTV39MrPUrXQUFJKVaBUput6GMZiq"
+        },
+        {
+            "direction": "Left",
+            "hash": "4ZXzvj47NPZXfwV6N2Z2TCs52AX143bKGTUNQR4KuL5F"
+        },
+        {
+            "direction": "Left",
+            "hash": "6Czm39v4AvX1Xc5NZdsB94BNhawYhPAXRqyP3BephTyV"
+        },
+        {
+            "direction": "Right",
+            "hash": "tojBg1nCgpCEpD3ssM4rTibXuCNQ6Bdfq7iByhPvukD"
+        },
+        {
+            "direction": "Right",
+            "hash": "FHTGPaTNPPfcQ1yGuVCz1LgRxkQDjuSX4bk4L8kgDgQq"
+        },
+        {
+            "direction": "Right",
+            "hash": "837fc2U3xTc7fMPPPvaXd2GzTkJhVWRxznk4xnzqg7kz"
+        },
+        {
+            "direction": "Left",
+            "hash": "CAyu4UBn9JTTbq13pUGjY6nXCvjDaRzKwepwpJcpRLpn"
+        },
+        {
+            "direction": "Left",
+            "hash": "6ejd5xCdeRefBX34FoXBv4V2hVcRa2S89dnymWbCdfpj"
+        },
+        {
+            "direction": "Right",
+            "hash": "DYzHCZNv5VR8hR6dvYsA2CK8GaruXYA3GJmABpqB4rp"
+        },
+        {
+            "direction": "Right",
+            "hash": "D9BmTFSNCoU9ZzKLANz8J11UBhNpWAGnn6LH8YD5Sw1D"
+        },
+        {
+            "direction": "Right",
+            "hash": "CiUV5kcdjZpqw6iS2nYhiJZd5Prhh2ZHM7AXVoiCzr1R"
+        },
+        {
+            "direction": "Right",
+            "hash": "E71mnUNN1jWnyvrfKLsTAAaQ1rJtVwuRLiSjUqR8QKaT"
+        },
+        {
+            "direction": "Left",
+            "hash": "7x3QgcmcQu1Di5uYwP29nL4uRzLFv6tDpacZJrYTCDrY"
+        },
+        {
+            "direction": "Left",
+            "hash": "83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD"
+        },
+        {
+            "direction": "Left",
+            "hash": "AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL"
+        }]);
+
+        let old = merkle::verify_hash(
+            CryptoHash::from_str(root).unwrap(),
+            &serde_json::from_value(old_proof).unwrap(),
+            CryptoHash::from_str(old_block_hash).unwrap(),
+        );
+        assert!(old);
     }
 }
