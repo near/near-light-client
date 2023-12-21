@@ -1,4 +1,5 @@
 #![feature(slice_partition_dedup)]
+#![feature(trait_alias)]
 
 use crate::client::LightClient;
 use client::Message;

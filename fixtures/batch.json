@@ -38,7 +38,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "2hEeSce4tTwiaCQ8AHprkndeg6jXv6rvg3rn7xw8m66V",
         "inner_rest_hash": "2zxnxeLSfGTFyYJjASAY9gVPVx3VXdL9424FpHCw1UHg",
         "prev_block_hash": "E7ugr7jwqLMBGHZf3Dszcmf4y9B96W4isaJraZJSrxUj",
@@ -90,7 +90,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "5sRv1mRJMEtuG4T7jdQyrP15wWNEJfX6miskUS42pLHS",
         "inner_rest_hash": "J4RPuwENpZmdkiMfqhqyYMbQ4MwR7idcaDBpP8431gMe",
         "prev_block_hash": "HbWHEEwcNZrChQxGJL3STkWNiB1UcRtLgAEzUtgkYp2S",
@@ -132,7 +132,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "GZp6n6hEkDtfsuEfYFrXD1ZCUKuGwkjGKBGFjmMsS6f4",
         "inner_rest_hash": "4nXZUEBPSyFk3EM9ovfnTVX8vEh4TiqRpp2p55WwrErJ",
         "prev_block_hash": "Gkh1v29dTQeZHUBsSmp37KFR9ZnV86nX4TX3fTsKuUbk",
@@ -182,7 +182,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "2zNaCSmvYcxriCjGxNnLFPsrqG6nxuterVC6y46kabCf",
         "inner_rest_hash": "DzGYc3CDLZXLn8EfADzZud6RPiuaaDj4E5o5Snmt2hQp",
         "prev_block_hash": "HqnvBjc9vvVNiNkGXtpuCEccbSR34J3uaMtX3Kao82dv",
@@ -224,7 +224,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "7tJ1xJLMcEoD1RqmVfbBt7d9wVmdC4rzzqXd3AaYAoaf",
         "inner_rest_hash": "9SNkoN3PaoQ3RzHnVoSetTTRA1yH4TovHZrPCeLZuKQn",
         "prev_block_hash": "FP9jWLcURrjeZq9Nn4GPRuw1BrS3B4viE3v7RP2MzV4T",
@@ -269,7 +269,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "8YJX9Z1N1u4KJfxeSZoxLuNgwYUKmZoTafCaaYxxfTx8",
         "inner_rest_hash": "3yso176TyBauYDM3xQZF8yDAc3wYJMaATSaLvjud17wo",
         "prev_block_hash": "37PEb6siLYmuKtv1S1msEj3VmsVgrJhvwKbSN1ZyGABP",
@@ -319,7 +319,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "7dCpZqv62dgXu8FTQhw5LmtR4aGshT54u2kfUA4b7hKQ",
         "inner_rest_hash": "BtT5hFjgU5NtddngkK4qMLBtSHw7tM6RawJzhhKmSUjA",
         "prev_block_hash": "2SZhhYzYQ9fVAaSuS9Tp9DaP5T31q1Ko6HDbpiTYvSYG",
@@ -361,7 +361,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "67D4C7JBk8eWXwWh4bR1bN4SH4MFLfKvWbqtPrDVixDC",
         "inner_rest_hash": "BHknTrn2WxLr7chMpgs9mTQTZxXLsHUNAZAsjSk4mYmj",
         "prev_block_hash": "2pVbpHb3dtgUyN5RsyN9Sksa778XaCYZNNoYwTrjLA6T",
@@ -411,7 +411,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "3xh1sTbGbuJK7sfzCYJh2yEYWCgmD4voyx9zHhEuiFNw",
         "inner_rest_hash": "HFbmky2Kxvdf587biCf1eNM3Vt41mnRhzcM1Zifo2fmh",
         "prev_block_hash": "66SDNjto6jXo7PSh2adrKAhKWmg5AAToiVA3RJ6zHWD3",
@@ -453,7 +453,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "9edAZZgpABc3kymJzjZ392jNKbfam7HsUBAhXdhqC6zW",
         "inner_rest_hash": "8fQRLSKq3LJyg5dHAZ4FG2FoPUZNxmSDYfJQt7nNQVw9",
         "prev_block_hash": "D6nKsiEojQYvu5kwzZ96CFTt7JGqz53XH4hKHGir2GBc",
@@ -487,7 +487,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "BfVXSJW3ikZ1DCikaA22LvY6t9Y1UksZNBduRVN2qEJs",
         "inner_rest_hash": "77XJVCUNgqURcZctRGf5tHQWx5SMjdVVZgKBjDauD5xc",
         "prev_block_hash": "DiSh6mnHWmRJgoFdxGX4Te2sLXCfyvhe2x2uzDHaHc9",
@@ -521,7 +521,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "BfVXSJW3ikZ1DCikaA22LvY6t9Y1UksZNBduRVN2qEJs",
         "inner_rest_hash": "77XJVCUNgqURcZctRGf5tHQWx5SMjdVVZgKBjDauD5xc",
         "prev_block_hash": "DiSh6mnHWmRJgoFdxGX4Te2sLXCfyvhe2x2uzDHaHc9",
@@ -558,7 +558,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "BfVXSJW3ikZ1DCikaA22LvY6t9Y1UksZNBduRVN2qEJs",
         "inner_rest_hash": "77XJVCUNgqURcZctRGf5tHQWx5SMjdVVZgKBjDauD5xc",
         "prev_block_hash": "DiSh6mnHWmRJgoFdxGX4Te2sLXCfyvhe2x2uzDHaHc9",
@@ -608,7 +608,7 @@
         6,
         7
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "BKMXE1PfYHSEoQnG7eXtJdD34CeTypLyX1CJzWNZiwm7",
         "inner_rest_hash": "8BHDS1KsJ55UMy2ndpcYYKUDACQYmCrVbh42dDqWiQDp",
         "prev_block_hash": "5vxW4UeYrqouAFCs63LwQWjMhKpEM6aabZmbsTwpbqg8",
@@ -650,7 +650,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "6aw5LHvcoWfcjmZA9rfc3UQX16MQZELWY1aTddoMWhYP",
         "inner_rest_hash": "CQtCaHorfe43v9KumQovuNzMaQh1MTe8oWeKdNBWfYDP",
         "prev_block_hash": "8AqJ5aEEuSNb1QTvExCdsmEaUEhtZ44aKed5eADGDyYA",
@@ -695,7 +695,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "HfhNmHv5NnjbQyUz9TRtTjJ7MGFmvyQb9youeUraznRe",
         "inner_rest_hash": "4vfTLdDbNp48ThVsDYcaadu9jb1vyi34E2xqXzP5v19t",
         "prev_block_hash": "9kNH12h8DiVQkir4TD7CJETsVu69ftx9vTmiEJJjZvYd",
@@ -734,7 +734,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "F6r1aHyovKST91xtCL4QQG1Y6M7JLySMndiZGB8pMLuQ",
         "inner_rest_hash": "6RRDMRFPZ5dMNVYzxxHfMNb2MmhaAjaYw1CExKAaKqHX",
         "prev_block_hash": "8yd1cSebZzL8UWtqoHrezFoCdQQB7wLrw4MdGjGjsFr7",
@@ -782,7 +782,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "3V3azAPeKh2psNx3JqpTs7roWVwDeavrMutDmhP3vmfT",
         "inner_rest_hash": "6aHDq5gzvFfTPeqtnBAgjnFJVaTS8Z8hFmZiWv9jNESH",
         "prev_block_hash": "Dqwd6XnJJE69WGsCwaG6LPL13AjRdmXMmbySzsofeioE",
@@ -830,7 +830,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "2yc1Q4beLQc4VeK7j4Jg8JQ6dHQ4Q9G2BjeijASbwvku",
         "inner_rest_hash": "5Fv3gZhWHTdFBbiuKvPf1PXYvtpCDqrppuZ83AoaqztP",
         "prev_block_hash": "8U9aaVFs5oDHn2cNfPVBtJBe3jfTZLhJhE2AWnYz8WBw",
@@ -878,7 +878,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "GrLZrWNuuxdDsxdduSy9ouXGfx1Hu5gWeRw71iBztBrW",
         "inner_rest_hash": "611qvrf6jZqUDFRayQjHVLehCPJEC3Vvkh4jPFzYgxfq",
         "prev_block_hash": "CosDUzMEFjvFEPAsprD36821Gqh5ay9hUuXYYANmD8xP",
@@ -926,7 +926,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "6C21hiRuACNnPU4q5WDgM1AJTDYxKkYAfLzRfrxhQcgL",
         "inner_rest_hash": "7SXM8unGiwzY29NdBqH83a3jKTYuer3Hpe2jZFFG5oxU",
         "prev_block_hash": "7FbfGi8W8afiEDCm3FX8hdKEJp1xweRzVkXYwNmWYWRy",
@@ -979,7 +979,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "ABvfWf3tEaF9vcHM43uqPkucGWb3ynMuoJffHQidF4M7",
         "inner_rest_hash": "49RKYDm3uhX7SvLan2epaQQ9tydGWgSHhmVYvczwv8B6",
         "prev_block_hash": "GoS88YTweaXQjgeG6N6Km8ZavZoJyB4T9qVwS4UgQe3a",
@@ -1024,7 +1024,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "DGHWpP4P3vkFaRvDdQLnZ61M6ePCnRiCrBet15MHf1iy",
         "inner_rest_hash": "HA5ATMhVGgyemdq5WkoJ8o1XSeTEyd37x1xsFjEY5aQC",
         "prev_block_hash": "A6ZCeowAt3xmhgoN1ti7QZf193CtBjUbmfhAz6u5L9uk",
@@ -1072,7 +1072,7 @@
         32,
         33
       ],
-      "transaction_header": {
+      "header": {
         "inner_lite_hash": "FyM9oxg1xG5LG69QYVhkRsW4xzBYdq2XUYGLxVab1XPK",
         "inner_rest_hash": "6a7x22aDseHD3YTuN9uvmT3duxcfAAvfWSH6zzapu8uv",
         "prev_block_hash": "9JJFsJN5AVrVfgbCqdYEcet34aYLBjPhe9fo3bKgma1S",
