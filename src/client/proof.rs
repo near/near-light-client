@@ -1,15 +1,16 @@
-use std::{collections::HashMap, sync::Arc};
-
 use super::{LightClientState, Proof as FullProof};
 use borsh::{BorshDeserialize, BorshSerialize};
 use either::Either;
 use itertools::Itertools;
+use merkle_util::compute_root_from_path;
 use near_primitives::{
-    merkle::{self, combine_hash, compute_root_from_path, MerklePathItem},
+    merkle::{combine_hash, MerklePathItem},
     views::LightClientBlockLiteView,
 };
 use near_primitives_core::hash::CryptoHash;
 use serde::{Deserialize, Serialize};
+
+pub(crate) mod merkle_util;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct LightweightHeader {
@@ -83,23 +84,23 @@ pub struct BlindedProof {
     outcome_root_proof: Vec<LookupMerklePathItem>,
     block_proof: Vec<LookupMerklePathItem>,
     // The header for the block that this proof was created from
-    transaction_header: LightweightHeader,
+    header: LightweightHeader,
 }
 
-#[derive(Debug, Clone, Default, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, Clone, Default, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(transparent)]
 struct MerkleCache {
     items: Vec<MerklePathItem>,
 }
 
 impl MerkleCache {
     fn cache(&mut self, batch: &mut Vec<BlindedProof>) {
-        // TODO: this is super inneficient, we had a nice one without duplicates but
-        // it unfortunately copies the iterator
         let duplicates = batch
             .iter()
             .cloned()
             .map(|fp| [fp.outcome_proof, fp.outcome_root_proof, fp.block_proof].concat())
             .flatten()
+            // TODO: this is super inefficient, we had a nice one without duplicates but
             // Unfortunately duplicates clones the array, so we can't do this zero
             // copy
             .duplicates()
@@ -121,6 +122,17 @@ impl MerkleCache {
                     .map(|i| item.0 = Either::Left(i as u32));
             });
         self.items = duplicates.into_iter().map(|x| x.0.unwrap_right()).collect();
+    }
+
+    fn collect<'a>(
+        &'a self,
+        path: &'a [LookupMerklePathItem],
+    ) -> impl Iterator<Item = &'a MerklePathItem> {
+        path.iter().map(|x| match &x.0 {
+            // TODO: no panic
+            Either::Left(i) => self.items.get(*i as usize).unwrap(),
+            Either::Right(x) => x,
+        })
     }
 }
 
@@ -145,24 +157,11 @@ impl From<FullProof> for BlindedProof {
                 .into_iter()
                 .map(LookupMerklePathItem::from)
                 .collect(),
-            transaction_header: LightweightHeader::from(x.block_header_lite),
+            header: LightweightHeader::from(x.block_header_lite),
         }
     }
 }
-impl BlindedProof {
-    fn collect_path<'a>(
-        &self,
-        cache: &'a [MerklePathItem],
-        path: &[LookupMerklePathItem],
-    ) -> Vec<MerklePathItem> {
-        Proof::unpack_cached_path(cache, &path)
-            .into_iter()
-            .cloned()
-            .collect()
-    }
-}
 
-// TODO: add refcount here
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LookupMerklePathItem(
@@ -178,22 +177,6 @@ impl From<MerklePathItem> for LookupMerklePathItem {
 impl From<u32> for LookupMerklePathItem {
     fn from(x: u32) -> Self {
         Self(Either::Left(x))
-    }
-}
-
-impl LookupMerklePathItem {
-    fn into<'a>(&'a self, cache: &'a [MerklePathItem]) -> &MerklePathItem {
-        match &self.0 {
-            // TODO: no panic
-            Either::Left(i) => cache.get(*i as usize).unwrap(),
-            Either::Right(x) => x,
-        }
-    }
-}
-
-impl From<Either<u32, MerklePathItem>> for LookupMerklePathItem {
-    fn from(x: Either<u32, MerklePathItem>) -> Self {
-        Self(x)
     }
 }
 
@@ -227,10 +210,10 @@ impl BorshDeserialize for LookupMerklePathItem {
         let kind = u8::deserialize_reader(reader)?;
         if kind == 0 {
             let i = u32::deserialize_reader(reader)?;
-            Ok(LookupMerklePathItem(Either::Left(i)))
+            Ok(LookupMerklePathItem::from(i))
         } else if kind == 1 {
             let path = MerklePathItem::deserialize_reader(reader)?;
-            Ok(LookupMerklePathItem(Either::Right(path)))
+            Ok(LookupMerklePathItem::from(path))
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -250,26 +233,10 @@ pub struct Proof {
     // we can save g as costs by only passing this once
     ancestry: Vec<MerklePathItem>,
     // Cache of common paths, indexed by u8
-    cache: Vec<MerklePathItem>,
+    cache: MerkleCache,
 }
 
 impl Proof {
-    fn unpack_cached_path<'a>(
-        cache: &'a [MerklePathItem],
-        path: &'a [LookupMerklePathItem],
-    ) -> Vec<&'a MerklePathItem> {
-        path.iter().map(|x| x.into(cache)).collect()
-    }
-
-    /// This checks the entire path of all batches and updates any reusable nodes
-    /// with indices
-    // fn cache_nodes(cache: &[MerklePathItem], batch: Vec<FullProof>) -> Vec<BlindedProof> {
-    //     batch
-    //         .into_iter()
-    //         .map(|x| BlindedProof::from(&cache, x))
-    //         .collect()
-    // }
-
     fn common_ancestry(
         proof1: &[MerklePathItem],
         proof2: &[MerklePathItem],
@@ -316,7 +283,7 @@ impl Proof {
             client_block_merkle_root: created_from,
             batch,
             ancestry,
-            cache: cache.items,
+            cache,
         }
     }
 }
@@ -327,30 +294,29 @@ pub fn verify_proof(proof: Proof) -> bool {
     //let cache = Proof::build_flat_cache(&body.batch);
 
     proof.batch.into_iter().all(|blinded| {
-        let block_hash = blinded.transaction_header.hash();
-        log::debug!(
-            "Verifying blinded proof: {:?}",
-            blinded.transaction_header.outcome_root
-        );
+        let block_hash = blinded.header.hash();
+        // TODO: here we probably also want to make sure we know about this root in the light
+        // client
+        log::debug!("Verifying blinded proof: {:?}", blinded.header.outcome_root);
         let block_hash_matches = block_hash == blinded.outcome_proof_block_hash;
 
         let outcome_proof_root = compute_root_from_path(
-            &blinded.collect_path(&proof.cache, &blinded.outcome_proof),
+            proof.cache.collect(&blinded.outcome_proof),
             blinded.outcome_hash,
         );
-        let outcome_root_root = merkle::compute_root_from_path_and_item(
-            &blinded.collect_path(&proof.cache, &blinded.outcome_root_proof),
+        let outcome_root_root = merkle_util::compute_root_from_path_and_item(
+            proof.cache.collect(&blinded.outcome_root_proof),
             outcome_proof_root,
         );
-        let outcome_verified = outcome_root_root == blinded.transaction_header.outcome_root;
+        let outcome_verified = outcome_root_root == blinded.header.outcome_root;
 
-        let mut block_proof: Vec<MerklePathItem> =
-            blinded.collect_path(&proof.cache, &blinded.block_proof);
-        block_proof.extend_from_slice(&proof.ancestry);
+        let block_proof = proof
+            .cache
+            .collect(&blinded.block_proof)
+            .chain(&proof.ancestry);
 
         let block_verified =
-            merkle::verify_hash(proof.client_block_merkle_root, &block_proof, block_hash);
-        // TODO: here we probably also want to make sure we know about this root
+            merkle_util::verify_hash(proof.client_block_merkle_root, block_proof, block_hash);
 
         log::debug!(
             "block_hash_matches: {:?}, outcome_verified: {:?}, block_verified: {:?}",
@@ -420,19 +386,17 @@ mod tests {
         let outcome_proof_leaf = CryptoHash::hash_borsh(proof.outcome_proof.to_hashes());
         let blinded = BlindedProof::from(proof);
 
-        let cache = vec![];
-        let outcome_proof_root = merkle::compute_root_from_path(
-            &blinded.collect_path(&cache, &blinded.outcome_proof),
-            blinded.outcome_hash,
-        );
-        let outcome_root = merkle::compute_root_from_path_and_item(
-            &blinded.collect_path(&cache, &blinded.outcome_root_proof),
+        let cache = MerkleCache::default();
+        let outcome_proof_root =
+            compute_root_from_path(cache.collect(&blinded.outcome_proof), blinded.outcome_hash);
+        let outcome_root = merkle_util::compute_root_from_path_and_item(
+            cache.collect(&blinded.outcome_root_proof),
             outcome_proof_root,
         );
-        assert_eq!(outcome_root, blinded.transaction_header.outcome_root);
+        assert_eq!(outcome_root, blinded.header.outcome_root);
         assert_eq!(
             outcome_proof_root,
-            merkle::compute_root_from_path(&outcome_proof_old.proof, outcome_proof_leaf)
+            compute_root_from_path(outcome_proof_old.proof.iter(), outcome_proof_leaf)
         )
     }
 
