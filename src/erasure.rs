@@ -1,3 +1,4 @@
+use anyhow::Result;
 use near_primitives::merkle::{self, MerklePath};
 use near_primitives_core::hash::CryptoHash;
 use reed_solomon_novelpoly::WrappedShard;
@@ -15,7 +16,7 @@ pub struct Erasure<const VALIDATORS: usize> {
 
 #[allow(unused)]
 impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
-    pub fn encodify(data: &[u8]) -> anyhow::Result<Self> {
+    pub fn encodify(data: &[u8]) -> Result<Self> {
         Ok(Self {
             shards: reed_solomon_novelpoly::encode(data, VALIDATORS)?
                 .into_iter()
@@ -24,7 +25,7 @@ impl<const VALIDATORS: usize> Erasure<VALIDATORS> {
         })
     }
 
-    pub fn recover(&self) -> anyhow::Result<Vec<u8>> {
+    pub fn recover(&self) -> Result<Vec<u8>> {
         Ok(reed_solomon_novelpoly::reconstruct(
             self.shards.clone(),
             VALIDATORS,

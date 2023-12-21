@@ -14,6 +14,7 @@ use crate::client::Message;
 
 type ClientState = flume::Sender<Message>;
 
+// TODO: replace with jsonrpc
 pub(crate) fn init(ctx: Sender<Message>) -> JoinHandle<Result<(), axum::Error>> {
     let proof_channel = flume::bounded(64);
 
@@ -107,7 +108,6 @@ mod proof {
     use super::*;
     use crate::client::{Proof, ProofType};
     use axum::Json;
-    use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
     use near_primitives_core::types::AccountId;
 
     pub type ProofChannel = (flume::Sender<Option<Proof>>, flume::Receiver<Option<Proof>>);
@@ -173,7 +173,7 @@ mod proof {
 
     pub(super) async fn post_proof(
         State((client, (tx, rx))): State<(ClientState, ValidateProofChannel)>,
-        Json(proof): Json<RpcLightClientExecutionProofResponse>,
+        Json(proof): Json<Proof>,
     ) -> impl IntoResponse {
         log::debug!("post_proof: {:?}", proof);
         if let Err(e) = client

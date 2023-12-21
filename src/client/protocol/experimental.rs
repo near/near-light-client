@@ -1,17 +1,18 @@
-use super::{LightClientState, Proof as FullProof};
+use super::BasicProof as FullProof;
+use crate::client::protocol::Protocol;
 use borsh::{BorshDeserialize, BorshSerialize};
 use either::Either;
 use itertools::Itertools;
-use merkle_util::compute_root_from_path;
 use near_primitives::{
+    block_header::BlockHeaderInnerLite,
     merkle::{combine_hash, MerklePathItem},
     views::LightClientBlockLiteView,
 };
 use near_primitives_core::hash::CryptoHash;
 use serde::{Deserialize, Serialize};
 
-pub(crate) mod merkle_util;
-
+/// Requires only needed parts of the LightClientBlockLiteView, and pre hashes
+/// the inner_lite.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct LightweightHeader {
     inner_lite_hash: CryptoHash,
@@ -31,8 +32,9 @@ impl LightweightHeader {
 
 impl From<LightClientBlockLiteView> for LightweightHeader {
     fn from(header: LightClientBlockLiteView) -> Self {
+        let full_inner: BlockHeaderInnerLite = header.inner_lite.clone().into();
         Self {
-            inner_lite_hash: LightClientState::inner_lite_hash(&header.inner_lite),
+            inner_lite_hash: CryptoHash::hash_borsh(&full_inner),
             inner_rest_hash: header.inner_rest_hash,
             prev_block_hash: header.prev_block_hash,
             outcome_root: header.inner_lite.outcome_root,
@@ -40,13 +42,16 @@ impl From<LightClientBlockLiteView> for LightweightHeader {
     }
 }
 
+/// Reduces the need to hash inner_lite, inner_rest and prev_block_hash
+///
+/// Useful for extremely expensive environments.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
-pub struct LightestHeader {
+pub struct BlindHeader {
     block_hash: CryptoHash,
     outcome_root: CryptoHash,
 }
 
-impl From<LightweightHeader> for LightestHeader {
+impl From<LightweightHeader> for BlindHeader {
     fn from(header: LightweightHeader) -> Self {
         Self {
             block_hash: header.hash(),
@@ -58,7 +63,7 @@ impl From<LightweightHeader> for LightestHeader {
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub enum Header {
     Lightweight(LightweightHeader),
-    Lightest(LightestHeader),
+    Lightest(BlindHeader),
 }
 
 impl Header {
@@ -124,13 +129,13 @@ impl MerkleCache {
         self.items = duplicates.into_iter().map(|x| x.0.unwrap_right()).collect();
     }
 
+    // TODO: no panic
     fn collect<'a>(
         &'a self,
         path: &'a [LookupMerklePathItem],
     ) -> impl Iterator<Item = &'a MerklePathItem> {
         path.iter().map(|x| match &x.0 {
-            // TODO: no panic
-            Either::Left(i) => self.items.get(*i as usize).unwrap(),
+            Either::Left(i) => &self.items[*i as usize],
             Either::Right(x) => x,
         })
     }
@@ -289,34 +294,29 @@ impl Proof {
 }
 
 pub fn verify_proof(proof: Proof) -> bool {
-    // We should know about the known_sync_block_merkle_root
+    // TODO: We should know about the known_sync_block_merkle_root
     //assert!(blinded_headers.contains_key(&body.created_from));
-    //let cache = Proof::build_flat_cache(&body.batch);
 
     proof.batch.into_iter().all(|blinded| {
         let block_hash = blinded.header.hash();
-        // TODO: here we probably also want to make sure we know about this root in the light
-        // client
         log::debug!("Verifying blinded proof: {:?}", blinded.header.outcome_root);
         let block_hash_matches = block_hash == blinded.outcome_proof_block_hash;
 
-        let outcome_proof_root = compute_root_from_path(
+        let outcome_verified = Protocol::verify_outcome(
+            &blinded.outcome_hash,
             proof.cache.collect(&blinded.outcome_proof),
-            blinded.outcome_hash,
-        );
-        let outcome_root_root = merkle_util::compute_root_from_path_and_item(
             proof.cache.collect(&blinded.outcome_root_proof),
-            outcome_proof_root,
+            &blinded.header.outcome_root,
         );
-        let outcome_verified = outcome_root_root == blinded.header.outcome_root;
 
-        let block_proof = proof
-            .cache
-            .collect(&blinded.block_proof)
-            .chain(&proof.ancestry);
-
-        let block_verified =
-            merkle_util::verify_hash(proof.client_block_merkle_root, block_proof, block_hash);
+        let block_verified = Protocol::verify_block(
+            &proof.client_block_merkle_root,
+            proof
+                .cache
+                .collect(&blinded.block_proof)
+                .chain(&proof.ancestry),
+            &block_hash,
+        );
 
         log::debug!(
             "block_hash_matches: {:?}, outcome_verified: {:?}, block_verified: {:?}",
@@ -329,17 +329,20 @@ pub fn verify_proof(proof: Proof) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::client::rpc::{NearRpcClient, Network};
+    use crate::client::{
+        protocol::merkle_util::{compute_root_from_path, compute_root_from_path_and_item},
+        rpc::{NearRpcClient, Network},
+    };
     use futures::FutureExt;
     use near_primitives_core::types::AccountId;
     use std::{path::Path, str::FromStr};
 
-    const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
-    const LIGHT_CLIENT_HEAD: &str = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU";
+    pub const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
+    pub const LIGHT_CLIENT_HEAD: &str = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU";
 
-    fn get_constants() -> (CryptoHash, CryptoHash, NearRpcClient) {
+    pub fn get_constants() -> (CryptoHash, CryptoHash, NearRpcClient) {
         let client = NearRpcClient::new(Network::Testnet);
         let block_root = CryptoHash::from_str(BLOCK_MERKLE_ROOT).unwrap();
         let light_client_head = CryptoHash::from_str(LIGHT_CLIENT_HEAD).unwrap();
@@ -389,7 +392,7 @@ mod tests {
         let cache = MerkleCache::default();
         let outcome_proof_root =
             compute_root_from_path(cache.collect(&blinded.outcome_proof), blinded.outcome_hash);
-        let outcome_root = merkle_util::compute_root_from_path_and_item(
+        let outcome_root = compute_root_from_path_and_item(
             cache.collect(&blinded.outcome_root_proof),
             outcome_proof_root,
         );
