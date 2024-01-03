@@ -20,13 +20,10 @@
           rustc = rustVersion;
         };
       in {
-        # stdenv = pkgs.clangStdenv;
+        stdenv = pkgs.fastStdenv;
         devShell = pkgs.mkShell {
           LIBCLANG_PATH = pkgs.libclang.lib + "/lib/";
-          NIXPKGS_ALLOW_INSECURE=1;
-          SEQUENCER_BATCH_INBOX_ADDRESS="0xff00000000000000000000000000000000000000";
-          L2OO_ADDRESS="0x70997970C51812dc3A010C7d01b50e0d17dc79C";
-          # LD_LIBRARY_PATH = "${pkgs.stdenv.cc.cc.lib}/lib/:$LD_LIBRARY_PATH";
+          PROTOC = pkgs.protobuf + "/bin/protoc"; 
 
           nativeBuildInputs = with pkgs; [
             bashInteractive

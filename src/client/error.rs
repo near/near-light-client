@@ -4,7 +4,7 @@ use thiserror::Error;
 pub enum Error {
     #[error("Block already verified")]
     BlockAlreadyVerified,
-    #[error("Block not current or next epoch")]
+    #[error("Block not in current or next epoch")]
     BlockNotCurrentOrNextEpoch,
     #[error("Signature invalid")]
     SignatureInvalid,
@@ -12,10 +12,6 @@ pub enum Error {
     NotEnoughApprovedStake,
     #[error("Block is in the next epoch but no new set")]
     NextBpsInvalid,
-    #[error("Signature len mismatch")]
-    SignatureLenMismatch,
-    #[error("Invalid proof")]
-    InvalidProof,
     #[error("Validator not signed")]
     ValidatorNotSigned,
 }

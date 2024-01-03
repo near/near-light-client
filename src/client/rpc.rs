@@ -1,13 +1,18 @@
+use anyhow::Result;
 use futures::TryFutureExt;
 use log::debug;
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
-use near_primitives::{types::TransactionOrReceiptId, views::LightClientBlockView};
-use near_primitives_core::{hash::CryptoHash, types::AccountId};
+use near_primitives::views::LightClientBlockView;
+use near_primitives_core::hash::CryptoHash;
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
+
+use super::message::GetProof;
+
+// TODO: retry, failover rpcs
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub enum Network {
@@ -75,6 +80,7 @@ impl NearRpcClient {
         let req = methods::next_light_client_block::RpcLightClientNextBlockRequest {
             last_block_hash: *latest_verified,
         };
+        log::debug!("requesting next block: {:?}", req);
         self.client
             .call(&req)
             .or_else(|e| {
@@ -82,20 +88,20 @@ impl NearRpcClient {
                 self.archive.call(&req)
             })
             .await
+            .map_err(|e| {
+                log::error!("Error fetching latest header: {:?}", e);
+                e
+            })
             .ok()?
     }
 
-    pub async fn fetch_light_client_tx_proof(
+    pub async fn fetch_light_client_proof(
         &self,
-        transaction_id: CryptoHash,
-        sender_id: AccountId,
+        req: GetProof,
         latest_verified: CryptoHash,
-    ) -> Option<RpcLightClientExecutionProofResponse> {
+    ) -> Result<RpcLightClientExecutionProofResponse> {
         let req = methods::light_client_proof::RpcLightClientExecutionProofRequest {
-            id: TransactionOrReceiptId::Transaction {
-                transaction_hash: transaction_id,
-                sender_id,
-            },
+            id: req.0,
             light_client_head: latest_verified,
         };
         self.client
@@ -105,28 +111,6 @@ impl NearRpcClient {
                 self.archive.call(&req)
             })
             .await
-            .ok()
-    }
-    pub async fn fetch_light_client_receipt_proof(
-        &self,
-        receipt_id: CryptoHash,
-        receiver_id: AccountId,
-        latest_verified: CryptoHash,
-    ) -> Option<RpcLightClientExecutionProofResponse> {
-        let req = methods::light_client_proof::RpcLightClientExecutionProofRequest {
-            id: TransactionOrReceiptId::Receipt {
-                receipt_id,
-                receiver_id,
-            },
-            light_client_head: latest_verified,
-        };
-        self.client
-            .call(&req)
-            .or_else(|e| {
-                debug!("Error hitting main rpc, falling back to archive: {:?}", e);
-                self.archive.call(&req)
-            })
-            .await
-            .ok()
+            .map_err(|e| anyhow::format_err!("{:?}:{}", req.id, e))
     }
 }

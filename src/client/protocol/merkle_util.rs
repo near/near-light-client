@@ -3,18 +3,16 @@ pub use near_primitives::merkle::combine_hash;
 use near_primitives::merkle::{Direction, MerklePathItem};
 use near_primitives_core::{hash::CryptoHash, types::MerkleHash};
 
-pub trait PathIterator<'a> = Iterator<Item = &'a MerklePathItem>;
-
 pub fn verify_hash<'a>(
     root: MerkleHash,
-    path: impl PathIterator<'a>,
+    path: impl Iterator<Item = &'a MerklePathItem>,
     item_hash: MerkleHash,
 ) -> bool {
     compute_root_from_path(path, item_hash) == root
 }
 
 pub fn compute_root_from_path<'a>(
-    path: impl PathIterator<'a>,
+    path: impl Iterator<Item = &'a MerklePathItem>,
     item_hash: MerkleHash,
 ) -> MerkleHash {
     let mut res = item_hash;
@@ -32,7 +30,7 @@ pub fn compute_root_from_path<'a>(
 }
 
 pub fn compute_root_from_path_and_item<'a, T: BorshSerialize>(
-    path: impl PathIterator<'a>,
+    path: impl Iterator<Item = &'a MerklePathItem>,
     item: T,
 ) -> MerkleHash {
     compute_root_from_path(path, CryptoHash::hash_borsh(item))

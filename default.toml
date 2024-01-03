@@ -1,4 +1,4 @@
-debug         = false
+catchup       = false
 network       = "Testnet"
 starting_head = "4zwZQzjQDpimeLK3tX39nzok6UjDU9edS57EFhkAa4Sk"
-state_path    = "db.sled"
+state_path    = "state.db"

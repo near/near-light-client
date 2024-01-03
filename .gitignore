@@ -4,4 +4,4 @@
 
 local.toml
 
-db.sled/
+state.db
