@@ -1,4 +1,5 @@
-debug         = false
+catchup       = true
+host          = "0.0.0.0:3030"
 network       = "Testnet"
-starting_head = "HaWkNoZujD1t9ftJAuZH1Wy2xnXrht8qzENZSDrka3y5"
-state_path    = "db.sled"
+starting_head = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU"
+state_path    = "state.db"

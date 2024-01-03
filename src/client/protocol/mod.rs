@@ -5,6 +5,7 @@ use merkle_util::*;
 use near_crypto::{PublicKey, Signature};
 use near_primitives::{
     block_header::ApprovalInner,
+    merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, EpochId},
     views::{
         validator_stake_view::ValidatorStakeView, LightClientBlockLiteView, LightClientBlockView,
@@ -31,12 +32,10 @@ impl Protocol {
         epoch_bps: &[ValidatorStake],
         next_block: LightClientBlockView,
     ) -> Result<Synced> {
-        println!("current_head: {:?}", head.inner_lite.height);
-        println!("next_block: {:?}", next_block.inner_lite.height);
-        Self::ensure_not_already_verified(&head, &next_block.inner_lite.height)?;
-        Self::ensure_epoch_is_current_or_next(&head, &next_block.inner_lite.epoch_id)?;
+        Self::ensure_not_already_verified(head, &next_block.inner_lite.height)?;
+        Self::ensure_epoch_is_current_or_next(head, &next_block.inner_lite.epoch_id)?;
         Self::ensure_if_next_epoch_contains_next_bps(
-            &head,
+            head,
             &next_block.inner_lite.epoch_id,
             &next_block.next_bps,
         )?;
@@ -53,12 +52,11 @@ impl Protocol {
             &next_block.approvals_after_next,
             epoch_bps,
             &approval_message,
-        )?;
-        println!("total_stake: {:?}", total);
-        println!("approved_stake: {:?}", approved);
+        );
+
         Self::ensure_stake_is_sufficient(&total, &approved)?;
 
-        log::debug!(
+        log::trace!(
             "prev/current head: {}/{}",
             head.inner_lite.height,
             new_head.inner_lite.height
@@ -73,17 +71,19 @@ impl Protocol {
             .map(|next_bps| next_bps.into_iter().map(Into::into).collect())
             .map(|next_bps| (EpochId(head.inner_lite.next_epoch_id), next_bps)),
         })
-        .inspect(|synced| log::debug!("Synced new head: {:?}", synced))
+        .map(|synced| {
+            log::debug!("Synced new head: {:?}", synced.new_head);
+            synced
+        })
     }
 
-    pub fn inclusion_proof_verify(
-        head: &LightClientBlockLiteView,
-        archive_header: Option<&LightClientBlockLiteView>,
-        proof: Proof,
-    ) -> Result<bool> {
+    pub fn inclusion_proof_verify(proof: Proof) -> Result<bool> {
         match proof {
             Proof::Experimental(proof) => Ok(experimental::verify_proof(proof)),
-            Proof::Basic(proof) => {
+            Proof::Basic {
+                head_block_root,
+                proof,
+            } => {
                 let block_hash = proof.block_header_lite.hash();
                 let block_hash_matches = block_hash == proof.outcome_proof.block_hash;
 
@@ -96,51 +96,26 @@ impl Protocol {
                     &proof.block_header_lite.inner_lite.outcome_root,
                 );
 
-                let mut block_verified = Self::verify_block(
-                    &head.inner_lite.block_merkle_root,
-                    proof.block_proof.iter(),
-                    &block_hash,
-                );
-
-                // TODO: refactor me
-                // Functionality to cover race conditions between previously synced heads since the current head may of changed
-                // since the proof was generated
-                match archive_header {
-                    Some(archive_header) if !block_verified => {
-                        log::debug!(
-                            "Trying to verify against archival header: {:?}",
-                            archive_header.inner_lite.height
-                        );
-                        if verify_hash(
-                            archive_header.inner_lite.block_merkle_root,
-                            proof.block_proof.iter(),
-                            block_hash,
-                        ) {
-                            log::debug!("Verified against archival header");
-                            block_verified = true;
-                        } else {
-                            return Err(Error::InvalidProof.into());
-                        }
-                    }
-                    Some(_) => {}
-                    None => return Err(Error::InvalidProof.into()),
-                }
+                let block_verified =
+                    Self::verify_block(&head_block_root, proof.block_proof.iter(), &block_hash);
 
                 log::debug!(
                     "shard outcome included: {:?}, block included: {:?}",
                     outcome_verified,
                     block_verified
                 );
-                Ok(block_hash_matches && outcome_verified && block_verified)
-                    .inspect(|verified| log::debug!("Verified proof {:?}", verified))
+                Ok(block_hash_matches && outcome_verified && block_verified).map(|verified| {
+                    log::debug!("Verified proof {:?}", verified);
+                    verified
+                })
             }
         }
     }
 
     pub(crate) fn verify_outcome<'a>(
         outcome_hash: &CryptoHash,
-        outcome_proof: impl PathIterator<'a>,
-        outcome_root_proof: impl PathIterator<'a>,
+        outcome_proof: impl Iterator<Item = &'a MerklePathItem>,
+        outcome_root_proof: impl Iterator<Item = &'a MerklePathItem>,
         expected_outcome_root: &CryptoHash,
     ) -> bool {
         let outcome_root = compute_root_from_path(outcome_proof, *outcome_hash);
@@ -153,7 +128,7 @@ impl Protocol {
 
     pub(crate) fn verify_block<'a>(
         block_merkle_root: &CryptoHash,
-        block_proof: impl PathIterator<'a>,
+        block_proof: impl Iterator<Item = &'a MerklePathItem>,
         block_hash: &CryptoHash,
     ) -> bool {
         verify_hash(*block_merkle_root, block_proof, *block_hash)
@@ -170,7 +145,7 @@ impl Protocol {
             temp_vec.extend_from_slice(&(current_block_hash.0));
             temp_vec
         });
-        let new = combine_hash(&block_view.next_block_inner_hash, &current_block_hash);
+        let new = combine_hash(&block_view.next_block_inner_hash, current_block_hash);
         assert_eq!(old, new);
         log::debug!("Current block hash: {}", current_block_hash);
         new
@@ -183,7 +158,7 @@ impl Protocol {
             inner_lite: block_view.inner_lite.clone(),
         };
 
-        let next_block_hash = Self::next_block_hash(&new_head.hash(), &block_view);
+        let next_block_hash = Self::next_block_hash(&new_head.hash(), block_view);
         let endorsement = ApprovalInner::Endorsement(next_block_hash);
 
         let approval_message = {
@@ -215,7 +190,7 @@ impl Protocol {
     ) -> Result<(), Error> {
         if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(epoch_id) {
             log::debug!("Block is not in the current or next epoch");
-            Err(Error::BlockNotCurrentOrNextEpoch.into())
+            Err(Error::BlockNotCurrentOrNextEpoch)
         } else {
             Ok(())
         }
@@ -238,18 +213,8 @@ impl Protocol {
         signatures: &[Option<Signature>],
         epoch_bps: &[ValidatorStake],
         approval_message: &[u8],
-    ) -> Result<StakeInfo, Error> {
-        // Signatures can contain more than the number of bps due to epoch switch
-        if signatures.len() < epoch_bps.len() {
-            log::debug!(
-                "Signature len {} does not match BPS len {}",
-                signatures.len(),
-                epoch_bps.len()
-            );
-            return Err(Error::SignatureLenMismatch);
-        }
-
-        Ok(signatures
+    ) -> StakeInfo {
+        signatures
             .iter()
             .zip(epoch_bps.iter())
             .fold((0, 0), |(total_stake, approved_stake), (sig, vs)| {
@@ -265,7 +230,7 @@ impl Protocol {
 
                 (total_stake, approved_stake)
             })
-            .into())
+            .into()
     }
 
     fn validate_signature(
@@ -297,7 +262,7 @@ impl Protocol {
 
         if approved_stake <= &threshold {
             log::debug!("Not enough stake approved");
-            Err(Error::NotEnoughApprovedStake.into())
+            Err(Error::NotEnoughApprovedStake)
         } else {
             Ok(())
         }
@@ -314,7 +279,7 @@ impl Protocol {
                 Ok(Some(next_bps))
             } else {
                 log::warn!("Next block producers hash is invalid");
-                return Err(Error::NextBpsInvalid);
+                Err(Error::NextBpsInvalid)
             }
         } else {
             Ok(None)
@@ -350,8 +315,6 @@ macro_rules! cvec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::protocol::experimental::tests::get_constants;
-    use core::str::FromStr;
     use itertools::Itertools;
     use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
     use serde_json::{self};
@@ -492,7 +455,7 @@ mod tests {
             Protocol::validate_signature(
                 &b"bogus approval message"[..],
                 &next_block.approvals_after_next[0],
-                &next_bps[0].public_key(),
+                next_bps[0].public_key(),
             ),
             Err(Error::SignatureInvalid)
         );
@@ -517,8 +480,7 @@ mod tests {
             &next_block.approvals_after_next,
             &next_bps.clone(),
             &approval_message.unwrap(),
-        )
-        .unwrap();
+        );
 
         assert_eq!((total, approved), (512915271547861520119028536348929, 0));
     }
@@ -535,8 +497,7 @@ mod tests {
             &next_block.approvals_after_next,
             &next_bps,
             &approval_message.unwrap(),
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             (total, approved),
@@ -604,7 +565,7 @@ mod tests {
         let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
         let p: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
 
-        let outcome_hash = CryptoHash::hash_borsh(&p.outcome_proof.to_hashes());
+        let outcome_hash = CryptoHash::hash_borsh(p.outcome_proof.to_hashes());
 
         let root_matches = Protocol::verify_outcome(
             &outcome_hash,
@@ -613,19 +574,5 @@ mod tests {
             &p.block_header_lite.inner_lite.outcome_root,
         );
         assert!(root_matches);
-    }
-
-    #[test]
-    fn test_root() {
-        pretty_env_logger::try_init().ok();
-        let (_head, root, _) = get_constants();
-
-        let block_hash =
-            CryptoHash::from_str("7xTJs2wYhLcWKsT2Vcf4HPcXVdKKxTAPFTphhEhf3AxW").unwrap();
-        let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
-        let p: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
-
-        let block_verified = Protocol::verify_block(&root, p.block_proof.iter(), &block_hash);
-        assert!(block_verified);
     }
 }

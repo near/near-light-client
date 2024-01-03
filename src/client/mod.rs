@@ -1,31 +1,50 @@
-use crate::{client::protocol::Protocol, config::Config};
+use self::{
+    message::BatchGetProof, protocol::experimental::Proof as ExperimentalProof, store::Store,
+};
+use crate::{
+    client::{
+        protocol::Protocol,
+        store::{head_key, Collection, Entity},
+    },
+    config::Config,
+};
 use anyhow::{anyhow, Result};
-use borsh::{BorshDeserialize, BorshSerialize};
-use flume::{Receiver, Sender};
+use async_trait::async_trait;
+use coerce::actor::{context::ActorContext, message::Handler, Actor};
+use itertools::Itertools;
+use message::{Archive, GetProof, Head, Shutdown, VerifyProof};
 use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse as BasicProof;
-use near_primitives::{types::validator_stake::ValidatorStake, views::LightClientBlockLiteView};
-use near_primitives_core::{hash::CryptoHash, types::AccountId};
+use near_primitives::views::{validator_stake_view::ValidatorStakeView, LightClientBlockLiteView};
+use near_primitives_core::hash::CryptoHash;
 use serde::{Deserialize, Serialize};
-use sled::Tree;
-use std::{path::PathBuf, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use tokio::time;
 
 pub mod error;
+pub mod message;
 pub mod protocol;
 pub mod rpc;
+mod store;
 
-pub const STATE_PATH: &str = "state.json";
 pub type Header = LightClientBlockLiteView;
+pub type BlockMerkleRoot = CryptoHash;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Proof {
-    Basic(BasicProof),
+    Basic {
+        head_block_root: BlockMerkleRoot,
+        proof: Box<BasicProof>,
+    },
     Experimental(protocol::experimental::Proof),
 }
 
-impl From<BasicProof> for Proof {
-    fn from(proof: BasicProof) -> Self {
-        Self::Basic(proof)
+impl From<(CryptoHash, BasicProof)> for Proof {
+    fn from((head_block_root, proof): (CryptoHash, BasicProof)) -> Self {
+        Self::Basic {
+            head_block_root,
+            proof: Box::new(proof),
+        }
     }
 }
 
@@ -35,302 +54,303 @@ impl From<protocol::experimental::Proof> for Proof {
     }
 }
 
-pub enum ProofType {
-    Transaction {
-        transaction_id: CryptoHash,
-        sender_id: AccountId,
-    },
-    Receipt {
-        receipt_id: CryptoHash,
-        receiver_id: AccountId,
-    },
+impl Proof {
+    pub fn block_merkle_root(&self) -> &CryptoHash {
+        match self {
+            Self::Basic {
+                head_block_root, ..
+            } => head_block_root,
+            Self::Experimental(proof) => &proof.head_block_root,
+        }
+    }
 }
 
-pub enum Message {
-    Shutdown(Option<PathBuf>),
-    Head {
-        tx: Sender<Header>,
-    },
-    Archive {
-        tx: Sender<Option<Header>>,
-        epoch: CryptoHash,
-    },
-    GetProof {
-        tx: Sender<Option<Proof>>,
-        proof: ProofType,
-    },
-    ValidateProof {
-        tx: Sender<bool>,
-        proof: Box<Proof>,
-    },
-}
-
-#[derive(Debug, Clone)]
 pub struct LightClient {
+    config: Config,
     client: rpc::NearRpcClient,
-    store: sled::Db,
-    head: LightClientBlockLiteView,
-    block_producers: Tree,
-    archival_headers: Tree,
+    store: Arc<Store<store::sled::Store>>,
 }
 
-pub enum TreeKind {
-    BlockProducers,
-    ArchivalHeaders,
+#[async_trait]
+impl Actor for LightClient {
+    async fn started(&mut self, _ctx: &mut ActorContext) {
+        self.bootstrap_store().await.unwrap();
+        // TODO: anonymous ctx.spawn(id, actor)
+        let catchup = self.config.catchup;
+        let store = self.store.clone();
+        let client = self.client.clone();
+        tokio::task::spawn(async move { Self::start_syncing(catchup, store, client).await });
+    }
+}
+
+#[async_trait]
+impl Handler<Head> for LightClient {
+    async fn handle(
+        &mut self,
+        _message: Head,
+        _ctx: &mut ActorContext,
+    ) -> <Head as coerce::actor::message::Message>::Result {
+        self.store.head().await.ok()
+    }
+}
+
+#[async_trait]
+impl Handler<Archive> for LightClient {
+    async fn handle(
+        &mut self,
+        message: Archive,
+        _ctx: &mut ActorContext,
+    ) -> <Archive as coerce::actor::message::Message>::Result {
+        self.header(message.epoch).await
+    }
+}
+
+#[async_trait]
+impl Handler<Shutdown> for LightClient {
+    async fn handle(
+        &mut self,
+        _message: Shutdown,
+        ctx: &mut ActorContext,
+    ) -> <Shutdown as coerce::actor::message::Message>::Result {
+        self.store.shutdown().await;
+        ctx.stop(None);
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Handler<GetProof> for LightClient {
+    async fn handle(
+        &mut self,
+        message: GetProof,
+        _ctx: &mut ActorContext,
+    ) -> <GetProof as coerce::actor::message::Message>::Result {
+        self.get_proofs(BatchGetProof(vec![message]))
+            .await
+            .ok()
+            .and_then(|proofs| proofs.into_iter().next())
+    }
+}
+
+#[async_trait]
+impl Handler<VerifyProof> for LightClient {
+    async fn handle(
+        &mut self,
+        message: VerifyProof,
+        _ctx: &mut ActorContext,
+    ) -> <VerifyProof as coerce::actor::message::Message>::Result {
+        self.verify_proof(message.proof).await.map_err(|e| {
+            log::error!("{:?}", e);
+            e
+        })
+    }
+}
+
+#[async_trait]
+impl Handler<BatchGetProof> for LightClient {
+    async fn handle(
+        &mut self,
+        message: BatchGetProof,
+        _ctx: &mut ActorContext,
+    ) -> <BatchGetProof as coerce::actor::message::Message>::Result {
+        self.experimental_get_proofs(message).await.ok()
+    }
 }
 
 impl LightClient {
-    pub fn start(mut self, mut is_fast: bool, rx: Receiver<Message>) {
-        tokio::spawn(async move {
-            // TODO: make configurable, currently set to ~block time
-            let default_duration = time::Duration::from_secs(2);
+    pub fn new(config: &Config) -> Result<Self> {
+        let client = rpc::NearRpcClient::new(config.network.clone());
 
-            let mut duration = if is_fast {
+        // TODO: store selector in config
+        let store = store::sled::init(config)?;
+
+        Ok(Self {
+            client,
+            config: config.clone(),
+            store: Store(store.into()).into(),
+        })
+    }
+
+    async fn bootstrap_store(&mut self) -> Result<()> {
+        let head = self.store.head().await;
+        if head.is_err() {
+            let sync_from =
+                CryptoHash::from_str(&self.config.starting_head).map_err(anyhow::Error::msg)?;
+
+            let starting_head = self
+                .client
+                .fetch_latest_header(&sync_from)
+                .await
+                .ok_or_else(|| anyhow::anyhow!("We need a starting header"))?;
+
+            log::info!("starting head: {:?}", starting_head.inner_lite.height);
+
+            let mut inserts: Vec<(CryptoHash, Entity)> = vec![];
+
+            inserts.push((
+                starting_head.inner_lite.epoch_id,
+                starting_head
+                    .next_bps
+                    .unwrap()
+                    .into_iter()
+                    .map(ValidatorStakeView::into_validator_stake)
+                    .collect_vec()
+                    .into(),
+            ));
+
+            let boostrapped_head = LightClientBlockLiteView {
+                prev_block_hash: starting_head.prev_block_hash,
+                inner_rest_hash: starting_head.inner_rest_hash,
+                inner_lite: starting_head.inner_lite,
+            };
+
+            inserts.push((head_key(), boostrapped_head.into()));
+
+            self.store.insert(&inserts).await?;
+        }
+
+        Ok(())
+    }
+
+    // TODO: dynamically determine if should catchup
+    pub async fn start_syncing(
+        mut catching_up: bool,
+        store: Arc<Store<store::sled::Store>>,
+        client: rpc::NearRpcClient,
+    ) {
+        // TODO: make configurable, currently set to ~block time
+        let default_duration = time::Duration::from_secs(2);
+
+        loop {
+            let duration = if catching_up {
                 time::Duration::from_millis(100)
             } else {
                 default_duration
             };
-
-            loop {
-                tokio::select! {
-                    Ok(msg) = rx.recv_async() => match msg {
-                        Message::Shutdown(_path) => {
-                            if let Err(e) = self.shutdown().await {
-                                log::error!("Failed to shutdown: {:?}", e);
-                            }
-                        }
-                        Message::Head { tx } => {
-                            if let Err(e) = tx.send_async(self.head().clone()).await {
-                                log::error!("Failed to send head: {:?}", e);
-                            }
+            tokio::select! {
+                r = Self::sync(store.clone(), client.clone()) => {
+                    tokio::time::sleep(duration).await;
+                    match r {
+                        Err(e) => {
+                            log::error!("Error syncing: {:?}", e);
+                            catching_up = false;
                         },
-                        Message::Archive { tx, epoch } => {
-                            if let Err(e) = tx.send_async(self.header(epoch)).await {
-                                log::error!("Failed to send archival header: {:?}", e);
-                    }
-                        },
-                        Message::GetProof {
-                            tx,
-                            proof: ProofType::Transaction { transaction_id, sender_id }
-                        } => {
-                            if let Err(e) = tx.send_async(self.get_transaction_proof(transaction_id, sender_id).await.map(Into::into)).await {
-                                log::error!("Failed to send proof: {:?}", e);
-                    }
-                        },
-                        Message::GetProof {
-                            tx, proof: ProofType::Receipt { receipt_id, receiver_id }
-                        } => {
-                            if let Err(e) = tx.send_async(self.get_receipt_proof(receipt_id, receiver_id).await.map(Into::into)).await {
-                                log::error!("Failed to send proof: {:?}", e);
-                            }
+                        Ok(false) if catching_up => {
+                            log::debug!("Slowing down sync interval to {:?}", default_duration);
+                            catching_up = false;
                         }
-                        Message::ValidateProof { tx, proof } => {
-                            if let Err(e) = tx.send_async(self.verify_proof(*proof).await).await {
-                                log::error!("Failed to send validation result: {:?}", e);
-                            }
-                        }
-                    },
-                    r = self.sync() => {
-                        tokio::time::sleep(duration).await;
-                        match r {
-                            Err(e) => log::error!("Error syncing: {:?}", e),
-                            Ok(false) if is_fast => {
-                                log::debug!("Slowing down sync interval to {:?}", default_duration);
-                                duration = default_duration;
-                                is_fast = false;
-                            }
-                            _ => (),
-                        }
+                        _ => (),
                     }
                 }
             }
-        });
-    }
-
-    // TODO: move to store module
-    pub fn get<K: AsRef<[u8]>, T: BorshDeserialize>(&self, key: K, kind: TreeKind) -> Option<T> {
-        let tree = match kind {
-            TreeKind::BlockProducers => &self.block_producers,
-            TreeKind::ArchivalHeaders => &self.archival_headers,
-        };
-        tree.get(key)
-            .ok()
-            .unwrap_or_default()
-            .and_then(|v| BorshDeserialize::try_from_slice(&v).ok())
-    }
-
-    pub fn insert<K: AsRef<[u8]>, T: BorshSerialize>(
-        &mut self,
-        key: K,
-        value: &T,
-        kind: TreeKind,
-    ) -> Result<()> {
-        let tree = match kind {
-            TreeKind::BlockProducers => &self.block_producers,
-            TreeKind::ArchivalHeaders => &self.archival_headers,
-        };
-        Ok(tree
-            .insert(key, BorshSerialize::try_to_vec(value)?)
-            .map(|_| ())?)
-    }
-
-    pub async fn init(config: &Config) -> Result<Self> {
-        let sled = sled::open(config.state_path.clone().unwrap_or(STATE_PATH.into()))
-            .expect("Failed to open store");
-        let client = rpc::NearRpcClient::new(config.network.clone());
-
-        let head = sled.get("head")?;
-        let block_producers = sled.open_tree("bps")?;
-        let archival_headers = sled.open_tree("archive")?;
-
-        if let Some(head) = head {
-            let head: LightClientBlockLiteView =
-                borsh::BorshDeserialize::try_from_slice(&head).expect("Failed to deserialize head");
-            Ok(Self {
-                client,
-                store: sled,
-                head,
-                block_producers,
-                archival_headers,
-            })
-        } else {
-            let starting_head = client
-                .fetch_latest_header(&CryptoHash::from_str(&config.starting_head).unwrap())
-                .await
-                .expect("We need a starting header");
-
-            log::info!("Got starting head: {:?}", starting_head.inner_lite.height);
-
-            block_producers.insert(
-                starting_head.inner_lite.epoch_id,
-                borsh::to_vec(&starting_head.next_bps.clone().unwrap())?,
-            )?;
-
-            Ok(Self {
-                client,
-                store: sled,
-                head: LightClientBlockLiteView {
-                    prev_block_hash: starting_head.prev_block_hash,
-                    inner_rest_hash: starting_head.inner_rest_hash,
-                    inner_lite: starting_head.inner_lite,
-                },
-                block_producers,
-                archival_headers,
-            })
         }
     }
+    pub async fn sync(
+        store: Arc<Store<store::sled::Store>>,
+        client: rpc::NearRpcClient,
+    ) -> Result<bool> {
+        let head = store.head().await?;
+        log::debug!("Current head: {:#?}", head.inner_lite);
 
-    pub async fn sync(&mut self) -> Result<bool> {
-        log::trace!("Current head: {:#?}", self.head.inner_lite);
-
-        let next_header = self
-            .client
+        let next_header = client
             .fetch_latest_header(
-                &CryptoHash::from_str(&format!("{}", self.head.hash()))
+                &CryptoHash::from_str(&format!("{}", head.hash()))
                     .map_err(|e| anyhow!("Failed to parse hash: {:?}", e))?,
             )
             .await
             .ok_or_else(|| anyhow!("Failed to fetch latest header"))?;
         log::trace!("Got new header: {:#?}", next_header.inner_lite);
 
-        let bps = self
-            .get::<_, Vec<ValidatorStake>>(&self.head.inner_lite.epoch_id, TreeKind::BlockProducers)
-            .ok_or_else(|| anyhow!("Failed to get block producers"))?;
+        let bps = store
+            .get(&Collection::BlockProducers, &head.inner_lite.epoch_id)
+            .await
+            .and_then(|x| x.bps())?;
 
-        let synced = Protocol::sync(&self.head, &bps, next_header)?;
+        let synced = Protocol::sync(&head, &bps, next_header)?;
+
+        let mut inserts: Vec<(CryptoHash, Entity)> = vec![];
 
         if let Some((epoch, next_bps)) = synced.next_bps {
             log::debug!("storing next bps[{:?}]", epoch);
-            self.insert(epoch, &next_bps, TreeKind::BlockProducers)?;
+            inserts.push((epoch.0, next_bps.into()));
         }
 
-        self.insert(
-            self.head.inner_lite.epoch_id,
-            &synced.new_head,
-            TreeKind::ArchivalHeaders,
-        )?;
-        self.head = synced.new_head;
-        self.store.insert("head", self.head.try_to_vec()?)?;
+        inserts.push((head.inner_lite.epoch_id, synced.new_head.clone().into()));
+        inserts.push((head_key(), synced.new_head.into()));
 
+        store.insert(&inserts).await?;
         Ok(true)
     }
 
-    fn head(&self) -> &Header {
-        &self.head
-    }
-
-    fn header(&self, epoch: CryptoHash) -> Option<Header> {
-        self.get::<_, LightClientBlockLiteView>(&epoch, TreeKind::ArchivalHeaders)
-    }
-
-    // TODO: memoize these in a real cache
-    pub async fn get_transaction_proof(
-        &mut self,
-        transaction_id: CryptoHash,
-        sender_id: AccountId,
-    ) -> Option<BasicProof> {
-        // TODO: we need much more logic here for headers in different epochs & the head
-        // since there are race conditions when we come to validate the proof header, we'd need to short-cache the proof validation
-        let last_verified_hash = self.head.hash();
-
-        self.client
-            .fetch_light_client_tx_proof(transaction_id, sender_id, last_verified_hash)
+    async fn header(&self, epoch: CryptoHash) -> Option<Header> {
+        self.store
+            .get(&Collection::Headers, &epoch)
             .await
-            .map(|proof| {
-                if let Err(e) = self.insert(
-                    proof.outcome_proof.block_hash,
-                    &self.head.clone(),
-                    TreeKind::ArchivalHeaders,
-                ) {
-                    log::warn!("Failed to insert archival header: {:?}", e)
-                }
-                proof
-            })
+            .and_then(|e| e.header())
+            .ok()
     }
 
-    pub async fn get_receipt_proof(
-        &mut self,
-        receipt_id: CryptoHash,
-        receiver_id: AccountId,
-    ) -> Option<BasicProof> {
-        let last_verified_hash = self.head.hash();
-        self.client
-            .fetch_light_client_receipt_proof(receipt_id, receiver_id, last_verified_hash)
-            .await
-            .map(|proof| {
-                if let Err(e) = self.insert(
-                    proof.outcome_proof.block_hash,
-                    &self.head.clone(),
-                    TreeKind::ArchivalHeaders,
-                ) {
-                    log::warn!("Failed to insert archival header: {:?}", e)
-                }
-                proof
-            })
-    }
-
-    pub async fn verify_proof(&mut self, p: Proof) -> bool {
-        // TODO: this is a hack
-        let archive = match &p {
-            Proof::Basic(p) => self.get::<_, LightClientBlockLiteView>(
-                p.outcome_proof.block_hash,
-                TreeKind::ArchivalHeaders,
-            ),
-            Proof::Experimental(_) => None,
-        };
-        Protocol::inclusion_proof_verify(&self.head, archive.as_ref(), p)
-            .inspect_err(|e| log::warn!("Failed to verify proof: {:?}", e))
-            .unwrap_or_default()
-    }
-
-    pub async fn shutdown(&self) -> Result<()> {
-        log::info!("Shutting down light client");
-        if let Err(e) = self.store.insert("head", self.head.try_to_vec()?) {
-            log::warn!("Failed to insert head: {:?}", e)
+    pub async fn batch_fetch_proofs(
+        &self,
+        last_verified_hash: &CryptoHash,
+        p: BatchGetProof,
+        collect_errors: bool,
+    ) -> Result<(Vec<BasicProof>, Vec<anyhow::Error>)> {
+        let mut futs = vec![];
+        for req in p.0 {
+            let proof = self
+                .client
+                .fetch_light_client_proof(req, *last_verified_hash);
+            futs.push(proof);
         }
-        log::info!("Head: {:?}", self.head.inner_lite.height);
-        self.store.flush_async().await?;
-        log::info!("Flushed store");
-        todo!("Deliberate panic here, need to make this graceful");
+        let unpin_futs: Vec<_> = futs.into_iter().map(Box::pin).collect();
+
+        let proofs: Vec<Result<BasicProof>> = futures::future::join_all(unpin_futs).await;
+        let (proofs, errors): (Vec<_>, Vec<_>) = if collect_errors {
+            proofs.into_iter().partition_result()
+        } else {
+            (proofs.into_iter().collect::<Result<Vec<_>>>()?, vec![])
+        };
+        Ok((proofs, errors))
+    }
+
+    pub async fn verify_proof(&self, p: Proof) -> Result<bool> {
+        anyhow::ensure!(
+            self.store
+                .contains(&Collection::UsedRoots, p.block_merkle_root())
+                .await?,
+            "Root {:?} is not known",
+            p.block_merkle_root()
+        );
+        Protocol::inclusion_proof_verify(p)
+    }
+
+    // TODO: this and below are the same except from two lines
+    pub async fn get_proofs(&self, p: BatchGetProof) -> Result<Vec<Proof>> {
+        let head = self.store.head().await?;
+        let proofs = self.batch_fetch_proofs(&head.hash(), p, false).await?.0;
+
+        self.store
+            .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
+            .await?;
+        Ok(proofs
+            .into_iter()
+            .map(|x| (head.inner_lite.block_merkle_root, x))
+            .map(Into::into)
+            .collect())
+    }
+
+    pub async fn experimental_get_proofs(
+        &self,
+        p: BatchGetProof,
+    ) -> Result<(ExperimentalProof, Vec<anyhow::Error>)> {
+        let head = self.store.head().await?;
+        let (proofs, errors) = self.batch_fetch_proofs(&head.hash(), p, true).await?;
+        let p = protocol::experimental::Proof::new(head.inner_lite.block_merkle_root, proofs);
+        self.store
+            .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
+            .await?;
+
+        Ok((p, errors))
     }
 }

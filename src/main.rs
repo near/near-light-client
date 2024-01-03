@@ -1,13 +1,9 @@
-#![feature(slice_partition_dedup)]
-#![feature(trait_alias)]
-
-use crate::client::LightClient;
-use client::Message;
+use crate::client::{message::Shutdown, LightClient};
+use coerce::actor::{system::ActorSystem, IntoActor};
 
 mod client;
 mod config;
 mod controller;
-mod erasure;
 
 pub struct ShutdownMsg;
 
@@ -16,16 +12,19 @@ async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
 
     let config = config::Config::new()?;
+    let system = ActorSystem::builder()
+        .system_name("near-light-client")
+        .build();
 
-    let (ctx, crx) = flume::bounded::<Message>(256);
-
-    LightClient::init(&config).await?.start(true, crx);
-    let webapi = controller::init(ctx.clone());
+    let client_actor = LightClient::new(&config)?
+        .into_actor(Some("light-client"), &system)
+        .await?;
+    let webapi = controller::init(&config, client_actor.clone());
 
     if tokio::signal::ctrl_c().await.is_ok() {
-        log::info!("Shutting down due to ctrlc");
-        let _ = ctx.send(Message::Shutdown(config.state_path));
+        log::info!("Shutting down..");
         webapi.abort();
+        client_actor.notify(Shutdown)?;
     }
 
     Ok(())

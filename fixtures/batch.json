@@ -1,5 +1,5 @@
 {
-  "client_block_merkle_root": "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L",
+  "head_block_root": "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L",
   "batch": [
     {
       "outcome_proof_block_hash": "3r5dS7bXYG2w35qLXx78nHjPPs8psdYZUdStUYkvHr8N",

@@ -34,7 +34,7 @@ impl From<LightClientBlockLiteView> for LightweightHeader {
     fn from(header: LightClientBlockLiteView) -> Self {
         let full_inner: BlockHeaderInnerLite = header.inner_lite.clone().into();
         Self {
-            inner_lite_hash: CryptoHash::hash_borsh(&full_inner),
+            inner_lite_hash: CryptoHash::hash_borsh(full_inner),
             inner_rest_hash: header.inner_rest_hash,
             prev_block_hash: header.prev_block_hash,
             outcome_root: header.inner_lite.outcome_root,
@@ -67,12 +67,14 @@ pub enum Header {
 }
 
 impl Header {
+    #[allow(unused)]
     fn hash(&self) -> CryptoHash {
         match self {
             Header::Lightweight(header) => header.hash(),
             Header::Lightest(header) => header.block_hash,
         }
     }
+    #[allow(unused)]
     fn outcome_root(&self) -> CryptoHash {
         match self {
             Header::Lightweight(header) => header.outcome_root,
@@ -99,12 +101,11 @@ struct MerkleCache {
 }
 
 impl MerkleCache {
-    fn cache(&mut self, batch: &mut Vec<BlindedProof>) {
+    fn cache(&mut self, batch: &mut [BlindedProof]) {
         let duplicates = batch
             .iter()
             .cloned()
-            .map(|fp| [fp.outcome_proof, fp.outcome_root_proof, fp.block_proof].concat())
-            .flatten()
+            .flat_map(|fp| [fp.outcome_proof, fp.outcome_root_proof, fp.block_proof].concat())
             // TODO: this is super inefficient, we had a nice one without duplicates but
             // Unfortunately duplicates clones the array, so we can't do this zero
             // copy
@@ -113,23 +114,20 @@ impl MerkleCache {
 
         batch
             .iter_mut()
-            .map(|fp| {
+            .flat_map(|fp| {
                 fp.outcome_proof
                     .iter_mut()
                     .chain(fp.outcome_root_proof.iter_mut())
                     .chain(fp.block_proof.iter_mut())
             })
-            .flatten()
             .for_each(|item| {
-                duplicates
-                    .iter()
-                    .position(|dup| dup == item)
-                    .map(|i| item.0 = Either::Left(i as u32));
+                if let Some(i) = duplicates.iter().position(|dup| dup == item) {
+                    item.0 = Either::Left(i as u32);
+                }
             });
         self.items = duplicates.into_iter().map(|x| x.0.unwrap_right()).collect();
     }
 
-    // TODO: no panic
     fn collect<'a>(
         &'a self,
         path: &'a [LookupMerklePathItem],
@@ -232,7 +230,7 @@ impl BorshDeserialize for LookupMerklePathItem {
 pub struct Proof {
     /// The block_merkle_root of the header used to create the proof batch
     /// It should be at least the header for the latest transactions proven + 1
-    client_block_merkle_root: CryptoHash,
+    pub head_block_root: CryptoHash,
     batch: Vec<BlindedProof>,
     // common ancestry if there is a common ancestry line in the batch
     // we can save g as costs by only passing this once
@@ -264,7 +262,7 @@ impl Proof {
         common_ancestry
     }
 
-    fn new(created_from: CryptoHash, mut batch: Vec<FullProof>) -> Self {
+    pub fn new(head_block_root: CryptoHash, mut batch: Vec<FullProof>) -> Self {
         // First decide common ancestry among all batches
         let ancestry = batch
             .iter()
@@ -285,7 +283,7 @@ impl Proof {
         cache.cache(&mut batch);
 
         Proof {
-            client_block_merkle_root: created_from,
+            head_block_root,
             batch,
             ancestry,
             cache,
@@ -310,7 +308,7 @@ pub fn verify_proof(proof: Proof) -> bool {
         );
 
         let block_verified = Protocol::verify_block(
-            &proof.client_block_merkle_root,
+            &proof.head_block_root,
             proof
                 .cache
                 .collect(&blinded.block_proof)
@@ -336,6 +334,7 @@ pub(crate) mod tests {
         rpc::{NearRpcClient, Network},
     };
     use futures::FutureExt;
+    use near_primitives::types::TransactionOrReceiptId;
     use near_primitives_core::types::AccountId;
     use std::{path::Path, str::FromStr};
 
@@ -463,7 +462,7 @@ pub(crate) mod tests {
 
     // Util for rewriting the original bridge proofs
     fn _rewrite_bridge_proofs(rainbow_prover_fixture_path: &str) {
-        let rewritten = vec![
+        let rewritten = [
             (
                 "22f00dd154366d758cd3e4fe81c1caed8e0db6227fe4b2b52a8e5a468aa0a723",
                 "proof2.json",
@@ -555,8 +554,14 @@ pub(crate) mod tests {
             .map(Result::unwrap)
             .map(|receipt_id| {
                 client
-                    .fetch_light_client_receipt_proof(receipt_id.clone(), receiver_id.clone(), head)
-                    .map(Option::unwrap)
+                    .fetch_light_client_proof(
+                        crate::client::message::GetProof(TransactionOrReceiptId::Receipt {
+                            receipt_id,
+                            receiver_id: receiver_id.clone(),
+                        }),
+                        head,
+                    )
+                    .map(Result::unwrap)
             })
             .collect_vec();
 
