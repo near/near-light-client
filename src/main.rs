@@ -29,3 +29,21 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+pub mod prelude {
+    pub use anyhow::Result;
+    pub use near_primitives::borsh::{self, BorshDeserialize, BorshSerialize};
+    pub use near_primitives_core::hash::CryptoHash;
+    pub use serde::{Deserialize, Serialize};
+    pub use anyhow::anyhow;
+    pub use log::{debug, error, info, trace, warn};
+    pub use itertools::Itertools;
+    pub use async_trait::async_trait;
+
+    pub type Header = near_primitives::views::LightClientBlockLiteView;
+    pub type BasicProof =
+        near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
+    pub type ExperimentalProof = super::client::protocol::experimental::Proof;
+
+
+}

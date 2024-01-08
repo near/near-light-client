@@ -1,6 +1,6 @@
 use crate::client::rpc::Network;
+use crate::prelude::*;
 use config::{Config as ConfigTrait, ConfigError, Environment, File};
-use serde::Deserialize;
 use std::{env, path::PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]

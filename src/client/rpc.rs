@@ -1,16 +1,12 @@
-use anyhow::Result;
+use super::message::GetProof;
+use crate::prelude::*;
 use futures::TryFutureExt;
-use log::debug;
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
 use near_primitives::views::LightClientBlockView;
-use near_primitives_core::hash::CryptoHash;
-use serde::Deserialize;
 use std::fmt::{Display, Formatter};
-
-use super::message::GetProof;
 
 // TODO: retry, failover rpcs
 

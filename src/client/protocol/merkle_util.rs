@@ -1,7 +1,7 @@
-use borsh::BorshSerialize;
+use crate::prelude::*;
 pub use near_primitives::merkle::combine_hash;
-use near_primitives::merkle::{Direction, MerklePathItem};
-use near_primitives_core::{hash::CryptoHash, types::MerkleHash};
+pub use near_primitives::merkle::{Direction, MerklePathItem};
+use near_primitives_core::types::MerkleHash;
 
 pub fn verify_hash<'a>(
     root: MerkleHash,

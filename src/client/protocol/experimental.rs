@@ -1,8 +1,6 @@
-use super::BasicProof as FullProof;
 use crate::client::protocol::Protocol;
-use borsh::{BorshDeserialize, BorshSerialize};
+use crate::prelude::*;
 use either::Either;
-use itertools::Itertools;
 use near_primitives::{
     block_header::BlockHeaderInnerLite,
     merkle::{combine_hash, MerklePathItem},
@@ -14,14 +12,14 @@ use serde::{Deserialize, Serialize};
 /// Requires only needed parts of the LightClientBlockLiteView, and pre hashes
 /// the inner_lite.
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub struct LightweightHeader {
+pub struct LiteHeader {
     inner_lite_hash: CryptoHash,
     inner_rest_hash: CryptoHash,
     prev_block_hash: CryptoHash,
     outcome_root: CryptoHash,
 }
 
-impl LightweightHeader {
+impl LiteHeader {
     fn hash(&self) -> CryptoHash {
         combine_hash(
             &combine_hash(&self.inner_lite_hash, &self.inner_rest_hash),
@@ -30,7 +28,7 @@ impl LightweightHeader {
     }
 }
 
-impl From<LightClientBlockLiteView> for LightweightHeader {
+impl From<LightClientBlockLiteView> for LiteHeader {
     fn from(header: LightClientBlockLiteView) -> Self {
         let full_inner: BlockHeaderInnerLite = header.inner_lite.clone().into();
         Self {
@@ -51,8 +49,8 @@ pub struct BlindHeader {
     outcome_root: CryptoHash,
 }
 
-impl From<LightweightHeader> for BlindHeader {
-    fn from(header: LightweightHeader) -> Self {
+impl From<LiteHeader> for BlindHeader {
+    fn from(header: LiteHeader) -> Self {
         Self {
             block_hash: header.hash(),
             outcome_root: header.outcome_root,
@@ -62,23 +60,23 @@ impl From<LightweightHeader> for BlindHeader {
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub enum Header {
-    Lightweight(LightweightHeader),
-    Lightest(BlindHeader),
+    Lite(LiteHeader),
+    Blind(BlindHeader),
 }
 
 impl Header {
     #[allow(unused)]
     fn hash(&self) -> CryptoHash {
         match self {
-            Header::Lightweight(header) => header.hash(),
-            Header::Lightest(header) => header.block_hash,
+            Header::Lite(header) => header.hash(),
+            Header::Blind(header) => header.block_hash,
         }
     }
     #[allow(unused)]
     fn outcome_root(&self) -> CryptoHash {
         match self {
-            Header::Lightweight(header) => header.outcome_root,
-            Header::Lightest(header) => header.outcome_root,
+            Header::Lite(header) => header.outcome_root,
+            Header::Blind(header) => header.outcome_root,
         }
     }
 }
@@ -91,7 +89,7 @@ pub struct BlindedProof {
     outcome_root_proof: Vec<LookupMerklePathItem>,
     block_proof: Vec<LookupMerklePathItem>,
     // The header for the block that this proof was created from
-    header: LightweightHeader,
+    header: LiteHeader,
 }
 
 #[derive(Debug, Clone, Default, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
@@ -139,8 +137,8 @@ impl MerkleCache {
     }
 }
 
-impl From<FullProof> for BlindedProof {
-    fn from(x: FullProof) -> Self {
+impl From<BasicProof> for BlindedProof {
+    fn from(x: BasicProof) -> Self {
         Self {
             outcome_proof_block_hash: x.outcome_proof.block_hash,
             outcome_hash: CryptoHash::hash_borsh(x.outcome_proof.to_hashes()),
@@ -160,7 +158,7 @@ impl From<FullProof> for BlindedProof {
                 .into_iter()
                 .map(LookupMerklePathItem::from)
                 .collect(),
-            header: LightweightHeader::from(x.block_header_lite),
+            header: LiteHeader::from(x.block_header_lite),
         }
     }
 }
@@ -262,7 +260,7 @@ impl Proof {
         common_ancestry
     }
 
-    pub fn new(head_block_root: CryptoHash, mut batch: Vec<FullProof>) -> Self {
+    pub fn new(head_block_root: CryptoHash, mut batch: Vec<BasicProof>) -> Self {
         // First decide common ancestry among all batches
         let ancestry = batch
             .iter()
@@ -364,7 +362,7 @@ pub(crate) mod tests {
         std::fs::write(path, json).unwrap();
     }
 
-    fn proof_fixture(is_new: bool) -> FullProof {
+    fn proof_fixture(is_new: bool) -> BasicProof {
         let path = if is_new {
             "fixtures/new.json"
         } else {
@@ -377,7 +375,7 @@ pub(crate) mod tests {
     fn test_blinded_same_block_hash() {
         let proof = proof_fixture(true);
         let full_block_hash = proof.block_header_lite.hash();
-        let blinded = LightweightHeader::from(proof.block_header_lite);
+        let blinded = LiteHeader::from(proof.block_header_lite);
         assert_eq!(full_block_hash, blinded.hash());
     }
 
@@ -438,7 +436,7 @@ pub(crate) mod tests {
     fn test_create_e2e() {
         let root = CryptoHash::from_str(BLOCK_MERKLE_ROOT).unwrap();
 
-        fn get_proof_len(proof: &FullProof) -> usize {
+        fn get_proof_len(proof: &BasicProof) -> usize {
             let mut bytes = vec![];
             BorshSerialize::serialize(&proof.block_proof, &mut bytes).unwrap();
             BorshSerialize::serialize(&proof.outcome_proof, &mut bytes).unwrap();
@@ -497,7 +495,7 @@ pub(crate) mod tests {
         })
         .all(|(block_root, path)| {
             let proof = if path.contains("old") {
-                let proof: FullProof = read_proof(&path);
+                let proof: BasicProof = read_proof(&path);
                 Proof::new(block_root, vec![proof])
             } else {
                 read_proof(&path)

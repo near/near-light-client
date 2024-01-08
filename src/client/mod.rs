@@ -1,6 +1,5 @@
-use self::{
-    message::BatchGetProof, protocol::experimental::Proof as ExperimentalProof, store::Store,
-};
+use self::{message::BatchGetProof, store::Store};
+use crate::prelude::*;
 use crate::{
     client::{
         protocol::Protocol,
@@ -8,15 +7,9 @@ use crate::{
     },
     config::Config,
 };
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use coerce::actor::{context::ActorContext, message::Handler, Actor};
-use itertools::Itertools;
 use message::{Archive, GetProof, Head, Shutdown, VerifyProof};
-use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse as BasicProof;
-use near_primitives::views::{validator_stake_view::ValidatorStakeView, LightClientBlockLiteView};
-use near_primitives_core::hash::CryptoHash;
-use serde::{Deserialize, Serialize};
+use near_primitives::views::validator_stake_view::ValidatorStakeView;
 use std::{str::FromStr, sync::Arc};
 use tokio::time;
 
@@ -26,14 +19,11 @@ pub mod protocol;
 pub mod rpc;
 mod store;
 
-pub type Header = LightClientBlockLiteView;
-pub type BlockMerkleRoot = CryptoHash;
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Proof {
     Basic {
-        head_block_root: BlockMerkleRoot,
+        head_block_root: CryptoHash,
         proof: Box<BasicProof>,
     },
     Experimental(protocol::experimental::Proof),
@@ -74,7 +64,9 @@ pub struct LightClient {
 #[async_trait]
 impl Actor for LightClient {
     async fn started(&mut self, _ctx: &mut ActorContext) {
-        self.bootstrap_store().await.unwrap();
+        self.bootstrap_store()
+            .await
+            .expect("Failed to bootstrap store");
         // TODO: anonymous ctx.spawn(id, actor)
         let catchup = self.config.catchup;
         let store = self.store.clone();
@@ -191,14 +183,14 @@ impl LightClient {
                 starting_head.inner_lite.epoch_id,
                 starting_head
                     .next_bps
-                    .unwrap()
+                    .ok_or_else(|| anyhow::anyhow!("next_bps should be Some for boostrapped head"))?
                     .into_iter()
                     .map(ValidatorStakeView::into_validator_stake)
                     .collect_vec()
                     .into(),
             ));
 
-            let boostrapped_head = LightClientBlockLiteView {
+            let boostrapped_head = Header {
                 prev_block_hash: starting_head.prev_block_hash,
                 inner_rest_hash: starting_head.inner_rest_hash,
                 inner_lite: starting_head.inner_lite,

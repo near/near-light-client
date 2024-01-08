@@ -1,26 +1,21 @@
-use super::{error::Error, BasicProof, Proof};
-use anyhow::Result;
-use borsh::BorshSerialize;
+use super::{error::Error, Proof};
+use crate::prelude::*;
 use merkle_util::*;
 use near_crypto::{PublicKey, Signature};
 use near_primitives::{
     block_header::ApprovalInner,
     merkle::MerklePathItem,
-    types::{validator_stake::ValidatorStake, EpochId},
-    views::{
-        validator_stake_view::ValidatorStakeView, LightClientBlockLiteView, LightClientBlockView,
-    },
+    types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
+    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
-use near_primitives_core::{hash::CryptoHash, types::BlockHeight};
 
 pub mod merkle_util;
-
 // Lightweight batch protocol with lookups for proofs
 pub mod experimental;
 
 #[derive(Debug)]
 pub struct Synced {
-    pub new_head: LightClientBlockLiteView,
+    pub new_head: Header,
     pub next_bps: Option<(EpochId, Vec<ValidatorStake>)>,
 }
 
@@ -28,7 +23,7 @@ pub struct Protocol;
 
 impl Protocol {
     pub fn sync(
-        head: &LightClientBlockLiteView,
+        head: &Header,
         epoch_bps: &[ValidatorStake],
         next_block: LightClientBlockView,
     ) -> Result<Synced> {
@@ -40,7 +35,7 @@ impl Protocol {
             &next_block.next_bps,
         )?;
 
-        let new_head = LightClientBlockLiteView {
+        let new_head = Header {
             prev_block_hash: next_block.prev_block_hash,
             inner_rest_hash: next_block.inner_rest_hash,
             inner_lite: next_block.inner_lite.clone(),
@@ -152,7 +147,7 @@ impl Protocol {
     }
 
     fn reconstruct_approval_message(block_view: &LightClientBlockView) -> Option<Vec<u8>> {
-        let new_head = LightClientBlockLiteView {
+        let new_head = Header {
             prev_block_hash: block_view.prev_block_hash,
             inner_rest_hash: block_view.inner_rest_hash,
             inner_lite: block_view.inner_lite.clone(),
@@ -174,7 +169,7 @@ impl Protocol {
     }
 
     pub fn ensure_not_already_verified(
-        head: &LightClientBlockLiteView,
+        head: &Header,
         block_height: &BlockHeight,
     ) -> Result<(), Error> {
         if block_height <= &head.inner_lite.height {
@@ -185,7 +180,7 @@ impl Protocol {
     }
 
     pub fn ensure_epoch_is_current_or_next(
-        head: &LightClientBlockLiteView,
+        head: &Header,
         epoch_id: &CryptoHash,
     ) -> Result<(), Error> {
         if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(epoch_id) {
@@ -197,7 +192,7 @@ impl Protocol {
     }
 
     pub fn ensure_if_next_epoch_contains_next_bps(
-        head: &LightClientBlockLiteView,
+        head: &Header,
         epoch_id: &CryptoHash,
         next_bps: &Option<Vec<ValidatorStakeView>>,
     ) -> Result<(), Error> {
@@ -335,19 +330,15 @@ mod tests {
         fixture("current_epoch.json")
     }
 
-    fn view_to_lite_view(h: LightClientBlockView) -> LightClientBlockLiteView {
-        LightClientBlockLiteView {
+    fn view_to_lite_view(h: LightClientBlockView) -> Header {
+        Header {
             prev_block_hash: h.prev_block_hash,
             inner_rest_hash: h.inner_rest_hash,
             inner_lite: h.inner_lite,
         }
     }
 
-    fn test_state() -> (
-        LightClientBlockLiteView,
-        Vec<ValidatorStake>,
-        LightClientBlockView,
-    ) {
+    fn test_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
         let first = get_first_epoch();
         let next = get_next_epoch();
 
