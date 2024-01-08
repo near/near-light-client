@@ -4,28 +4,26 @@ name    = "near-light-client"
 version = "0.2.0"
 
 [dependencies]
-anyhow                 = "1.0"
-async-trait            = "0.1"
-config                 = "0.13"
-either                 = { version = "1.9", features = [ "serde" ] }
-itertools              = "0.12"
-log                    = "0.4"
-pretty_env_logger      = "0.5"
-sled                   = "0.34" # TODO: maybe heavy
-thiserror              = "1.0"
+anyhow            = "1.0"
+async-trait       = "0.1"
+config            = "0.13"
+either            = { version = "1.9", features = [ "serde" ] }
+itertools         = "0.12"
+log               = "0.4"
+pretty_env_logger = "0.5"
+sled              = "0.34" # TODO: maybe heavy
+thiserror         = "1.0"
 
 # Async
-coerce = { version  = "0.8", features = ["full"] }
 axum    = "*"
-flume   = "0.10"
-futures = "0.3.28"
-reqwest = { version = "0.11.17", features = [ "gzip", "brotli", "deflate", "json" ] }
+coerce  = { version = "0.8", features = [ "full" ] }
+futures = "0.3"
+reqwest = { version = "0.11", features = [ "gzip", "brotli", "deflate", "json" ] }
 tokio   = { version = "1", features = [ "full" ] }
 
 # Codec
-borsh      = { version = "0.10", features = [ "rc" ] }
-protobuf = "=3.2.0"
 hex        = { version = "0.4", features = [ "serde" ] }
+protobuf   = "=3.2.0"
 serde      = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 
