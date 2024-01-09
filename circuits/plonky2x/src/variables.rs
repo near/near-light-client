@@ -45,7 +45,6 @@ pub struct Header {
     pub prev_block_hash: CryptoHash,
     pub inner_rest_hash: Bytes32Variable,
     pub inner_lite: HeaderInner,
-    pub hash: CryptoHash,
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
@@ -66,7 +65,7 @@ pub struct HeaderInner {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnerLiteHash<const N: usize>;
 impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for InnerLiteHash<N> {
-    fn hint(&self, input_stream: &mut ValueStream<L, D>, _output_stream: &mut ValueStream<L, D>) {
+    fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let mut bytes: Vec<u8> = vec![];
         let height = input_stream.read_value::<U64Variable>();
         let epoch_id = input_stream.read_value::<CryptoHash>();
@@ -87,6 +86,10 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Inner
         bytes.extend_from_slice(&timestamp_nanosec.to_le_bytes());
         bytes.extend_from_slice(&next_bp_hash.0);
         bytes.extend_from_slice(&block_merkle_root.0);
+
+
+        let hash = sha256(&bytes);
+        output_stream.write_value::<Bytes32Variable>(hash.into());
     }
 }
 

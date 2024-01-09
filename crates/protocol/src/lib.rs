@@ -183,6 +183,7 @@ impl Protocol {
             BorshSerialize::serialize(&endorsement, &mut temp_vec).ok()?;
             //temp_vec.extend_from_slice(&(endorsement.try_to_vec().ok()?[..]));
             temp_vec.extend_from_slice(&((block_view.inner_lite.height + 2).to_le_bytes()[..]));
+            println!("temp_vec len: {:?}", temp_vec.len());
             temp_vec
         };
 
@@ -334,11 +335,11 @@ macro_rules! cvec {
 mod tests {
     use super::*;
     use itertools::Itertools;
-    use near_jsonrpc_client::methods::light_client_proof::RpcLightClientExecutionProofResponse;
+    use near_jsonrpc_primitives::types::light_client::RpcLightClientExecutionProofResponse;
     use serde_json::{self};
 
     fn fixture(file: &str) -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open(format!("fixtures/{}", file)).unwrap()).unwrap()
+        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap()).unwrap()
     }
 
     fn get_next_epoch() -> LightClientBlockView {
@@ -588,5 +589,11 @@ mod tests {
             &p.block_header_lite.inner_lite.outcome_root,
         );
         assert!(root_matches);
+    }
+
+    #[test]
+    fn statically_test_lens() {
+        println!("approval: {:?}", std::mem::size_of::<ApprovalInner>());
+        
     }
 }

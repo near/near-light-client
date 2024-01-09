@@ -321,7 +321,7 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         let mut input_stream = VariableStream::new();
         input_stream.write(&next_block_hash);
         input_stream.write(&next_block.inner_lite.height);
-        let output_stream = self.hint(input_stream, BuildEndorsement::<40>); // TODO: real sizes
+        let output_stream = self.hint(input_stream, BuildEndorsement::<41>);
         let approval_message = output_stream.read::<Bytes32Variable>(self);
 
         approval_message
@@ -360,8 +360,115 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
 mod tests {
     use super::*;
 
+    fn fixture(file: &str) -> near_light_client_protocol::prelude::Header {
+        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
+            .unwrap()
+    }
+
+    fn default_env() {
+        let mut builder = DefaultBuilder::new();
+        //        let mut pw = PartialWitness::new();
+        let x1 = 10;
+        let x = builder.init::<U64Variable>();
+        //
+        // x.set(&mut pw, x1);
+        //
+        // assert_eq!(x.get(&pw), x1);
+        //
+        // println!("x1: {:?}", x1.to_le_bytes());
+        // println!("x: {:?}", x.encode(&mut builder));
+        //
+        // let circuit = builder.build();
+        // let proof = circuit.data.prove(pw).unwrap();
+        // circuit.data.verify(proof).unwrap();
+    }
+
+    fn header_from_header<L: PlonkParameters<D>, const D: usize>(
+        builder: &mut CircuitBuilder<L, D>,
+        pw: &mut PartialWitness<GoldilocksField>,
+        header: near_light_client_protocol::prelude::Header,
+    ) -> Header {
+        let inner = header.inner_lite;
+
+        let height: U64Variable = builder.constant(inner.height);
+        let epoch_id: CryptoHash = builder.constant(inner.epoch_id.0.into());
+        let next_epoch_id: CryptoHash = builder.constant(inner.next_epoch_id.0.into());
+        let prev_state_root: CryptoHash = builder.constant(inner.prev_state_root.0.into());
+        let outcome_root: CryptoHash = builder.constant(inner.outcome_root.0.into());
+        let timestamp: U64Variable = builder.constant(inner.timestamp);
+        let timestamp_nanosec: U64Variable = builder.constant(inner.timestamp_nanosec);
+        let next_bp_hash: CryptoHash = builder.constant(inner.next_bp_hash.0.into());
+        let block_merkle_root: CryptoHash = builder.constant(inner.block_merkle_root.0.into());
+        // height.set(pw, inner.height);
+        // epoch_id.set(pw, inner.epoch_id.0.into());
+        // next_epoch_id.set(pw, inner.next_epoch_id.0.into());
+        // prev_state_root.set(pw, inner.prev_state_root.0.into());
+        // outcome_root.set(pw, inner.outcome_root.0.into());
+        // timestamp.set(pw, inner.timestamp);
+        // timestamp_nanosec.set(pw, inner.timestamp_nanosec);
+        // next_bp_hash.set(pw, inner.next_bp_hash.0.into());
+        // block_merkle_root.set(pw, inner.block_merkle_root.0.into());
+
+        let inner_lite = HeaderInner {
+            height,
+            epoch_id,
+            next_epoch_id,
+            prev_state_root,
+            outcome_root,
+            timestamp,
+            timestamp_nanosec,
+            next_bp_hash,
+            block_merkle_root,
+        };
+        let inner_rest_hash: CryptoHash = builder.constant(header.inner_rest_hash.0.into());
+        inner_rest_hash.set(pw, header.inner_rest_hash.0.into());
+        let prev_block_hash: CryptoHash = builder.constant(header.prev_block_hash.0.into());
+        prev_block_hash.set(pw, header.prev_block_hash.0.into());
+        Header {
+            inner_lite,
+            inner_rest_hash,
+            prev_block_hash,
+        }
+    }
+
     #[test]
-    fn test_name() {
-        
+    fn statically_test_lens() {
+        //println!("approval: {:?}", )
+    }
+
+    #[test]
+    fn test_hashing_equality() {
+        let mut builder = DefaultBuilder::new();
+        let mut pw = PartialWitness::<GoldilocksField>::new();
+
+        let header = fixture("1.json");
+        let header_hash = header.hash();
+        let expected_header_hash: CryptoHash = builder.constant(header_hash.0.into());
+        let expected_inner_lite_hash: CryptoHash = builder.constant(
+            near_light_client_protocol::prelude::CryptoHash::hash_borsh(header.inner_lite.clone())
+                .0
+                .into(),
+        );
+
+        let converted_header = header_from_header(&mut builder, &mut pw, header);
+        let inner_lite_hash = builder.inner_lite_hash(&converted_header.inner_lite);
+        builder.assert_is_equal(inner_lite_hash, expected_inner_lite_hash);
+        let header_hash = builder.header_hash(
+            &converted_header.inner_lite,
+            &converted_header.inner_rest_hash,
+            &converted_header.prev_block_hash,
+        );
+        //builder.assert_is_equal(header_hash, expected_header_hash);
+
+        let circuit = builder.build();
+        let pw = PartialWitness::new();
+        let proof = circuit.data.prove(pw).unwrap();
+        circuit.data.verify(proof).unwrap();
+
+        // let circuit = builder.build();
+        // let input = circuit.input();
+        // let (proof, output) = circuit.prove(&input);
+        // circuit.verify(&proof, &input, &output);
+        // circuit.test_default_serializers();
     }
 }

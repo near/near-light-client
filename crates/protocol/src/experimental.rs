@@ -342,13 +342,14 @@ pub(crate) mod tests {
 
     fn read_proof<T: for<'a> Deserialize<'a>>(path: &str) -> T {
         println!("Reading {}", path);
+        let path = format!("../../{path}");
         serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap()
     }
 
     fn write_proof(path: &str, proof: &Proof) {
         std::fs::write(
             path.to_string().replace(".json", ".hex"),
-            hex::encode(proof.try_to_vec().unwrap()),
+            hex::encode(borsh::to_vec(&proof).unwrap()),
         )
         .unwrap();
         let json = serde_json::to_string_pretty(&proof).unwrap();
@@ -444,7 +445,7 @@ pub(crate) mod tests {
         println!("{:#?}", proof_size);
         let batch = vec![proof1, proof2];
         let proof = Proof::new(root, batch);
-        let new_proof_size = proof.try_to_vec().unwrap().len();
+        let new_proof_size = borsh::to_vec(&proof).unwrap().len();
         assert!(new_proof_size < proof_size / 2);
         println!("{:#?}", new_proof_size);
 
@@ -506,7 +507,7 @@ pub(crate) mod tests {
     #[test]
     fn batch_proofs() {
         let _ = pretty_env_logger::try_init();
-        let (head, common_root, client) = get_constants();
+        let (head, common_root) = get_constants();
         let receiver_id = AccountId::from_str("da.topgunbakugo.testnet").unwrap();
 
         let path = "fixtures/batch.json";
