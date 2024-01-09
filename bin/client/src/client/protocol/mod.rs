@@ -1,4 +1,4 @@
-use super::{error::Error, Proof};
+use super::error::Error;
 use crate::prelude::*;
 use merkle_util::*;
 use near_crypto::{PublicKey, Signature};
@@ -17,6 +17,42 @@ pub mod experimental;
 pub struct Synced {
     pub new_head: Header,
     pub next_bps: Option<(EpochId, Vec<ValidatorStake>)>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Proof {
+    Basic {
+        head_block_root: CryptoHash,
+        proof: Box<BasicProof>,
+    },
+    Experimental(experimental::Proof),
+}
+
+impl From<(CryptoHash, BasicProof)> for Proof {
+    fn from((head_block_root, proof): (CryptoHash, BasicProof)) -> Self {
+        Self::Basic {
+            head_block_root,
+            proof: Box::new(proof),
+        }
+    }
+}
+
+impl From<experimental::Proof> for Proof {
+    fn from(proof: experimental::Proof) -> Self {
+        Self::Experimental(proof)
+    }
+}
+
+impl Proof {
+    pub fn block_merkle_root(&self) -> &CryptoHash {
+        match self {
+            Self::Basic {
+                head_block_root, ..
+            } => head_block_root,
+            Self::Experimental(proof) => &proof.head_block_root,
+        }
+    }
 }
 
 pub struct Protocol;

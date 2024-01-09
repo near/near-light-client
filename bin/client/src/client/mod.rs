@@ -2,6 +2,7 @@ use self::{message::BatchGetProof, store::Store};
 use crate::prelude::*;
 use crate::{
     client::{
+        protocol::Proof,
         protocol::Protocol,
         store::{head_key, Collection, Entity},
     },
@@ -18,42 +19,6 @@ pub mod message;
 pub mod protocol;
 pub mod rpc;
 mod store;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Proof {
-    Basic {
-        head_block_root: CryptoHash,
-        proof: Box<BasicProof>,
-    },
-    Experimental(protocol::experimental::Proof),
-}
-
-impl From<(CryptoHash, BasicProof)> for Proof {
-    fn from((head_block_root, proof): (CryptoHash, BasicProof)) -> Self {
-        Self::Basic {
-            head_block_root,
-            proof: Box::new(proof),
-        }
-    }
-}
-
-impl From<protocol::experimental::Proof> for Proof {
-    fn from(proof: protocol::experimental::Proof) -> Self {
-        Self::Experimental(proof)
-    }
-}
-
-impl Proof {
-    pub fn block_merkle_root(&self) -> &CryptoHash {
-        match self {
-            Self::Basic {
-                head_block_root, ..
-            } => head_block_root,
-            Self::Experimental(proof) => &proof.head_block_root,
-        }
-    }
-}
 
 pub struct LightClient {
     config: Config,
