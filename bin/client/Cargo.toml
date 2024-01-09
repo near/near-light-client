@@ -27,6 +27,7 @@ serde_json.workspace           = true
 sled.workspace                 = true
 thiserror.workspace            = true
 tokio.workspace                = true
+protocol = { path = "../../crates/protocol", package = "near-light-client-protocol" }
 
 [dev-dependencies]
 rand = "*"

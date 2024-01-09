@@ -1,22 +1,17 @@
 use self::{message::BatchGetProof, store::Store};
 use crate::prelude::*;
 use crate::{
-    client::{
-        protocol::Proof,
-        protocol::Protocol,
-        store::{head_key, Collection, Entity},
-    },
+    client::store::{head_key, Collection, Entity},
     config::Config,
 };
 use coerce::actor::{context::ActorContext, message::Handler, Actor};
 use message::{Archive, GetProof, Head, Shutdown, VerifyProof};
 use near_primitives::views::validator_stake_view::ValidatorStakeView;
+use protocol::{Proof, Protocol};
 use std::{str::FromStr, sync::Arc};
 use tokio::time;
 
-pub mod error;
 pub mod message;
-pub mod protocol;
 pub mod rpc;
 mod store;
 

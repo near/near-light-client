@@ -1,7 +1,7 @@
-use super::{protocol::experimental::Proof as ExperimentalProof, Header, Proof};
 use crate::prelude::*;
 use coerce::actor::message::Message;
 use near_primitives::types::TransactionOrReceiptId;
+use protocol::{experimental::Proof as ExperimentalProof, Proof};
 
 pub struct Shutdown;
 
@@ -43,14 +43,4 @@ pub struct VerifyProof {
 
 impl Message for VerifyProof {
     type Result = Result<bool>;
-}
-
-// TODO: batch messages
-//
-//
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_name() {}
 }

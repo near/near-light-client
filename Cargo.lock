@@ -1982,6 +1982,7 @@ dependencies = [
  "log",
  "near-crypto",
  "near-jsonrpc-client",
+ "near-light-client-protocol",
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
@@ -1993,6 +1994,26 @@ dependencies = [
  "sled",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "near-light-client-protocol"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "either",
+ "hex",
+ "itertools 0.12.0",
+ "log",
+ "near-crypto",
+ "near-jsonrpc-primitives",
+ "near-primitives",
+ "near-primitives-core",
+ "pretty_env_logger",
+ "rand 0.7.3",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
