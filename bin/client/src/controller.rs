@@ -81,7 +81,7 @@ mod proof {
     use super::*;
     use crate::client::{
         message::{BatchGetProof, GetProof, VerifyProof},
-        Proof,
+        protocol::Proof,
     };
     use axum::Json;
 
