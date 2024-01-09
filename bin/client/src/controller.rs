@@ -79,11 +79,9 @@ mod header {
 
 mod proof {
     use super::*;
-    use crate::client::{
-        message::{BatchGetProof, GetProof, VerifyProof},
-        protocol::Proof,
-    };
+    use crate::client::message::{BatchGetProof, GetProof, VerifyProof};
     use axum::Json;
+    use protocol::Proof;
 
     pub(super) async fn post_get_proof(
         State(client): State<LocalActorRef<LightClient>>,
@@ -113,7 +111,7 @@ mod proof {
 
     #[derive(Debug, Serialize)]
     pub struct BatchProofWithErrors {
-        proofs: crate::client::protocol::experimental::Proof,
+        proofs: protocol::experimental::Proof,
         errors: Vec<String>,
     }
 

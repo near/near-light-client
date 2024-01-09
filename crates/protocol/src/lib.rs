@@ -1,5 +1,5 @@
-use super::error::Error;
 use crate::prelude::*;
+use error::Error;
 use merkle_util::*;
 use near_crypto::{PublicKey, Signature};
 use near_primitives::{
@@ -9,7 +9,9 @@ use near_primitives::{
     views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 
+pub mod error;
 pub mod merkle_util;
+pub mod prelude;
 // Lightweight batch protocol with lookups for proofs
 pub mod experimental;
 
@@ -303,7 +305,7 @@ impl Protocol {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StakeInfo {
+pub struct StakeInfo {
     total: u128,
     approved: u128,
 }

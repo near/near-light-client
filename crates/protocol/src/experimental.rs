@@ -1,6 +1,6 @@
-use crate::client::protocol::Protocol;
-use crate::prelude::*;
+use crate::{prelude::*, Protocol};
 use either::Either;
+use itertools::Itertools;
 use near_primitives::{
     block_header::BlockHeaderInnerLite,
     merkle::{combine_hash, MerklePathItem},
@@ -327,23 +327,17 @@ pub fn verify_proof(proof: Proof) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::client::{
-        protocol::merkle_util::{compute_root_from_path, compute_root_from_path_and_item},
-        rpc::{NearRpcClient, Network},
-    };
-    use futures::FutureExt;
-    use near_primitives::types::TransactionOrReceiptId;
+    use crate::merkle_util::{compute_root_from_path, compute_root_from_path_and_item};
     use near_primitives_core::types::AccountId;
-    use std::{path::Path, str::FromStr};
+    use std::str::FromStr;
 
     pub const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
     pub const LIGHT_CLIENT_HEAD: &str = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU";
 
-    pub fn get_constants() -> (CryptoHash, CryptoHash, NearRpcClient) {
-        let client = NearRpcClient::new(Network::Testnet);
+    pub fn get_constants() -> (CryptoHash, CryptoHash) {
         let block_root = CryptoHash::from_str(BLOCK_MERKLE_ROOT).unwrap();
         let light_client_head = CryptoHash::from_str(LIGHT_CLIENT_HEAD).unwrap();
-        (light_client_head, block_root, client)
+        (light_client_head, block_root)
     }
 
     fn read_proof<T: for<'a> Deserialize<'a>>(path: &str) -> T {
@@ -509,67 +503,15 @@ pub(crate) mod tests {
 
     // This test populates a reasonably large batch of proofs for verifying the
     // slimmer onchain light client
-    #[tokio::test]
-    async fn batch_proofs() {
+    #[test]
+    fn batch_proofs() {
         let _ = pretty_env_logger::try_init();
         let (head, common_root, client) = get_constants();
         let receiver_id = AccountId::from_str("da.topgunbakugo.testnet").unwrap();
 
         let path = "fixtures/batch.json";
 
-        let p = if Path::new(path).exists() {
-            read_proof(path)
-        } else {
-            // Get a bunch of receipts to test
-            let receipts = vec![
-                "2QUBErafE2zU3dV9HBYCUyqpcP74erBm7k1j7tXduRa2",
-                "BixAd4vjnYKzxNtSLGD5w7jk7vD3ZedesHizutwWvDDK",
-                "6W5LXCxFwg21XMxVLqZMzq24g531kFu2hxBr2N5yN67f",
-                "Dwwv7KeNP8H9Pr6suUkAqDwex8mp1vK3KykE7asjaYHk",
-                "D75Ej8NJ8kYE62CnaVX3p8SCHiNLBQCA7pLpudeRbnM6",
-                "ERDrqb65Sa8mKr4XrXCw1uBae3a8mrByLPcEN92zewfG",
-                "FuNDcy6u3sS5B8j1szxZGTh6BCjsDTWfUbfFWsFwUyPA",
-                "2EVVdVsw1nM3hRFV4LTkBYYRWPCR77TVmYxZwipLHmYn",
-                "9Exwa5z51bTGWPzMMkRcVdGZ6a8rpu4CuWfAvrMuqXHn",
-                "J65AycXr48nCqrRc8eErLp5AiQb6xUAWF1sgG2fRbn9t",
-                "5axBiFL3GkvizK4KobsJjzychu7UckoKACnX23RefhoS",
-                "GEG9nhhwbgMHw61fTrFYvtpeRidAB6NKmNFJmkMc8AuE",
-                "BFdir5jFtyWQWoLPbxWEGtRedbjgt4nSPcDrdNfWLXcd",
-                "48tF8CXXLLaUgEbvayqhvX1UZLzLrqSjVJBq5bWXFX7T",
-                "3L2vmfXBZzMGoXx8bLDaSRxtp2dV65SZr3rYKM46wqe1",
-                "4g3zeZEt4UrXqFh8Vxcdz8UCGaBBdT7K7MELrnNbu3PH",
-                "2r652tQLr8kpGtY6KQNLhVC4j6S5jwC1Q6VcuLxQM1UQ",
-                "DNAQsgrEqJ6kYhqaXbhCNP5W4K891jLUhBtY3nsU17dv",
-                "EJCfAgRT3x8hPmTvLJgqexuwRqhgujUKbby4b81ypXX4",
-                "3FFWvbPQXkpQNvGwJ6NkkJtya6XXo8x88Wmhoyv6ABQU",
-                "BVgDgRBcJJoXeFYarSTrsH9NYe6kgfC14Des88hSJp1j",
-                "EcnvcNZDgwyiBP7NpV2afkDDvPCmw5rwKT2MLiG1jUFD",
-                "Hbjut1evHnfm1Ee9eeGJe5ydorVE3W66RacprLuciFpY",
-                "AKknXHv6Y7iyD44yyTjdTLmgC8AM9CmUHtLXvgEh4qdS",
-            ]
-            .into_iter()
-            .map(CryptoHash::from_str)
-            .map(Result::unwrap)
-            .map(|receipt_id| {
-                client
-                    .fetch_light_client_proof(
-                        crate::client::message::GetProof(TransactionOrReceiptId::Receipt {
-                            receipt_id,
-                            receiver_id: receiver_id.clone(),
-                        }),
-                        head,
-                    )
-                    .map(Result::unwrap)
-            })
-            .collect_vec();
-
-            let proofs: Vec<_> = futures::future::join_all(receipts).await;
-
-            let p = Proof::new(common_root, proofs);
-            write_proof(path, &p);
-            p
-        };
-
+        let p = read_proof(path);
         assert!(verify_proof(p));
     }
 }
