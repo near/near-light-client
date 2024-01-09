@@ -1,9 +1,12 @@
-[package]
+[workspace.package]
 edition = "2021"
-name    = "near-light-client"
+license = "MIT"
 version = "0.2.0"
 
-[dependencies]
+[workspace]
+members = [ "bin/*" ]
+
+[workspace.dependencies]
 anyhow            = "1.0"
 async-trait       = "0.1"
 config            = "0.13"
@@ -33,6 +36,3 @@ near-crypto          = "0.17"
 near-jsonrpc-client  = "0.6"
 near-primitives      = "0.17"
 near-primitives-core = "0.17"
-
-[dev-dependencies]
-rand = "*"

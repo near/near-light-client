@@ -129,23 +129,6 @@ impl Protocol {
         verify_hash(*block_merkle_root, block_proof, *block_hash)
     }
 
-    fn next_block_hash(
-        current_block_hash: &CryptoHash,
-        block_view: &LightClientBlockView,
-    ) -> CryptoHash {
-        // TODO: remove the check once tests pass
-        let old = CryptoHash::hash_bytes(&{
-            let mut temp_vec = Vec::new();
-            temp_vec.extend_from_slice(&(block_view.next_block_inner_hash.0));
-            temp_vec.extend_from_slice(&(current_block_hash.0));
-            temp_vec
-        });
-        let new = combine_hash(&block_view.next_block_inner_hash, current_block_hash);
-        assert_eq!(old, new);
-        log::debug!("Current block hash: {}", current_block_hash);
-        new
-    }
-
     fn reconstruct_approval_message(block_view: &LightClientBlockView) -> Option<Vec<u8>> {
         let new_head = Header {
             prev_block_hash: block_view.prev_block_hash,
@@ -153,7 +136,8 @@ impl Protocol {
             inner_lite: block_view.inner_lite.clone(),
         };
 
-        let next_block_hash = Self::next_block_hash(&new_head.hash(), block_view);
+        let next_block_hash = combine_hash(&block_view.next_block_inner_hash, &new_head.hash());
+
         let endorsement = ApprovalInner::Endorsement(next_block_hash);
 
         let approval_message = {
