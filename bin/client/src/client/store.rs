@@ -94,22 +94,6 @@ pub trait DatabaseOperations {
     fn shutdown(&mut self);
 }
 
-fn encode<T: BorshSerialize>(x: &T) -> Result<Vec<u8>> {
-    x.try_to_vec().map_err(|e| {
-        let e = anyhow::format_err!("Failed to encode: {:?}", e);
-        log::error!("{:?}", e);
-        e
-    })
-}
-
-fn decode<T: BorshDeserialize>(x: &[u8]) -> Result<T> {
-    T::try_from_slice(x).map_err(|e| {
-        let e = anyhow::format_err!("Failed to decode: {:?}", e);
-        log::error!("{:?}", e);
-        e
-    })
-}
-
 pub fn head_key() -> CryptoHash {
     CryptoHash::default()
 }
@@ -117,6 +101,7 @@ pub fn head_key() -> CryptoHash {
 pub mod sled {
     use super::*;
     use ::sled::{open, transaction::TransactionError, Batch, Db, Transactional, Tree};
+    use borsh::ser::BorshSerialize as BorshSerializeExt;
     use itertools::Itertools;
 
     pub struct Store {
@@ -162,7 +147,7 @@ pub mod sled {
                 Collection::UsedRoots => self.used_roots.get(key),
             }?
             .ok_or_else(|| anyhow::anyhow!("Key not found"))
-            .and_then(|value| decode(&value))
+            .and_then(|value| T::try_from_slice(&value).map_err(|e| anyhow::anyhow!(e)))
         }
 
         fn shutdown(&mut self) {
@@ -228,8 +213,8 @@ pub mod sled {
                 .map(|(k, v)| {
                     log::debug!("Insert {:?}", k);
                     log::trace!("Insert {:?}", v);
-                    encode(k).and_then(|ek| {
-                        encode(v).map(|ev| {
+                    borsh::to_vec(k).and_then(|ek| {
+                        borsh::to_vec(v).map(|ev| {
                             let collection = match v {
                                 Entity::BlockProducers(_) => Collection::BlockProducers,
                                 Entity::Header(_) => Collection::Headers,
@@ -247,15 +232,15 @@ pub mod sled {
         }
 
         fn get(&self, collection: &Collection, k: &CryptoHash) -> Result<Entity> {
-            self.raw_get(collection, encode(k)?)
+            self.raw_get(collection, borsh::to_vec(k)?)
         }
 
         fn head(&self) -> Result<Header> {
             let head = self
                 .headers
-                .get(encode(&head_key())?)?
+                .get(borsh::to_vec(&head_key())?)?
                 .ok_or_else(|| anyhow::anyhow!("Failed to get head, no head in store"))?;
-            let h: Entity = decode(&head)?;
+            let h: Entity = borsh::from_slice(&head)?;
             h.header()
         }
 
@@ -264,7 +249,7 @@ pub mod sled {
         }
 
         fn contains(&self, collection: &Collection, k: &CryptoHash) -> Result<bool> {
-            self.raw_contains(collection, encode(k)?)
+            self.raw_contains(collection, borsh::to_vec(k)?)
         }
     }
 
@@ -278,7 +263,7 @@ pub mod sled {
             .and_then(|ov| u32::try_from_slice(&ov).ok())
             .unwrap_or_else(|| 0);
         log::debug!("Incrementing ref count for {:?}, {}", key, ref_count);
-        (ref_count + 1).try_to_vec().ok()
+        borsh::to_vec(&(ref_count + 1)).ok()
     }
     #[cfg(test)]
     mod tests {

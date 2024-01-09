@@ -180,7 +180,8 @@ impl Protocol {
 
         let approval_message = {
             let mut temp_vec = Vec::new();
-            temp_vec.extend_from_slice(&(endorsement.try_to_vec().ok()?[..]));
+            BorshSerialize::serialize(&endorsement, &mut temp_vec).ok()?;
+            //temp_vec.extend_from_slice(&(endorsement.try_to_vec().ok()?[..]));
             temp_vec.extend_from_slice(&((block_view.inner_lite.height + 2).to_le_bytes()[..]));
             temp_vec
         };
@@ -227,7 +228,7 @@ impl Protocol {
     }
 
     pub fn validate_signatures(
-        signatures: &[Option<Signature>],
+        signatures: &[Option<Box<Signature>>],
         epoch_bps: &[ValidatorStake],
         approval_message: &[u8],
     ) -> StakeInfo {
@@ -252,7 +253,7 @@ impl Protocol {
 
     fn validate_signature(
         msg: &[u8],
-        sig: &Option<Signature>,
+        sig: &Option<Box<Signature>>,
         pk: &PublicKey,
     ) -> Result<(), Error> {
         match sig {

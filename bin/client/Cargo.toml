@@ -8,6 +8,7 @@ version.workspace = true
 anyhow.workspace               = true
 async-trait.workspace          = true
 axum.workspace                 = true
+borsh.workspace                = true
 coerce.workspace               = true
 config.workspace               = true
 either.workspace               = true
@@ -21,13 +22,13 @@ near-primitives-core.workspace = true
 near-primitives.workspace      = true
 pretty_env_logger.workspace    = true
 protobuf.workspace             = true
+protocol                       = { path = "../../crates/protocol", package = "near-light-client-protocol" }
 reqwest.workspace              = true
 serde.workspace                = true
 serde_json.workspace           = true
 sled.workspace                 = true
 thiserror.workspace            = true
 tokio.workspace                = true
-protocol = { path = "../../crates/protocol", package = "near-light-client-protocol" }
 
 [dev-dependencies]
 rand = "*"
