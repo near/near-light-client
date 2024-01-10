@@ -46,8 +46,8 @@ impl<F: RichField, const M: usize> From<MerklePath> for MerklePathVariableValue<
         let indices: Vec<bool> = value
             .iter()
             .map(|x| match x.direction {
-                near_light_client_protocol::Direction::Left => false,
-                near_light_client_protocol::Direction::Right => true,
+                near_light_client_protocol::Direction::Left => true,
+                near_light_client_protocol::Direction::Right => false,
             })
             .collect();
         Self {

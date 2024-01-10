@@ -16,18 +16,18 @@ pub fn compute_root_from_path<'a>(
     path: impl Iterator<Item = &'a MerklePathItem>,
     item_hash: MerkleHash,
 ) -> MerkleHash {
-    let mut res = item_hash;
-    for item in path {
-        match item.direction {
+    let mut hash_so_far = item_hash;
+    for uncle in path {
+        match uncle.direction {
             Direction::Left => {
-                res = combine_hash(&item.hash, &res);
+                hash_so_far = combine_hash(&uncle.hash, &hash_so_far);
             }
             Direction::Right => {
-                res = combine_hash(&res, &item.hash);
+                hash_so_far = combine_hash(&hash_so_far, &uncle.hash);
             }
         }
     }
-    res
+    hash_so_far
 }
 
 pub fn compute_root_from_path_and_item<'a, T: BorshSerialize>(
