@@ -3698,9 +3698,12 @@ version = "0.1.0"
 dependencies = [
  "borsh 1.3.0",
  "ethers",
+ "hex",
  "near-light-client-protocol",
+ "near-primitives",
  "plonky2",
  "plonky2x",
+ "pretty_env_logger",
  "serde",
  "serde_json",
 ]

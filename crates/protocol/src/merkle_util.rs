@@ -1,5 +1,6 @@
 use crate::prelude::*;
 pub use near_primitives::merkle::combine_hash;
+pub use near_primitives::merkle::MerklePath;
 pub use near_primitives::merkle::{Direction, MerklePathItem};
 use near_primitives_core::types::MerkleHash;
 
