@@ -1,3 +1,4 @@
+use crate::merkle::NearMerkleTree;
 use crate::variables::{
     BlockHeightVariable, BlockVariable, BuildEndorsement, CryptoHashVariable, HeaderInnerVariable,
     HeaderVariable, InnerLiteHash, MerklePathVariable, ProofVariable, PublicKeyVariable,
@@ -210,18 +211,24 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         outcome_hash: &CryptoHashVariable,
         outcome_root_proof: &MerklePathVariable<ORD>,
     ) -> BoolVariable {
-        let outcome_root = self.get_root_from_merkle_proof_hashed_leaf(
+        let outcome_root = self.get_root_from_merkle_proof_hashed_leaf_unindex(
             &outcome_proof.path,
             &outcome_proof.indices,
             *outcome_hash,
         );
-        let leaf = self.sha256(&outcome_root.0 .0);
+        self.watch(&outcome_root, "outcome_proof_root");
 
-        let outcome_root = self.get_root_from_merkle_proof_hashed_leaf(
+        let leaf = self.curta_sha256(&outcome_root.0 .0);
+        self.watch(&leaf, "leaf");
+
+        self.watch(outcome_root_proof, "outcome_root_proof");
+
+        let outcome_root = self.get_root_from_merkle_proof_hashed_leaf_unindex(
             &outcome_root_proof.path,
             &outcome_root_proof.indices,
             leaf,
         );
+        self.watch(&outcome_root, "outcome_root");
         self.is_equal(outcome_root, *expected)
     }
 
@@ -231,7 +238,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         block_proof: &MerklePathVariable<BD>,
         block_hash: &CryptoHashVariable,
     ) -> BoolVariable {
-        let block_root = self.get_root_from_merkle_proof_hashed_leaf(
+        let block_root = self.get_root_from_merkle_proof_hashed_leaf_unindex(
             &block_proof.path,
             &block_proof.indices,
             *block_hash,
@@ -385,13 +392,13 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::variables::*;
     use near_light_client_protocol::{
-        prelude::Header, LightClientBlockView, StakeInfo, ValidatorStake,
+        prelude::{BasicProof, Header},
+        LightClientBlockView, StakeInfo, ValidatorStake,
     };
     use near_primitives::{hash::CryptoHash, types::ValidatorStakeV1};
-    use plonky2x::frontend::eth::storage::vars::EthHeaderVariable;
-
-    use super::*;
 
     fn fixture(file: &str) -> LightClientBlockView {
         serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
@@ -529,6 +536,31 @@ mod tests {
             builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
         builder.write::<BoolVariable>(next_bps_is_valid);
 
+        let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
+        let p: BasicProof = serde_json::from_str(req).unwrap();
+        let outcome_hash = CryptoHash::hash_borsh(p.outcome_proof.to_hashes());
+
+        let outcome_proof: MerklePathVariableValue<0, _> = p.outcome_proof.proof.into();
+        let outcome_proof = builder.constant::<MerklePathVariable<0>>(outcome_proof);
+
+        let outcome_root_proof: MerklePathVariableValue<2, _> = p.outcome_root_proof.into();
+        let outcome_root_proof = builder.constant::<MerklePathVariable<2>>(outcome_root_proof);
+
+        let expected_outcome_root = builder
+            .constant::<CryptoHashVariable>(p.block_header_lite.inner_lite.outcome_root.0.into());
+        // outcome_root: "8891c92e4e1106f9433bdec481a50b4d49ea45591e5f829942bc4bd1b1fad6e0"
+        // leaf: "4efe13c031019dd7452a42cf735a5edebbe860244ec8539c2cb9ba936dc9ee23"
+        // outcome_root: "6b913ffe7a3a776d5f9352281c1e3dca4efcb816d014e69ad2d981c7a3073199"
+
+        let outcome_hash = builder.constant::<CryptoHashVariable>(outcome_hash.0.into());
+        let root_matches = builder.verify_outcome(
+            &expected_outcome_root,
+            &outcome_proof,
+            &outcome_hash,
+            &outcome_root_proof,
+        );
+        builder.write::<BoolVariable>(root_matches);
+
         let circuit = builder.build();
         let mut input = circuit.input();
 
@@ -562,6 +594,8 @@ mod tests {
         assert!(!stake_is_zero, "stake is zero");
         let next_bps_is_valid = output.read::<BoolVariable>();
         assert!(next_bps_is_valid, "next bps is valid");
+        let outcome_root_matches = output.read::<BoolVariable>();
+        assert!(outcome_root_matches);
     }
 
     #[test]

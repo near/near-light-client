@@ -155,8 +155,16 @@ impl Protocol {
         expected_outcome_root: &CryptoHash,
     ) -> bool {
         let outcome_root = compute_root_from_path(outcome_proof, *outcome_hash);
+        #[cfg(test)]
+        println!("outcome_root: {:?}", hex::encode(&outcome_root));
 
-        let outcome_root = compute_root_from_path_and_item(outcome_root_proof, outcome_root);
+        let leaf = CryptoHash::hash_borsh(outcome_root);
+        #[cfg(test)]
+        println!("leaf: {:?}", hex::encode(&leaf));
+
+        let outcome_root = compute_root_from_path(outcome_root_proof, leaf);
+        #[cfg(test)]
+        println!("outcome_root: {:?}", hex::encode(&outcome_root));
         log::debug!("outcome_root: {:?}", outcome_root);
 
         &outcome_root == expected_outcome_root

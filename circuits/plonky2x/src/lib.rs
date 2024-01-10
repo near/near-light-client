@@ -5,6 +5,7 @@ mod builder;
 mod codec;
 mod input;
 mod variables;
+mod merkle;
 
 // TODO:
 // hint/generator for any queries for things that are offchain/expensive to do in a circuit
