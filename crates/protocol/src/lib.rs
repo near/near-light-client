@@ -1,12 +1,15 @@
 use crate::prelude::*;
 use error::Error;
-use merkle_util::*;
-use near_crypto::{PublicKey, Signature};
-use near_primitives::{
+pub use merkle_util::*;
+pub use near_crypto::{PublicKey, Signature};
+pub use near_primitives::{
     block_header::ApprovalInner,
+    block_header::BlockHeaderInnerLite,
     merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
-    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
+    views::{
+        validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView, LightClientBlockView,
+    },
 };
 
 pub mod error;
@@ -308,8 +311,8 @@ impl Protocol {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StakeInfo {
-    total: u128,
-    approved: u128,
+    pub total: u128,
+    pub approved: u128,
 }
 
 impl From<(u128, u128)> for StakeInfo {
@@ -339,7 +342,8 @@ mod tests {
     use serde_json::{self};
 
     fn fixture(file: &str) -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap()).unwrap()
+        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
+            .unwrap()
     }
 
     fn get_next_epoch() -> LightClientBlockView {
@@ -594,6 +598,5 @@ mod tests {
     #[test]
     fn statically_test_lens() {
         println!("approval: {:?}", std::mem::size_of::<ApprovalInner>());
-        
     }
 }
