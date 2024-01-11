@@ -112,7 +112,6 @@ impl Protocol {
             synced
         })
     }
-
     pub fn inclusion_proof_verify(proof: Proof) -> Result<bool> {
         match proof {
             Proof::Experimental(proof) => Ok(experimental::verify_proof(proof)),
