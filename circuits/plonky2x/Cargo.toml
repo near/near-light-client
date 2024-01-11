@@ -14,12 +14,12 @@ serde.workspace = true
 plonky2  = { git = "https://github.com/mir-protocol/plonky2.git" }
 plonky2x = { git = "https://github.com/succinctlabs/succinctx.git" }
 
-near-light-client-protocol  = { path = "../../crates/protocol" }
+near-light-client-protocol = { path = "../../crates/protocol" }
 
 [dev-dependencies]
 borsh.workspace             = true
 hex.workspace               = true
-near-primitives.workspace       = true
+near-primitives.workspace   = true
 pretty_env_logger.workspace = true
 serde_json.workspace        = true
 

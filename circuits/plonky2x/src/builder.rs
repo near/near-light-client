@@ -333,6 +333,8 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
 
         c = self.ensure_stake_is_sufficient(&stake);
         self.assertx(c);
+
+        //c = self.ensure_next_bps_is_valid(&head.inner_lite.next_bp_hash, next_block.next_bps)
         // Self::ensure_next_bps_is_valid(
         //                 &next_block.inner_lite.next_bp_hash,
         //                 next_block.next_bps,
@@ -469,6 +471,7 @@ mod tests {
         assert_eq!(hash.0, expected_hash);
     }
 
+    // TODO: split humungous test into smaller ones
     #[test]
     fn test_ensures() {
         pretty_env_logger::try_init().unwrap_or_default();
@@ -572,9 +575,17 @@ mod tests {
 
         let block_proof: MerklePathVariableValue<26, _> = p.block_proof.into();
         let block_proof = builder.constant::<MerklePathVariable<26>>(block_proof);
-        let block_hash = builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
+        let block_hash =
+            builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
         builder.verify_block(&expected_root, &block_proof, &block_hash);
         builder.write::<BoolVariable>(root_matches);
+
+        let next_bps_hash = CryptoHash::hash_borsh(&test_bps);
+
+        let next_bps_hash = builder.constant::<CryptoHashVariable>(next_bps_hash.0.into());
+        let next_bps_hash_matches =
+            builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+        builder.write::<BoolVariable>(next_bps_hash_matches);
 
         let circuit = builder.build();
         let mut input = circuit.input();
@@ -613,6 +624,8 @@ mod tests {
         assert!(outcome_root_matches);
         let block_root_matches = output.read::<BoolVariable>();
         assert!(block_root_matches);
+        let next_bps_hash_matches = output.read::<BoolVariable>();
+        assert!(next_bps_hash_matches);
     }
 
     #[test]
