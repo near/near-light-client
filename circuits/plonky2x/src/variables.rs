@@ -252,18 +252,22 @@ impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
-pub struct ProofVariable {
+pub struct ProofVariable<const OPD: usize, const ORPD: usize, const BPD: usize> {
     pub head_block_root: CryptoHashVariable,
     // TODO: make variable pub outcome_proof: ExecutionOutcomeWithId,
     pub outcome_hash: CryptoHashVariable,
     pub outcome_proof_block_hash: CryptoHashVariable,
-    pub outcome_proof: MerklePathVariable<32>, // TODO: get real number here
-    pub outcome_root_proof: MerklePathVariable<32>, // TODO: get real number here
+    pub outcome_proof: MerklePathVariable<OPD>, // TODO: get real number here
+    pub outcome_root_proof: MerklePathVariable<ORPD>, // TODO: get real number here
     pub block_header: HeaderVariable,
-    pub block_proof: MerklePathVariable<256>, // TODO: get real number here
+    pub block_proof: MerklePathVariable<BPD>, // TODO: get real number here
 }
 
-impl<F: RichField> From<near_light_client_protocol::Proof> for ProofVariableValue<F> {
+impl<F, const OPD: usize, const ORPD: usize, const BPD: usize>
+    From<near_light_client_protocol::Proof> for ProofVariableValue<OPD, ORPD, BPD, F>
+where
+    F: RichField,
+{
     fn from(proof: near_light_client_protocol::Proof) -> Self {
         match proof {
             near_light_client_protocol::Proof::Basic {
