@@ -365,30 +365,42 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
 }
 
 pub trait VerifyCircuit<L: PlonkParameters<D>, const D: usize> {
-    fn verify(&mut self, proof: ProofVariable);
+    fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
+        &mut self,
+        proof: ProofVariable<OPD, ORPD, BPD>,
+    ) -> BoolVariable;
 }
 
 impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuilder<L, D> {
-    fn verify(&mut self, proof: ProofVariable) {
+    fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
+        &mut self,
+        proof: ProofVariable<OPD, ORPD, BPD>,
+    ) -> BoolVariable {
         let block_hash = self.header_hash(
             &proof.block_header.inner_lite,
             &proof.block_header.inner_rest_hash,
             &proof.block_header.prev_block_hash,
         );
 
-        let mut c = self.is_equal(block_hash, proof.outcome_proof_block_hash);
-        self.assertx(c);
+        let block_hash_matches = self.is_equal(block_hash, proof.outcome_proof_block_hash);
+        self.watch(&block_hash_matches, "block_hash_matches");
 
-        c = self.verify_outcome(
+        let outcome_matches = self.verify_outcome(
             &proof.block_header.inner_lite.outcome_root,
             &proof.outcome_proof,
             &proof.outcome_hash,
             &proof.outcome_root_proof,
         );
-        self.assertx(c);
+        self.watch(&outcome_matches, "outcome_matches");
 
-        c = self.verify_block(&proof.head_block_root, &proof.block_proof, &block_hash);
-        self.assertx(c);
+        let block_matches =
+            self.verify_block(&proof.head_block_root, &proof.block_proof, &block_hash);
+        self.watch(&block_matches, "block_matches");
+
+        let verified = self.and(block_matches, outcome_matches);
+        let verified = self.and(verified, block_hash_matches);
+        self.assertx(verified);
+        verified
     }
 }
 
@@ -400,7 +412,7 @@ mod tests {
     use crate::variables::*;
     use near_light_client_protocol::{
         prelude::{BasicProof, Header},
-        LightClientBlockView, StakeInfo, ValidatorStake,
+        LightClientBlockView, Proof, StakeInfo, ValidatorStake,
     };
     use near_primitives::{hash::CryptoHash, types::ValidatorStakeV1};
     use serde::de::DeserializeOwned;
@@ -542,6 +554,9 @@ mod tests {
             builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
         builder.write::<BoolVariable>(next_bps_is_valid);
 
+        let expected_root =
+            CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
+
         let p: BasicProof = fixture("old.json");
         let outcome_hash = CryptoHash::hash_borsh(p.outcome_proof.to_hashes());
         const OUTCOME_PROOF_AMT: usize = 2;
@@ -569,15 +584,13 @@ mod tests {
         );
         builder.write::<BoolVariable>(root_matches);
 
-        let expected_root =
-            CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
-        let expected_root = builder.constant::<CryptoHashVariable>(expected_root.0.into());
+        let expected = builder.constant::<CryptoHashVariable>(expected_root.0.clone().into());
 
         let block_proof: MerklePathVariableValue<26, _> = p.block_proof.into();
         let block_proof = builder.constant::<MerklePathVariable<26>>(block_proof);
         let block_hash =
             builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
-        builder.verify_block(&expected_root, &block_proof, &block_hash);
+        builder.verify_block(&expected, &block_proof, &block_hash);
         builder.write::<BoolVariable>(root_matches);
 
         let next_bps_hash = CryptoHash::hash_borsh(&test_bps);
@@ -586,6 +599,16 @@ mod tests {
         let next_bps_hash_matches =
             builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
         builder.write::<BoolVariable>(next_bps_hash_matches);
+
+        let registered_p = builder.constant::<ProofVariable<2, 2, 26>>(
+            near_light_client_protocol::Proof::Basic {
+                head_block_root: expected_root,
+                proof: Box::new(fixture("old.json")),
+            }
+            .into(),
+        );
+        let proof_verified = builder.verify(registered_p);
+        builder.write::<BoolVariable>(proof_verified);
 
         let circuit = builder.build();
         let mut input = circuit.input();
@@ -626,6 +649,8 @@ mod tests {
         assert!(block_root_matches);
         let next_bps_hash_matches = output.read::<BoolVariable>();
         assert!(next_bps_hash_matches);
+        let proof_verified = output.read::<BoolVariable>();
+        assert!(proof_verified);
     }
 
     #[test]

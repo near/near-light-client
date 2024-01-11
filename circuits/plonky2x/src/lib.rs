@@ -1,11 +1,13 @@
 use plonky2x::prelude::*;
-use variables::{BlockVariable, HeaderVariable, ProofVariable, ValidatorStakeVariable, MAX_EPOCH_VALIDATORS};
+use variables::{
+    BlockVariable, HeaderVariable, ProofVariable, ValidatorStakeVariable, MAX_EPOCH_VALIDATORS,
+};
 
 mod builder;
 mod codec;
 mod input;
-mod variables;
 mod merkle;
+mod variables;
 
 // TODO:
 // hint/generator for any queries for things that are offchain/expensive to do in a circuit
@@ -29,7 +31,10 @@ pub trait SyncCircuit<L: PlonkParameters<D>, const D: usize> {
 }
 
 pub trait VerifyCircuit<L: PlonkParameters<D>, const D: usize> {
-    fn verify(&mut self, proof: ProofVariable) -> bool;
+    fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
+        &mut self,
+        proof: ProofVariable<OPD, ORPD, BPD>,
+    ) -> bool;
 }
 
 #[cfg(test)]
