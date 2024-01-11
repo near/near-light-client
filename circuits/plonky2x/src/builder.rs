@@ -314,7 +314,15 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         );
         self.assertx(c);
 
+        let new_head = HeaderVariable {
+            prev_block_hash: next_block.prev_block_hash,
+            inner_rest_hash: next_block.inner_rest_hash,
+            inner_lite: next_block.inner_lite.clone(),
+        };
+        self.watch(&new_head, "new_head");
+
         let approval = self.reconstruct_approval_message(&next_block);
+        self.watch(&approval, "approval_msg");
 
         let signatures_eddsa = next_block
             .approvals_after_next
@@ -330,6 +338,7 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
             epoch_bps,
             approval,
         );
+        self.watch(&stake, "stake");
 
         c = self.ensure_stake_is_sufficient(&stake);
         self.assertx(c);
@@ -340,8 +349,8 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         //                 next_block.next_bps,
         //             )
         //
-        // TODO: decide what to write here
-        // self.evm_write(new_head);
+        // TODO: decide what to write here for evm
+        self.write(new_head);
         // self.evm_write(next_block.inner_lite.block_merkle_root);
     }
 
@@ -412,7 +421,7 @@ mod tests {
     use crate::variables::*;
     use near_light_client_protocol::{
         prelude::{BasicProof, Header},
-        LightClientBlockView, Proof, StakeInfo, ValidatorStake,
+        EpochId, LightClientBlockView, Proof, StakeInfo, ValidatorStake,
     };
     use near_primitives::{hash::CryptoHash, types::ValidatorStakeV1};
     use serde::de::DeserializeOwned;
@@ -429,6 +438,29 @@ mod tests {
         fixture("1.json")
     }
 
+    fn view_to_lite_view(h: LightClientBlockView) -> Header {
+        Header {
+            prev_block_hash: h.prev_block_hash,
+            inner_rest_hash: h.inner_rest_hash,
+            inner_lite: h.inner_lite,
+        }
+    }
+    fn test_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
+        let first = get_first_epoch();
+        let next = get_next_epoch();
+
+        (
+            view_to_lite_view(first.clone()),
+            first
+                .next_bps
+                .clone()
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            next,
+        )
+    }
     fn to_header(bv: LightClientBlockView) -> Header {
         Header {
             prev_block_hash: bv.prev_block_hash,
@@ -653,6 +685,107 @@ mod tests {
         assert!(proof_verified);
     }
 
+    // TODO: split humungous test into smaller ones
+    #[test]
+    fn test_basic_inclusion_proof() {
+        pretty_env_logger::try_init().unwrap_or_default();
+        let test_header = get_first_epoch();
+        let test_header = to_header(test_header);
+
+        let expected_root =
+            CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
+
+        let mut builder = DefaultBuilder::new();
+
+        let registered_p = builder.constant::<ProofVariable<2, 2, 26>>(
+            near_light_client_protocol::Proof::Basic {
+                head_block_root: expected_root,
+                proof: Box::new(fixture("old.json")),
+            }
+            .into(),
+        );
+        let proof_verified = builder.verify(registered_p);
+        builder.write::<BoolVariable>(proof_verified);
+
+        let circuit = builder.build();
+        let mut input = circuit.input();
+
+        input.write::<HeaderVariable>(test_header.into());
+
+        let (_proof, mut output) = circuit.prove(&input);
+
+        assert!(output.read::<BoolVariable>())
+    }
+
+    // TODO: split humungous test into smaller ones
+    #[test]
+    fn test_sync_accross_boundaries() {
+        pretty_env_logger::try_init().unwrap_or_default();
+        let (mut head, mut next_bps, next_block) = test_state();
+        let mut next_epoch_id = EpochId(head.inner_lite.next_epoch_id);
+
+        let mut builder = DefaultBuilder::new();
+        let header_var = builder.read::<HeaderVariable>();
+        let bps_var = builder.read::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>();
+        let next_block_var = builder.read::<BlockVariable>();
+
+        builder.sync(header_var, bps_var, next_block_var);
+        // let mut sync_and_update = |next_block: LightClientBlockView| {
+        //     let next_bps = builder
+        //         .constant::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
+        //             bps_var
+        //                 .clone()
+        //                 .into_iter()
+        //                 .map(|s| Into::<ValidatorStake>::into(s))
+        //                 .map(Into::into)
+        //                 .collect(),
+        //         );
+        //     let next_block = builder.constant::<BlockVariable>(next_block.clone().into());
+        //     //     // Assert we matched the epoch id for the new BPS
+        //     //     assert_eq!(
+        //     //         head.inner_lite.next_epoch_id,
+        //     //         sync_next.next_bps.as_ref().unwrap().0 .0
+        //     //     );
+        //     //
+        //     //     head = sync_next.new_head;
+        //     //     next_bps = sync_next.next_bps.unwrap().1;
+        //     //
+        //     //     // Assert new head is the new block
+        //     //     assert_eq!(head.inner_lite, next_block.inner_lite);
+        //     //     // Assert new BPS is from the next block producers because we're
+        //     //     // in an epoch boundary
+        //     //     assert_eq!(
+        //     //         &next_bps,
+        //     //         &next_block
+        //     //             .next_bps
+        //     //             .unwrap()
+        //     //             .into_iter()
+        //     //             .map(Into::into)
+        //     //             .collect_vec()
+        //     //     );
+        //     //     next_epoch_id.0 = head.inner_lite.next_epoch_id;
+        // };
+        // sync_and_update(next_block_var.clone());
+        //
+        let circuit = builder.build();
+        let mut input = circuit.input();
+
+        input.write::<HeaderVariable>(head.into());
+        input.write::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
+            next_bps
+                .clone()
+                .into_iter()
+                .map(|s| Into::<ValidatorStake>::into(s))
+                .map(Into::into)
+                .collect(),
+        );
+        input.write::<BlockVariable>(next_block.clone().into());
+
+        let (proof, mut output) = circuit.prove(&input);
+
+        let header = output.read::<HeaderVariable>();
+        println!("header: {:?}", header);
+    }
     #[test]
     fn test_reconstruct_approval_msg() {}
 }
