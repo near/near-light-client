@@ -1,10 +1,11 @@
 use crate::merkle::NearMerkleTree;
 use crate::variables::{
-    BlockHeightVariable, BlockVariable, BuildEndorsement, CryptoHashVariable, HeaderInnerVariable,
-    HeaderVariable, InnerLiteHash, MerklePathVariable, ProofVariable, PublicKeyVariable,
-    StakeInfoVariable, ValidatorStakeVariable, MAX_EPOCH_VALIDATORS,
+    BlockHeightVariable, BlockVariable, BpsApprovals, BuildEndorsement, CryptoHashVariable,
+    HeaderInnerVariable, HeaderVariable, InnerLiteHash, MerklePathVariable, ProofVariable,
+    PublicKeyVariable, StakeInfoVariable, ValidatorStakeVariable, MAX_EPOCH_VALIDATORS,
 };
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
+use plonky2x::frontend::vars::EvmVariable;
 use plonky2x::prelude::*;
 
 pub trait Verify<L: PlonkParameters<D>, const D: usize> {
@@ -29,8 +30,7 @@ pub trait Verify<L: PlonkParameters<D>, const D: usize> {
 
     fn validate_eddsa_signatures(
         &mut self,
-        is_active: ArrayVariable<BoolVariable, MAX_EPOCH_VALIDATORS>,
-        signatures: ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>,
+        approvals_after_next: BpsApprovals,
         epoch_bps: ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>,
         approval_message_hash: BytesVariable<41>,
     ) -> StakeInfoVariable;
@@ -114,31 +114,37 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         self.select(is_next_epoch, is_not_empty, ok_anyway)
     }
 
+    // // Create a new BytesVariable that will contain the message to be hashed.
+    //            // The hashed message is a concatenation of sigR, pk, and msg.
+    //            let mut message_bytes = Vec::new();
+    //            message_bytes.extend(signatures[i].r.0.as_bytes());
+    //            message_bytes.extend(pubkeys[i].0.as_bytes());
+    //            message_bytes.extend(messages[i].0);
 
     // TODO: does not build active participants
     fn validate_eddsa_signatures(
         &mut self,
-        is_active: ArrayVariable<BoolVariable, MAX_EPOCH_VALIDATORS>,
-        signatures: ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>,
+        approvals_after_next: BpsApprovals,
         epoch_bps: ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>,
         approval_message: BytesVariable<41>,
     ) -> StakeInfoVariable {
-        let messages = [approval_message.0; MAX_EPOCH_VALIDATORS];
+        const MSG_LEN: usize = 41;
+
+        let messages = [approval_message; MAX_EPOCH_VALIDATORS];
+
         let pubkeys: Vec<PublicKeyVariable> = epoch_bps
             .data
             .iter()
             .map(|vs| vs.public_key.clone())
             .collect();
 
-        const MSG_LEN: usize = 41;
-
         // TODO: switch between eddsa/ecdsa when integrated
         // Here we ensure that all active participants have signed
         self.curta_eddsa_verify_sigs_conditional::<MSG_LEN, MAX_EPOCH_VALIDATORS>(
-            is_active.clone(),
+            approvals_after_next.is_active.clone(),
             None,
             ArrayVariable::new(messages.to_vec()),
-            signatures,
+            approvals_after_next.signatures,
             ArrayVariable::new(pubkeys),
         );
 
@@ -147,7 +153,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
 
         // Collect all approvals
         for (i, bps) in epoch_bps.data.iter().enumerate() {
-            if is_active.data.get(i).is_some() {
+            if approvals_after_next.is_active.data.get(i).is_some() {
                 approved_stake = self.add(approved_stake, bps.stake);
             }
             total_stake = self.add(total_stake, bps.stake);
@@ -305,10 +311,10 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         next_block: BlockVariable,
     ) {
         let a = self.ensure_not_already_verified(&head, &next_block.inner_lite.height);
-        //self.assertx(a);
+        self.assertx(a);
 
         let b = self.ensure_epoch_is_current_or_next(&head, &next_block.inner_lite.epoch_id);
-        //self.assertx(b);
+        self.assertx(b);
 
         let c = self.ensure_if_next_epoch_contains_next_bps(
             &head,
@@ -327,24 +333,12 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         let approval = self.reconstruct_approval_message(&next_block);
         self.watch(&approval, "approval_msg");
 
-        let signatures_eddsa = next_block
-            .approvals_after_next
-            .signatures
-            .data
-            .iter()
-            .map(|s| s.ed25519.clone()) // FIXME: when ecdsa
-            .collect::<Vec<_>>();
-
-        let stake = self.validate_eddsa_signatures(
-            next_block.approvals_after_next.active_bitmask,
-            ArrayVariable::new(signatures_eddsa),
-            epoch_bps,
-            approval,
-        );
+        let stake =
+            self.validate_eddsa_signatures(next_block.approvals_after_next, epoch_bps, approval);
         self.watch(&stake, "stake");
 
         let d = self.ensure_stake_is_sufficient(&stake);
-        //self.assertx(d);
+        self.assertx(d);
 
         //c = self.ensure_next_bps_is_valid(&head.inner_lite.next_bp_hash, next_block.next_bps)
         // Self::ensure_next_bps_is_valid(
@@ -425,11 +419,14 @@ mod tests {
     use super::*;
     use crate::variables::*;
     use near_light_client_protocol::{
-        prelude::{BasicProof, Header},
+        prelude::{BasicProof, Header, Itertools},
         EpochId, LightClientBlockView, Proof, Protocol, StakeInfo, ValidatorStake,
     };
     use near_primitives::{hash::CryptoHash, types::ValidatorStakeV1};
-    use plonky2x::backend::circuit::{PublicInput, PublicOutput};
+    use plonky2x::{
+        backend::circuit::{PublicInput, PublicOutput},
+        frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue,
+    };
     use serde::de::DeserializeOwned;
 
     type B<const D: usize = 2> = CircuitBuilder<DefaultParameters, D>;
@@ -811,8 +808,114 @@ mod tests {
     }
 
     #[test]
+    fn test_one_signature() {
+        let (_, bps, next_block) = test_state();
+
+        let msg: [u8; 41] = Protocol::reconstruct_approval_message(&next_block)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let msgs = [msg; SIG_AMT];
+
+        const SIG_AMT: usize = 50;
+        type Arr<T> = ArrayVariable<T, SIG_AMT>;
+
+        let mut nbps: Vec<PublicKeyVariableValue> = vec![];
+        let mut sigs: Vec<EDDSASignatureVariableValue<GoldilocksField>> = vec![];
+
+        // Filter out null bps
+        bps.into_iter()
+            .zip(next_block.approvals_after_next.into_iter())
+            .filter(|(_, s)| s.is_some())
+            .take(SIG_AMT)
+            .for_each(|(v, s)| {
+                assert!(s.is_some());
+                let v: ValidatorStakeVariableValue<GoldilocksField> = v.into();
+                nbps.push(v.public_key);
+                let s: SignatureVariableValue<GoldilocksField> = s.into();
+                sigs.push(s.ed25519.into());
+            });
+
+        println!("msgs: {:?}", msgs);
+        println!("bps: {:?}", nbps);
+        println!("sigs: {:?}", sigs);
+
+        let define = |builder: &mut B| {
+            let pubkeys = builder.read::<Arr<PublicKeyVariable>>();
+            let msgs = builder.read::<Arr<BytesVariable<41>>>();
+            let sigs = builder.read::<Arr<EDDSASignatureVariable>>();
+
+            builder.curta_eddsa_verify_sigs(msgs, None, sigs, pubkeys);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<Arr<PublicKeyVariable>>(nbps.into());
+            input.write::<Arr<BytesVariable<41>>>(msgs.into());
+            input.write::<Arr<EDDSASignatureVariable>>(sigs.into());
+
+            // TODO: isnt this the issue XD
+            // let sig: SignatureVariableValue<GoldilocksField> =
+            //     next_block.approvals_after_next[0].clone().into();
+            // input.write::<ArrayVariable<EDDSASignatureVariable, SIG_AMT>>(vec![sig.ed25519].into());
+            //(next_block.clone().into());
+        };
+        let assertions = |mut output: PO| {
+            // let msghash = output.read::<BytesVariable<41>>();
+            // let msg = Protocol::reconstruct_approval_message(&next_block).unwrap();
+            // assert_eq!(msghash, msghash);
+            // println!("msg: {:?}", msg);
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_signatures() {
+        let (_, next_bps, next_block) = test_state();
+
+        let define = |builder: &mut B| {
+            let pubkeys = builder.read::<ArrayVariable<PublicKeyVariable, MAX_EPOCH_VALIDATORS>>();
+            let messages = builder.read::<ArrayVariable<BytesVariable<41>, MAX_EPOCH_VALIDATORS>>();
+            let signatures =
+                builder.read::<ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>>();
+            //let next_block = builder.read::<BlockVariable>();
+
+            builder.curta_eddsa_verify_sigs(messages, None, signatures, pubkeys)
+        };
+        let writer = |input: &mut PI| {
+            let vs = next_bps
+                .clone()
+                .into_iter()
+                .map(Into::<ValidatorStake>::into)
+                .map(Into::<ValidatorStakeVariableValue<GoldilocksField>>::into)
+                .map(|s| s.public_key)
+                .collect_vec();
+            input.write::<ArrayVariable<PublicKeyVariable, MAX_EPOCH_VALIDATORS>>(vs.into());
+
+            let msg: [u8; 41] = Protocol::reconstruct_approval_message(&next_block)
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let msgs = [msg; MAX_EPOCH_VALIDATORS];
+            input.write::<ArrayVariable<BytesVariable<41>, MAX_EPOCH_VALIDATORS>>(msgs.into());
+            let sigs = next_block
+                .approvals_after_next
+                .clone()
+                .into_iter()
+                .map(Into::<SignatureVariableValue<GoldilocksField>>::into)
+                .map(|s| s.ed25519)
+                .collect_vec();
+            input.write::<ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>>(sigs.into());
+        };
+        let assertions = |mut output: PO| {
+            // let msghash = output.read::<BytesVariable<41>>();
+            // let msg = Protocol::reconstruct_approval_message(&next_block).unwrap();
+            // assert_eq!(msghash, msghash);
+            // println!("msg: {:?}", msg);
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
     fn test_reconstruct_approval_msg() {
-        pretty_env_logger::try_init().unwrap_or_default();
         let (_, next_bps, next_block) = test_state();
         println!(
             "bps len {} sigs len {} next len {}",
