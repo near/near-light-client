@@ -177,7 +177,7 @@ impl Protocol {
         verify_hash(*block_merkle_root, block_proof, *block_hash)
     }
 
-    fn reconstruct_approval_message(block_view: &LightClientBlockView) -> Option<Vec<u8>> {
+    pub fn reconstruct_approval_message(block_view: &LightClientBlockView) -> Option<Vec<u8>> {
         let new_head = Header {
             prev_block_hash: block_view.prev_block_hash,
             inner_rest_hash: block_view.inner_rest_hash,
@@ -262,7 +262,7 @@ impl Protocol {
             .into()
     }
 
-    fn validate_signature(
+    pub fn validate_signature(
         msg: &[u8],
         sig: &Option<Box<Signature>>,
         pk: &PublicKey,

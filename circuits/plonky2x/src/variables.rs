@@ -128,8 +128,10 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Inner
         bytes.extend_from_slice(&next_bp_hash.0);
         bytes.extend_from_slice(&block_merkle_root.0);
 
-        let hash = sha256(&bytes);
-        output_stream.write_value::<Bytes32Variable>(hash.into());
+        assert_eq!(bytes.len(), N, "expected {} bytes, got {}", N, bytes.len());
+
+        let bytes: [u8; N] = bytes.try_into().unwrap();
+        output_stream.write_value::<BytesVariable<N>>(bytes);
     }
 }
 
@@ -146,6 +148,7 @@ pub struct BlockVariable {
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
+        assert_eq!(block.next_bps.as_ref().unwrap().len(), MAX_EPOCH_VALIDATORS);
         Self {
             prev_block_hash: block.prev_block_hash.0.into(),
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
@@ -161,6 +164,7 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
                     .map(Into::into)
                     .collect()
             } else {
+                // FIXME: needs to fill to spsace
                 vec![]
             }
             .into(),
@@ -177,11 +181,6 @@ pub struct BpsApprovals {
 
 impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
-        assert_eq!(
-            approvals.len(),
-            MAX_EPOCH_VALIDATORS,
-            "Approvals must be of length M"
-        );
         let mut active_bitmask = vec![];
         let signatures = approvals
             .into_iter()
@@ -197,6 +196,7 @@ impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
 
         assert_eq!(active_bitmask.len(), MAX_EPOCH_VALIDATORS);
         assert_eq!(signatures.len(), MAX_EPOCH_VALIDATORS);
+
         Self {
             active_bitmask: active_bitmask.into(),
             signatures: signatures.into(),
