@@ -188,11 +188,15 @@ impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
             .map(|sig| {
                 if sig.is_none() {
                     active_bitmask.push(false);
+                } else {
+                    active_bitmask.push(true);
                 }
                 sig.into()
             })
             .collect::<Vec<SignatureVariableValue<F>>>();
 
+        assert_eq!(active_bitmask.len(), MAX_EPOCH_VALIDATORS);
+        assert_eq!(signatures.len(), MAX_EPOCH_VALIDATORS);
         Self {
             active_bitmask: active_bitmask.into(),
             signatures: signatures.into(),
