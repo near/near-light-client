@@ -153,8 +153,8 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         }
 
         StakeInfoVariable {
-            total_stake,
-            approved_stake,
+            total: total_stake,
+            approved: approved_stake,
         }
     }
 
@@ -162,8 +162,8 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         let numerator = self.constant(2.into());
         let denominator = self.constant(3.into());
 
-        let threshold = self.mul(stake.total_stake, numerator);
-        let approved = self.mul(stake.approved_stake, denominator);
+        let threshold = self.mul(stake.total, numerator);
+        let approved = self.mul(stake.approved, denominator);
         self.watch(&approved, "approved");
         self.watch(&threshold, "threshold");
 
@@ -360,7 +360,8 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
             &next_block.prev_block_hash,
         );
 
-        let next_block_hash = self.sha256_pair(next_block.next_block_inner_hash, next_header_hash);
+        let next_block_hash =
+            self.curta_sha256_pair(next_block.next_block_inner_hash, next_header_hash);
 
         let mut input_stream = VariableStream::new();
         input_stream.write(&next_block_hash);
@@ -423,7 +424,12 @@ mod tests {
         EpochId, LightClientBlockView, Proof, StakeInfo, ValidatorStake,
     };
     use near_primitives::{hash::CryptoHash, types::ValidatorStakeV1};
+    use plonky2x::backend::circuit::{PublicInput, PublicOutput};
     use serde::de::DeserializeOwned;
+
+    type B<const D: usize = 2> = CircuitBuilder<DefaultParameters, D>;
+    type PI<const D: usize = 2> = PublicInput<DefaultParameters, D>;
+    type PO<const D: usize = 2> = PublicOutput<DefaultParameters, D>;
 
     fn fixture<T: DeserializeOwned>(file: &str) -> T {
         serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
@@ -468,332 +474,303 @@ mod tests {
         }
     }
 
-    fn default_env() {
-        let mut builder = DefaultBuilder::new();
-        //        let mut pw = PartialWitness::new();
-        let x1 = 10;
-        let x = builder.init::<U64Variable>();
-        //
-        // x.set(&mut pw, x1);
-        //
-        // assert_eq!(x.get(&pw), x1);
-        //
-        // println!("x1: {:?}", x1.to_le_bytes());
-        // println!("x: {:?}", x.encode(&mut builder));
-        //
-        // let circuit = builder.build();
-        // let proof = circuit.data.prove(pw).unwrap();
-        // circuit.data.verify(proof).unwrap();
+    // TODO: define inputs and logic at once
+    fn builder_suite<F, WriteInputs, Assertions>(
+        define: F,
+        writer: WriteInputs,
+        assertions: Assertions,
+    ) where
+        F: FnOnce(&mut B),
+        WriteInputs: FnOnce(&mut PI),
+        Assertions: FnOnce(PO),
+    {
+        pretty_env_logger::try_init().unwrap_or_default();
+
+        let mut builder = B::new();
+        define(&mut builder);
+
+        let circuit = builder.build();
+
+        let mut inputs = circuit.input();
+        writer(&mut inputs);
+
+        let (proof, output) = circuit.prove(&inputs);
+
+        assertions(output.clone());
+
+        circuit.verify(&proof, &inputs, &output);
     }
 
     #[test]
     fn test_header_hash() {
-        pretty_env_logger::try_init().unwrap_or_default();
-
-        let mut builder = DefaultBuilder::new();
-        let header = builder.read::<HeaderVariable>();
-
-        let result = builder.header_hash(
-            &header.inner_lite,
-            &header.inner_rest_hash,
-            &header.prev_block_hash,
-        );
-        builder.write(result);
-
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
         let header = to_header(fixture("1.json"));
         let expected_hash = header.hash().0;
-        println!("expected_hash: {:?}", hex!(expected_hash));
 
-        input.write::<HeaderVariable>(header.into());
-        let (_proof, mut output) = circuit.prove(&input);
-
-        let hash = output.read::<CryptoHashVariable>();
-        assert_eq!(hash.0, expected_hash);
-    }
-
-    // TODO: split humungous test into smaller ones
-    #[test]
-    #[test]
-    fn test_ensure_height() {
-        pretty_env_logger::try_init().unwrap_or_default();
-        let test_header = get_first_epoch();
-        let test_bps = test_header.next_bps.clone().unwrap_or_default();
-        let test_header = to_header(test_header);
-
-        let mut builder = DefaultBuilder::new();
-        let header = builder.read::<HeaderVariable>();
-
-        let early_block_height = builder.constant::<U64Variable>(1);
-        let later_block_height = builder.constant::<U64Variable>(test_header.inner_lite.height + 1);
-
-        let r = builder.ensure_not_already_verified(&header, &early_block_height);
-        builder.write::<BoolVariable>(r);
-
-        let r = builder.ensure_not_already_verified(&header, &later_block_height);
-
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
-        input.write::<HeaderVariable>(test_header.into());
-
-        let (proof, mut output) = circuit.prove(&input);
-
-        assert!(!output.read::<BoolVariable>(), "too early");
-        assert!(output.read::<BoolVariable>(), "height is later");
-    }
-    fn test_ensure_next_bps() {
-        pretty_env_logger::try_init().unwrap_or_default();
-        let test_header = get_first_epoch();
-        let test_bps = test_header.next_bps.clone().unwrap_or_default();
-        let test_header = to_header(test_header);
-
-        let mut builder = DefaultBuilder::new();
-        let header = builder.read::<HeaderVariable>();
-
-        let r = builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
-        builder.write::<BoolVariable>(r);
-        let r = builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.next_epoch_id);
-        builder.write::<BoolVariable>(r);
-
-        let next_bps = builder
-            .constant::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
-                test_bps
-                    .clone()
-                    .into_iter()
-                    .map(|s| Into::<ValidatorStake>::into(s))
-                    .map(Into::into)
-                    .collect(),
+        let define = |builder: &mut B| {
+            let header = builder.read::<HeaderVariable>();
+            let result = builder.header_hash(
+                &header.inner_lite,
+                &header.inner_rest_hash,
+                &header.prev_block_hash,
             );
-        let r = builder.ensure_if_next_epoch_contains_next_bps(
-            &header,
-            &header.inner_lite.next_epoch_id,
-            &next_bps,
-        );
-        builder.write::<BoolVariable>(r);
-
-        let next_bps_hash = CryptoHash::hash_borsh(test_bps.clone());
-        let next_bps_hash = builder.constant::<CryptoHashVariable>(next_bps_hash.0.into());
-
-        let next_bps_is_valid =
-            builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
-        builder.write::<BoolVariable>(next_bps_is_valid);
-
-        let next_bps_hash = CryptoHash::hash_borsh(&test_bps);
-        let next_bps_hash = builder.constant::<CryptoHashVariable>(next_bps_hash.0.into());
-        let next_bps_hash_matches =
-            builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
-        builder.write::<BoolVariable>(next_bps_hash_matches);
-
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
-        input.write::<HeaderVariable>(test_header.into());
-
-        let (proof, mut output) = circuit.prove(&input);
-
-        assert!(output.read::<BoolVariable>(), "next epoch has bps");
-        assert!(output.read::<BoolVariable>(), "next bps is valid");
-        assert!(output.read::<BoolVariable>(), "next bps hash matches");
-    }
-    fn test_ensures() {
-        pretty_env_logger::try_init().unwrap_or_default();
-        let test_header = get_first_epoch();
-        let test_bps = test_header.next_bps.clone().unwrap_or_default();
-        let test_header = to_header(test_header);
-
-        let mut builder = DefaultBuilder::new();
-        let header = builder.read::<HeaderVariable>();
-
-        let early_block_height = builder.constant::<U64Variable>(1);
-        let later_block_height = builder.constant::<U64Variable>(test_header.inner_lite.height + 1);
-
-        let r = builder.ensure_not_already_verified(&header, &early_block_height);
-        builder.write::<BoolVariable>(r);
-        let r = builder.ensure_not_already_verified(&header, &later_block_height);
-        builder.write::<BoolVariable>(r);
-        let r = builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
-        builder.write::<BoolVariable>(r);
-        let r = builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.next_epoch_id);
-        builder.write::<BoolVariable>(r);
-
-        let next_bps = builder
-            .constant::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
-                test_bps
-                    .clone()
-                    .into_iter()
-                    .map(|s| Into::<ValidatorStake>::into(s))
-                    .map(Into::into)
-                    .collect(),
-            );
-        let r = builder.ensure_if_next_epoch_contains_next_bps(
-            &header,
-            &header.inner_lite.next_epoch_id,
-            &next_bps,
-        );
-        builder.write::<BoolVariable>(r);
-
-        let mut stake = StakeInfo {
-            total: 300,
-            approved: 200,
+            builder.write(result);
         };
 
-        let stake_info = builder.constant::<StakeInfoVariable>(stake.clone().into());
-        let stake_is_equal_to_threshold = builder.ensure_stake_is_sufficient(&stake_info);
-        builder.write::<BoolVariable>(stake_is_equal_to_threshold);
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(header.into());
+        };
 
-        stake.approved = 199;
-        let stake_info = builder.constant::<StakeInfoVariable>(stake.clone().into());
-        let stake_is_less_than_threshold = builder.ensure_stake_is_sufficient(&stake_info);
-        builder.write::<BoolVariable>(stake_is_less_than_threshold);
+        let assertions = |mut output: PO| {
+            let hash = output.read::<CryptoHashVariable>();
+            assert_eq!(hash.0, expected_hash);
+        };
+        builder_suite(define, writer, assertions);
+    }
 
-        stake.approved = 201;
-        let stake_info = builder.constant::<StakeInfoVariable>(stake.clone().into());
-        let stake_is_greater_than_threshold = builder.ensure_stake_is_sufficient(&stake_info);
-        builder.write::<BoolVariable>(stake_is_greater_than_threshold);
+    #[test]
+    fn test_stake() {
+        let approved_stakes = [200, 199, 201, 0];
 
-        stake.approved = 0;
-        let stake_info = builder.constant::<StakeInfoVariable>(stake.clone().into());
-        let stake_is_zero = builder.ensure_stake_is_sufficient(&stake_info);
-        builder.write::<BoolVariable>(stake_is_zero);
+        let define = |builder: &mut B| {
+            let mut stake_info = builder.constant::<StakeInfoVariable>(
+                StakeInfo {
+                    total: 300,
+                    approved: 0,
+                }
+                .into(),
+            );
 
-        let next_bps_hash = CryptoHash::hash_borsh(test_bps.clone());
-        let next_bps_hash = builder.constant::<CryptoHashVariable>(next_bps_hash.0.into());
+            for _ in 0..approved_stakes.len() {
+                stake_info.approved = builder.read::<BalanceVariable>();
+                let is_sufficient = builder.ensure_stake_is_sufficient(&stake_info);
+                builder.write::<BoolVariable>(is_sufficient);
+            }
+        };
+        let writer = |input: &mut PI| {
+            for stake in approved_stakes {
+                input.write::<BalanceVariable>(stake.into());
+            }
+        };
+        let assertions = |mut output: PO| {
+            assert!(output.read::<BoolVariable>(), "stake is equal to threshold");
+            assert!(
+                !output.read::<BoolVariable>(),
+                "stake is less than threshold"
+            );
+            assert!(
+                output.read::<BoolVariable>(),
+                "stake is greater than threshold"
+            );
+            assert!(!output.read::<BoolVariable>(), "stake is zero");
+        };
+        builder_suite(define, writer, assertions);
+    }
 
-        let next_bps_is_valid =
-            builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
-        builder.write::<BoolVariable>(next_bps_is_valid);
+    #[test]
+    fn test_ensure_height() {
+        let test_header = to_header(get_first_epoch());
+        let define = |builder: &mut B| {
+            let header = builder.read::<HeaderVariable>();
 
-        let expected_root =
+            let early_block_height = builder.constant::<U64Variable>(1);
+            let one = builder.one();
+            let later_block_height = builder.add(header.inner_lite.height, one);
+
+            let r = builder.ensure_not_already_verified(&header, &early_block_height);
+            builder.write::<BoolVariable>(r);
+
+            let r = builder.ensure_not_already_verified(&header, &later_block_height);
+            builder.write::<BoolVariable>(r);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(test_header.into());
+        };
+        let assertions = |mut output: PO| {
+            assert!(!output.read::<BoolVariable>(), "too early");
+            assert!(output.read::<BoolVariable>(), "height is later");
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_ensure_next_bps() {
+        let header = get_first_epoch();
+        let bps = header.next_bps.clone().unwrap_or_default();
+        let bps_hash = CryptoHash::hash_borsh(bps.clone());
+        let header = to_header(header);
+
+        let define = |builder: &mut B| {
+            let header = builder.read::<HeaderVariable>();
+            let next_bps =
+                builder.read::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>();
+
+            let current =
+                builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
+            builder.write::<BoolVariable>(current);
+            let next =
+                builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.next_epoch_id);
+            builder.write::<BoolVariable>(next);
+
+            let contains_next_bps = builder.ensure_if_next_epoch_contains_next_bps(
+                &header,
+                &header.inner_lite.next_epoch_id,
+                &next_bps,
+            );
+            builder.write::<BoolVariable>(contains_next_bps);
+
+            let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
+            let is_valid = builder
+                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            builder.write::<BoolVariable>(is_valid);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(header.into());
+            input.write::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
+                bps.clone()
+                    .into_iter()
+                    .map(|s| Into::<ValidatorStake>::into(s))
+                    .map(Into::into)
+                    .collect(),
+            )
+        };
+        let assertions = |mut output: PO| {
+            assert!(output.read::<BoolVariable>(), "epoch is current");
+            assert!(output.read::<BoolVariable>(), "epoch is next");
+            assert!(output.read::<BoolVariable>(), "next epoch has bps");
+            assert!(output.read::<BoolVariable>(), "next bps is valid");
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_ensure_proofs() {
+        let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
-
         let p: BasicProof = fixture("old.json");
         let outcome_hash = CryptoHash::hash_borsh(p.outcome_proof.to_hashes());
+
         const OUTCOME_PROOF_AMT: usize = 2;
+        const OUTCOME_ROOT_PROOF_AMT: usize = 2;
+        const BLOCK_PROOF_AMT: usize = 26;
 
-        let outcome_proof: MerklePathVariableValue<OUTCOME_PROOF_AMT, _> =
-            p.outcome_proof.proof.into();
-        let outcome_proof =
-            builder.constant::<MerklePathVariable<OUTCOME_PROOF_AMT>>(outcome_proof);
+        let define = |builder: &mut B| {
+            let proof = builder.read::<ProofVariable<
+                OUTCOME_PROOF_AMT,
+                OUTCOME_ROOT_PROOF_AMT,
+                BLOCK_PROOF_AMT,
+            >>();
+            let expected_outcome_root = builder.read::<CryptoHashVariable>();
+            let expected_block_root = builder.read::<CryptoHashVariable>();
 
-        let outcome_root_proof: MerklePathVariableValue<2, _> = p.outcome_root_proof.into();
-        let outcome_root_proof = builder.constant::<MerklePathVariable<2>>(outcome_root_proof);
+            // TODO: to_hashes
+            let outcome_hash = builder.constant::<CryptoHashVariable>(outcome_hash.0.into());
+            let root_matches = builder.verify_outcome(
+                &expected_outcome_root,
+                &proof.outcome_proof,
+                &outcome_hash,
+                &proof.outcome_root_proof,
+            );
+            builder.write::<BoolVariable>(root_matches);
 
-        let expected_outcome_root = builder
-            .constant::<CryptoHashVariable>(p.block_header_lite.inner_lite.outcome_root.0.into());
+            // TODO: to_hashes
+            let block_hash =
+                builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
+            let root_matches =
+                builder.verify_block(&expected_block_root, &proof.block_proof, &block_hash);
+            builder.write::<BoolVariable>(root_matches);
 
-        let outcome_hash = builder.constant::<CryptoHashVariable>(outcome_hash.0.into());
-        let root_matches = builder.verify_outcome(
-            &expected_outcome_root,
-            &outcome_proof,
-            &outcome_hash,
-            &outcome_root_proof,
-        );
-        builder.write::<BoolVariable>(root_matches);
-
-        let expected = builder.constant::<CryptoHashVariable>(expected_root.0.clone().into());
-
-        let block_proof: MerklePathVariableValue<26, _> = p.block_proof.into();
-        let block_proof = builder.constant::<MerklePathVariable<26>>(block_proof);
-        let block_hash =
-            builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
-        builder.verify_block(&expected, &block_proof, &block_hash);
-        builder.write::<BoolVariable>(root_matches);
-
-        let next_bps_hash = CryptoHash::hash_borsh(&test_bps);
-
-        let next_bps_hash = builder.constant::<CryptoHashVariable>(next_bps_hash.0.into());
-        let next_bps_hash_matches =
-            builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
-        builder.write::<BoolVariable>(next_bps_hash_matches);
-
-        let registered_p = builder.constant::<ProofVariable<2, 2, 26>>(
-            near_light_client_protocol::Proof::Basic {
-                head_block_root: expected_root,
-                proof: Box::new(fixture("old.json")),
-            }
-            .into(),
-        );
-        let proof_verified = builder.verify(registered_p);
-        builder.write::<BoolVariable>(proof_verified);
-
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
-        input.write::<HeaderVariable>(test_header.into());
-
-        let (proof, mut output) = circuit.prove(&input);
-
-        assert!(!output.read::<BoolVariable>(), "too early");
-        assert!(output.read::<BoolVariable>(), "height it later");
-        assert!(output.read::<BoolVariable>(), "current epoch");
-        assert!(output.read::<BoolVariable>(), "next epoch");
-
-        assert!(output.read::<BoolVariable>(), "next epoch has bps");
-        assert!(output.read::<BoolVariable>(), "stake is equal to threshold");
-        assert!(
-            !output.read::<BoolVariable>(),
-            "stake is less than threshold"
-        );
-        assert!(
-            output.read::<BoolVariable>(),
-            "stake is greater than threshold"
-        );
-        assert!(!output.read::<BoolVariable>(), "stake is zero");
-        assert!(output.read::<BoolVariable>(), "next bps is valid");
-        assert!(output.read::<BoolVariable>(), "outcome root matches");
-        assert!(output.read::<BoolVariable>(), "block root matches");
-        assert!(output.read::<BoolVariable>(), "next bps hash matches");
-        assert!(output.read::<BoolVariable>(), "proof verified");
+            let proof_verified = builder.verify(proof);
+            builder.write::<BoolVariable>(proof_verified);
+        };
+        let writer = |input: &mut PI| {
+            input
+                .write::<ProofVariable<OUTCOME_PROOF_AMT, OUTCOME_ROOT_PROOF_AMT, BLOCK_PROOF_AMT>>(
+                    near_light_client_protocol::Proof::Basic {
+                        head_block_root: block_root,
+                        proof: Box::new(fixture("old.json")),
+                    }
+                    .into(),
+                );
+            input.write::<CryptoHashVariable>(p.block_header_lite.inner_lite.outcome_root.0.into());
+            input.write::<CryptoHashVariable>(block_root.0.clone().into());
+        };
+        let assertions = |mut output: PO| {
+            assert!(output.read::<BoolVariable>(), "outcome root matches");
+            assert!(output.read::<BoolVariable>(), "block root matches");
+            assert!(output.read::<BoolVariable>(), "proof verified");
+        };
+        builder_suite(define, writer, assertions);
     }
 
-    // TODO: split humungous test into smaller ones
     #[test]
-    fn test_basic_inclusion_proof() {
-        pretty_env_logger::try_init().unwrap_or_default();
-        let test_header = get_first_epoch();
-        let test_header = to_header(test_header);
-
-        let expected_root =
+    fn test_inclusion_proof_blackbox() {
+        let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
 
-        let mut builder = DefaultBuilder::new();
+        const OUTCOME_PROOF_AMT: usize = 2;
+        const OUTCOME_ROOT_PROOF_AMT: usize = 2;
+        const BLOCK_PROOF_AMT: usize = 26;
 
-        let registered_p = builder.constant::<ProofVariable<2, 2, 26>>(
-            near_light_client_protocol::Proof::Basic {
-                head_block_root: expected_root,
-                proof: Box::new(fixture("old.json")),
-            }
-            .into(),
-        );
-        let proof_verified = builder.verify(registered_p);
-        builder.write::<BoolVariable>(proof_verified);
+        let define = |builder: &mut B| {
+            let registered_proof = builder.read::<ProofVariable<
+                OUTCOME_PROOF_AMT,
+                OUTCOME_ROOT_PROOF_AMT,
+                BLOCK_PROOF_AMT,
+            >>();
 
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
-        input.write::<HeaderVariable>(test_header.into());
-
-        let (_proof, mut output) = circuit.prove(&input);
-
-        assert!(output.read::<BoolVariable>())
+            let proof_verified = builder.verify(registered_proof);
+            builder.write::<BoolVariable>(proof_verified);
+        };
+        let writer = |input: &mut PI| {
+            input
+                .write::<ProofVariable<OUTCOME_PROOF_AMT, OUTCOME_ROOT_PROOF_AMT, BLOCK_PROOF_AMT>>(
+                    near_light_client_protocol::Proof::Basic {
+                        head_block_root: block_root,
+                        proof: Box::new(fixture("old.json")),
+                    }
+                    .into(),
+                );
+        };
+        let assertions = |mut output: PO| {
+            assert!(output.read::<BoolVariable>(), "proof verified");
+        };
+        builder_suite(define, writer, assertions);
     }
 
-    // TODO: split humungous test into smaller ones
     #[test]
-    fn test_sync_accross_boundaries() {
+    fn test_sync_accross_boundaries_blackbox() {
         pretty_env_logger::try_init().unwrap_or_default();
-        let (mut head, mut next_bps, next_block) = test_state();
-        let mut next_epoch_id = EpochId(head.inner_lite.next_epoch_id);
+        let (head, next_bps, next_block) = test_state();
+        println!(
+            "bps len {} sigs len {}",
+            next_bps.len(),
+            next_block.approvals_after_next.len()
+        );
 
-        let mut builder = DefaultBuilder::new();
-        let header_var = builder.read::<HeaderVariable>();
-        let bps_var = builder.read::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>();
-        let next_block_var = builder.read::<BlockVariable>();
+        let define = |builder: &mut B| {
+            let header = builder.read::<HeaderVariable>();
+            let bps = builder.read::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>();
+            let next_block = builder.read::<BlockVariable>();
+            builder.sync(header, bps, next_block);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(head.into());
+            input.write::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
+                next_bps
+                    .clone()
+                    .into_iter()
+                    .map(|s| Into::<ValidatorStake>::into(s))
+                    .map(Into::into)
+                    .collect(),
+            );
+            input.write::<BlockVariable>(next_block.clone().into());
+        };
+        let assertions = |mut output: PO| {
+            let header = output.read::<HeaderVariable>();
+            println!("header: {:?}", header);
+        };
+        builder_suite(define, writer, assertions);
 
-        builder.sync(header_var, bps_var, next_block_var);
         // let mut sync_and_update = |next_block: LightClientBlockView| {
         //     let next_bps = builder
         //         .constant::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
@@ -831,24 +808,6 @@ mod tests {
         // };
         // sync_and_update(next_block_var.clone());
         //
-        let circuit = builder.build();
-        let mut input = circuit.input();
-
-        input.write::<HeaderVariable>(head.into());
-        input.write::<ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>>(
-            next_bps
-                .clone()
-                .into_iter()
-                .map(|s| Into::<ValidatorStake>::into(s))
-                .map(Into::into)
-                .collect(),
-        );
-        input.write::<BlockVariable>(next_block.clone().into());
-
-        let (proof, mut output) = circuit.prove(&input);
-
-        let header = output.read::<HeaderVariable>();
-        println!("header: {:?}", header);
     }
     #[test]
     fn test_reconstruct_approval_msg() {}

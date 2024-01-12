@@ -177,6 +177,11 @@ pub struct BpsApprovals {
 
 impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
+        assert_eq!(
+            approvals.len(),
+            MAX_EPOCH_VALIDATORS,
+            "Approvals must be of length M"
+        );
         let mut active_bitmask = vec![];
         let signatures = approvals
             .into_iter()
@@ -310,15 +315,15 @@ where
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct StakeInfoVariable {
-    pub approved_stake: BalanceVariable,
-    pub total_stake: BalanceVariable,
+    pub approved: BalanceVariable,
+    pub total: BalanceVariable,
 }
 
 impl<F: RichField> From<near_light_client_protocol::StakeInfo> for StakeInfoVariableValue<F> {
     fn from(value: near_light_client_protocol::StakeInfo) -> Self {
         Self {
-            approved_stake: value.approved.into(),
-            total_stake: value.total.into(),
+            approved: value.approved.into(),
+            total: value.total.into(),
         }
     }
 }
