@@ -5,22 +5,21 @@ use near_light_client_protocol::{
     LightClientBlockView, Signature, ValidatorStake,
 };
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
-use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::{
     EDDSASignatureVariable, DUMMY_SIGNATURE,
+};
+use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::{
+    EDDSASignatureVariableValue, DUMMY_PUBLIC_KEY,
 };
 use plonky2x::frontend::hint::simple::hint::Hint;
 use plonky2x::frontend::{curta::ec::point::CompressedEdwardsYVariable, uint::Uint};
 use plonky2x::prelude::*;
-use plonky2x::utils::hash::sha256;
 use serde::{Deserialize, Serialize};
 
 // TODO: if we use borsh here be careful of order
-// TODO: ideally just use into conversions and expose protocol via types crate
 // TODO: borsh? would need encoding for messages, make a hint
+//
 // TODO: optional variable
-// TODO: sparse arrays for BPS, check tendermint, or we make own pub type entirely
-// TODO: ecdsa sigs & keys
 // TODO: get constrained numbers
 //
 // EVM write synced
@@ -175,30 +174,27 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct BpsApprovals {
-    pub active_bitmask: ArrayVariable<BoolVariable, MAX_EPOCH_VALIDATORS>,
-    pub signatures: ArrayVariable<SignatureVariable, MAX_EPOCH_VALIDATORS>,
+    pub is_active: ArrayVariable<BoolVariable, MAX_EPOCH_VALIDATORS>,
+    pub signatures: ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>,
 }
 
 impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
-        let mut active_bitmask = vec![];
+        let mut is_active = vec![];
         let signatures = approvals
             .into_iter()
             .map(|sig| {
-                if sig.is_none() {
-                    active_bitmask.push(false);
-                } else {
-                    active_bitmask.push(true);
-                }
-                sig.into()
+                is_active.push(sig.is_some());
+                let sig: SignatureVariableValue<F> = sig.into();
+                sig.ed25519
             })
-            .collect::<Vec<SignatureVariableValue<F>>>();
+            .collect::<Vec<EDDSASignatureVariableValue<F>>>();
 
-        assert_eq!(active_bitmask.len(), MAX_EPOCH_VALIDATORS);
+        assert_eq!(is_active.len(), MAX_EPOCH_VALIDATORS);
         assert_eq!(signatures.len(), MAX_EPOCH_VALIDATORS);
 
         Self {
-            active_bitmask: active_bitmask.into(),
+            is_active: is_active.into(),
             signatures: signatures.into(),
         }
     }
@@ -235,6 +231,7 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
 //     Ed25519(CompressedEdwardsYVariable),
 // }
 pub type PublicKeyVariable = CompressedEdwardsYVariable;
+pub type PublicKeyVariableValue = CompressedEdwardsY;
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct SignatureVariable {
@@ -244,15 +241,22 @@ pub struct SignatureVariable {
 
 impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
     fn from(sig: Option<Box<Signature>>) -> Self {
-        let sig = sig
+        let (r, s) = sig
             .map(|s| match *s {
-                Signature::ED25519(s) => s.to_bytes(),
-                Signature::SECP256K1(_) => todo!("Support ECDSA"),
+                Signature::ED25519(s) => (*s.r_bytes(), *s.s_bytes()),
+                Signature::SECP256K1(_) => {
+                    panic!("ECDSA is being phased out and validators don't use it")
+                }
             })
-            .unwrap_or_else(|| DUMMY_SIGNATURE);
+            .unwrap_or_else(|| {
+                (
+                    DUMMY_SIGNATURE[0..32].try_into().unwrap(),
+                    DUMMY_SIGNATURE[32..64].try_into().unwrap(),
+                )
+            });
         let sig = EDDSASignatureVariableValue {
-            r: CompressedEdwardsY(sig[0..32].try_into().unwrap()),
-            s: U256::from_little_endian(&sig[32..64]),
+            r: CompressedEdwardsY(r),
+            s: U256::from_little_endian(&s),
         };
         Self {
             ed25519: sig.into(),
