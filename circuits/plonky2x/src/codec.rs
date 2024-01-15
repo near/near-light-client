@@ -37,29 +37,29 @@ pub trait Borsh: Sized {
 //     ) -> Vec<ByteVariable> {
 //         let x = self.variables()[0];
 //         builder.beacon_get_block_header(block_root)
-        // <U64Variable as Uint<2>>::to_little_endian(&self, &mut vec![]);
-        // U64Target::from(self).encode(builder);
-        // self.limbs
-        //     .iter()
-        //     .rev()
-        //     .flat_map(|x| x.encode(builder))
-        //     .collect::<Vec<_>>()
-    //}
+// <U64Variable as Uint<2>>::to_little_endian(&self, &mut vec![]);
+// U64Target::from(self).encode(builder);
+// self.limbs
+//     .iter()
+//     .rev()
+//     .flat_map(|x| x.encode(builder))
+//     .collect::<Vec<_>>()
+//}
 
-    // fn decodeb<L: PlonkParameters<D>, const D: usize>(
-    //     builder: &mut CircuitBuilder<L, D>,
-    //     bytes: &[ByteVariable],
-    // ) -> Self {
-    //     assert_eq!(bytes.len(), 2 * 4);
-    //     let mut limbs = [U32Variable::init_unsafe(builder); 2];
-    //     limbs[0].to_little_endian(&mut bytes[0..4]);
-    //     U32Variable::from_variables(builder, variables)
-    //     for i in 0..2 {
-    //         limbs[i] = U32Variable::decodeb(builder, &bytes[i * 4..(i + 1) * 4]);
-    //     }
-    //     limbs.reverse();
-    //     Self { limbs }
-    // }
+// fn decodeb<L: PlonkParameters<D>, const D: usize>(
+//     builder: &mut CircuitBuilder<L, D>,
+//     bytes: &[ByteVariable],
+// ) -> Self {
+//     assert_eq!(bytes.len(), 2 * 4);
+//     let mut limbs = [U32Variable::init_unsafe(builder); 2];
+//     limbs[0].to_little_endian(&mut bytes[0..4]);
+//     U32Variable::from_variables(builder, variables)
+//     for i in 0..2 {
+//         limbs[i] = U32Variable::decodeb(builder, &bytes[i * 4..(i + 1) * 4]);
+//     }
+//     limbs.reverse();
+//     Self { limbs }
+// }
 //}
 
 // fn serialize<W: Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
