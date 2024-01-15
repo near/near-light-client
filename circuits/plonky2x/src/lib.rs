@@ -1,7 +1,5 @@
 use plonky2x::prelude::*;
-use variables::{
-    BlockVariable, HeaderVariable, ProofVariable, ValidatorStakeVariable, MAX_EPOCH_VALIDATORS,
-};
+use variables::{BlockVariable, BpsArr, HeaderVariable, ProofVariable, ValidatorStakeVariable};
 
 mod builder;
 mod codec;
@@ -25,7 +23,7 @@ pub trait SyncCircuit<L: PlonkParameters<D>, const D: usize> {
     fn sync(
         &mut self,
         head: HeaderVariable,
-        epoch_bps: ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>,
+        epoch_bps: BpsArr<ValidatorStakeVariable>,
         next_block: BlockVariable,
     ) -> HeaderVariable;
 }
