@@ -1351,7 +1351,7 @@ dependencies = [
 [[package]]
 name = "curta"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/curta.git#59e489d21622a92b25a2e4a5b710ce322f309b87"
+source = "git+https://github.com/succinctlabs/curta.git#ebbd97c0f4f91bfa792fa5746e1d3f5334316189"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1361,7 +1361,7 @@ dependencies = [
  "itertools 0.10.5",
  "log",
  "num",
- "plonky2",
+ "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
  "plonky2_maybe_rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.8.5",
  "serde",
@@ -3683,7 +3683,7 @@ dependencies = [
  "near-primitives-core",
  "pretty_env_logger",
  "protobuf 3.2.0",
- "rand 0.8.5",
+ "rand 0.7.3",
  "reqwest",
  "serde",
  "serde_json",
@@ -3701,8 +3701,9 @@ dependencies = [
  "hex",
  "near-light-client-protocol",
  "near-primitives",
- "plonky2",
+ "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git)",
  "plonky2x",
+ "pretty_assertions",
  "pretty_env_logger",
  "serde",
  "serde_json",
@@ -3723,7 +3724,7 @@ dependencies = [
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
- "rand 0.8.5",
+ "rand 0.7.3",
  "serde",
  "serde_json",
  "thiserror",
@@ -4735,7 +4736,7 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
-source = "git+https://github.com/mir-protocol/plonky2.git#54a13135884e0da7c1d1787a3511a16d3518f0ba"
+source = "git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d#2d36559dad7adaff46631f31c7e6b24b80096eee"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
@@ -4745,9 +4746,32 @@ dependencies = [
  "keccak-hash",
  "log",
  "num",
- "plonky2_field",
+ "plonky2_field 0.1.1 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
+ "plonky2_maybe_rayon 0.1.1 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
+ "plonky2_util 0.1.1 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "unroll",
+]
+
+[[package]]
+name = "plonky2"
+version = "0.1.4"
+source = "git+https://github.com/mir-protocol/plonky2.git#30b47998262642be54da5acf03dfca31af4d93f7"
+dependencies = [
+ "ahash 0.8.7",
+ "anyhow",
+ "getrandom 0.2.12",
+ "hashbrown 0.14.3",
+ "itertools 0.11.0",
+ "keccak-hash",
+ "log",
+ "num",
+ "plonky2_field 0.1.1 (git+https://github.com/mir-protocol/plonky2.git)",
  "plonky2_maybe_rayon 0.1.1 (git+https://github.com/mir-protocol/plonky2.git)",
- "plonky2_util",
+ "plonky2_util 0.1.1 (git+https://github.com/mir-protocol/plonky2.git)",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "serde",
@@ -4759,12 +4783,27 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "0.1.1"
-source = "git+https://github.com/mir-protocol/plonky2.git#54a13135884e0da7c1d1787a3511a16d3518f0ba"
+source = "git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d#2d36559dad7adaff46631f31c7e6b24b80096eee"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
  "num",
- "plonky2_util",
+ "plonky2_util 0.1.1 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
+ "rand 0.8.5",
+ "serde",
+ "static_assertions",
+ "unroll",
+]
+
+[[package]]
+name = "plonky2_field"
+version = "0.1.1"
+source = "git+https://github.com/mir-protocol/plonky2.git#30b47998262642be54da5acf03dfca31af4d93f7"
+dependencies = [
+ "anyhow",
+ "itertools 0.11.0",
+ "num",
+ "plonky2_util 0.1.1 (git+https://github.com/mir-protocol/plonky2.git)",
  "rand 0.8.5",
  "serde",
  "static_assertions",
@@ -4783,7 +4822,15 @@ dependencies = [
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
-source = "git+https://github.com/mir-protocol/plonky2.git#54a13135884e0da7c1d1787a3511a16d3518f0ba"
+source = "git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d#2d36559dad7adaff46631f31c7e6b24b80096eee"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "plonky2_maybe_rayon"
+version = "0.1.1"
+source = "git+https://github.com/mir-protocol/plonky2.git#30b47998262642be54da5acf03dfca31af4d93f7"
 dependencies = [
  "rayon",
 ]
@@ -4791,12 +4838,17 @@ dependencies = [
 [[package]]
 name = "plonky2_util"
 version = "0.1.1"
-source = "git+https://github.com/mir-protocol/plonky2.git#54a13135884e0da7c1d1787a3511a16d3518f0ba"
+source = "git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d#2d36559dad7adaff46631f31c7e6b24b80096eee"
+
+[[package]]
+name = "plonky2_util"
+version = "0.1.1"
+source = "git+https://github.com/mir-protocol/plonky2.git#30b47998262642be54da5acf03dfca31af4d93f7"
 
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#9d59459e62a43103c310d77b1155df0fe61a174f"
+source = "git+https://github.com/succinctlabs/succinctx.git#19a16bfd14b3367c6c022ba6477457baca9d84b3"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4820,7 +4872,7 @@ dependencies = [
  "log",
  "num",
  "num-bigint 0.4.4",
- "plonky2",
+ "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
  "plonky2x-derive",
  "rand 0.8.5",
  "reqwest",
@@ -4838,7 +4890,7 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#9d59459e62a43103c310d77b1155df0fe61a174f"
+source = "git+https://github.com/succinctlabs/succinctx.git#19a16bfd14b3367c6c022ba6477457baca9d84b3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4874,6 +4926,16 @@ name = "prefix-sum-vec"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa06bd51638b6e76ac9ba9b6afb4164fa647bd2916d722f2623fbb6d1ed8bdba"
+
+[[package]]
+name = "pretty_assertions"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af7cee1a6c8a5b9208b3cb1061f10c0cb689087b3d8ce85fb9d2dd7a29b6ba66"
+dependencies = [
+ "diff",
+ "yansi",
+]
 
 [[package]]
 name = "pretty_env_logger"

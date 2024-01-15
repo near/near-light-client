@@ -42,3 +42,10 @@ impl<L: PlonkParameters<D>, const D: usize> NearMerkleTree for CircuitBuilder<L,
         self.curta_sha256(&encoded_leaf)
     }
 }
+
+pub fn determine_direction(dir: &near_light_client_protocol::Direction) -> bool {
+    match dir {
+        near_light_client_protocol::Direction::Left => true,
+        near_light_client_protocol::Direction::Right => false,
+    }
+}

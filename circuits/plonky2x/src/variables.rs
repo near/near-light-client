@@ -1,4 +1,5 @@
-use ethers::types::{H256, U256};
+use crate::merkle::determine_direction;
+use ethers::types::U256;
 use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::{Header, Itertools};
 use near_light_client_protocol::{
@@ -7,56 +8,51 @@ use near_light_client_protocol::{
 };
 use near_light_client_protocol::{Proof, StakeInfo};
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
-use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::{
-    EDDSASignatureVariable, DUMMY_SIGNATURE,
-};
-use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::{
-    EDDSASignatureVariableValue, DUMMY_PUBLIC_KEY,
-};
+use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
+use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue;
 use plonky2x::frontend::hint::simple::hint::Hint;
+use plonky2x::frontend::vars::EvmVariable;
 use plonky2x::frontend::{curta::ec::point::CompressedEdwardsYVariable, uint::Uint};
 use plonky2x::prelude::*;
+use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
+// TODO: remove any unused fields like account id etc?
 // TODO: if we use borsh here be careful of order
-// TODO: borsh? would need encoding for messages, make a hint
-//
-// TODO: optional variable
-// TODO: get constrained numbers
-//
-// EVM write synced
-// EVM write proof
 
-// TODO: check if this BPS seats changers for testnet/mainnet
+/// TODO: check if BPS seats changes for testnet/mainnet
 /// Type for omitting the size across the codebase for arrays that are the same size as BPS
 pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
 pub type BlockHeightVariable = U64Variable;
 pub type BalanceVariable = U128Variable;
-pub type AccountIdVariable = BytesVariable<{ AccountId::MAX_LEN }>;
+pub type AccountIdVariable = BytesVariable<{ AccountId::MAX_LEN }>; // TODO: decide if this is a
+                                                                    // reasonable way
 
+// TODO: add handling of empty path elements
 #[derive(CircuitVariable, Clone, Debug)]
-pub struct MerklePathVariable<const M: usize> {
-    pub path: ArrayVariable<Bytes32Variable, M>,
-    pub indices: ArrayVariable<BoolVariable, M>,
+pub struct MerklePathVariable<const A: usize> {
+    pub path: ArrayVariable<Bytes32Variable, A>,
+    pub indices: ArrayVariable<BoolVariable, A>,
 }
+impl<F: RichField, const A: usize> From<MerklePath> for MerklePathVariableValue<A, F> {
+    fn from(path: MerklePath) -> Self {
+        assert!(path.len() <= A);
 
-impl<F: RichField, const M: usize> From<MerklePath> for MerklePathVariableValue<M, F> {
-    fn from(value: MerklePath) -> Self {
-        assert_eq!(value.len(), M, "Merkle path must be of length M");
-        let indices: Vec<bool> = value
+        let mut indices = path
             .iter()
-            .map(|x| match x.direction {
-                // TODO: add tests for this
-                near_light_client_protocol::Direction::Left => true,
-                near_light_client_protocol::Direction::Right => false,
-            })
-            .collect();
-        Self {
-            path: value.iter().map(|x| x.hash.0.into()).collect::<Vec<_>>(),
-            indices,
-        }
+            .map(|x| &x.direction)
+            .map(determine_direction)
+            .collect_vec();
+        // FIXME: Hmm, this seems problematic potentially since it might hash the wrong way
+        // verify.
+        indices.resize(A, Default::default());
+
+        let mut path = path.iter().map(|x| x.hash.0.into()).collect_vec();
+        path.resize(A, Default::default());
+
+        Self { path, indices }
     }
 }
 
@@ -73,6 +69,27 @@ impl<F: RichField> From<Header> for HeaderVariableValue<F> {
             inner_rest_hash: header.inner_rest_hash.0.into(),
             inner_lite: header.inner_lite.into(),
         }
+    }
+}
+impl<F: RichField> From<LightClientBlockView> for HeaderVariableValue<F> {
+    fn from(header: LightClientBlockView) -> Self {
+        Self {
+            prev_block_hash: header.prev_block_hash.0.into(),
+            inner_rest_hash: header.inner_rest_hash.0.into(),
+            inner_lite: header.inner_lite.into(),
+        }
+    }
+}
+impl HeaderVariable {
+    pub(crate) fn hash<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<L, D>,
+    ) -> CryptoHashVariable {
+        let inner_lite = self.inner_lite.hash(b);
+        let lite_rest = b.curta_sha256_pair(inner_lite, self.inner_rest_hash);
+        let hash = b.curta_sha256_pair(lite_rest, self.prev_block_hash);
+        b.watch(&hash, "header_hash");
+        hash
     }
 }
 
@@ -106,12 +123,41 @@ impl<F: RichField> From<BlockHeaderInnerLiteView> for HeaderInnerVariableValue<F
         }
     }
 }
+pub const INNER_ENCODED_LEN: usize = 208;
 
-// TODO: test this individually as i think they arent borsh encoded correctly
-// this is incredibly error prone
+impl HeaderInnerVariable {
+    pub(crate) fn encode<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<L, D>,
+    ) -> BytesVariable<INNER_ENCODED_LEN> {
+        // TODO: doubt we can abi encode this
+        let mut input_stream = VariableStream::new();
+        input_stream.write(&self.height);
+        input_stream.write(&self.epoch_id);
+        input_stream.write(&self.next_epoch_id);
+        input_stream.write(&self.prev_state_root);
+        input_stream.write(&self.outcome_root);
+        input_stream.write(&self.timestamp);
+        input_stream.write(&self.next_bp_hash);
+        input_stream.write(&self.block_merkle_root);
+
+        let output_bytes = b.hint(input_stream, EncodeInner);
+        let bytes = output_bytes.read::<BytesVariable<208>>(b);
+        b.watch(&bytes, "inner_lite_bytes");
+        bytes
+    }
+    pub(crate) fn hash<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<L, D>,
+    ) -> CryptoHashVariable {
+        let bytes = self.encode(b);
+        b.curta_sha256(&bytes.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InnerLiteHash<const N: usize>;
-impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for InnerLiteHash<N> {
+pub struct EncodeInner;
+impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for EncodeInner {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let mut bytes: Vec<u8> = vec![];
         let height = input_stream.read_value::<U64Variable>();
@@ -132,100 +178,118 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Inner
         bytes.extend_from_slice(&next_bp_hash.0);
         bytes.extend_from_slice(&block_merkle_root.0);
 
-        assert_eq!(bytes.len(), N, "expected {} bytes, got {}", N, bytes.len());
+        assert_eq!(
+            bytes.len(),
+            INNER_ENCODED_LEN,
+            "expected {} bytes, got {}",
+            INNER_ENCODED_LEN,
+            bytes.len()
+        );
 
-        let bytes: [u8; N] = bytes.try_into().unwrap();
-        output_stream.write_value::<BytesVariable<N>>(bytes);
+        let bytes: [u8; INNER_ENCODED_LEN] = bytes.try_into().unwrap();
+        output_stream.write_value::<BytesVariable<INNER_ENCODED_LEN>>(bytes);
     }
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct BlockVariable {
-    pub prev_block_hash: CryptoHashVariable,
+    pub header: HeaderVariable,
     pub next_block_inner_hash: CryptoHashVariable,
-    pub inner_lite: HeaderInnerVariable,
-    pub inner_rest_hash: CryptoHashVariable,
     pub next_bps: BpsArr<ValidatorStakeVariable>,
-    pub approvals_after_next: BpsApprovals,
+    pub approvals_after_next: BpsApprovals<NUM_BLOCK_PRODUCER_SEATS>,
 }
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
         Self {
-            prev_block_hash: block.prev_block_hash.0.into(),
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
-            inner_lite: block.inner_lite.into(),
-            inner_rest_hash: block.inner_rest_hash.0.into(),
-            next_bps: if let Some(next_bps) = block.next_bps {
-                next_bps
-                    .into_iter()
-                    .map(|s| {
-                        let s: ValidatorStake = s.into();
-                        s
-                    })
-                    .map(Into::into)
-                    .collect()
-            } else {
-                // FIXME: needs to fill to spsace
-                vec![]
-            }
-            .into(),
+            header: block.clone().into(),
+            next_bps: bps_to_variable(block.next_bps),
             approvals_after_next: block.approvals_after_next.into(),
         }
     }
 }
 
-#[derive(CircuitVariable, Clone, Debug)]
-pub struct BpsApprovals {
-    pub is_active: BpsArr<BoolVariable>,
-    pub signatures: BpsArr<EDDSASignatureVariable>,
+pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
+    next_bps: Option<Vec<T>>,
+) -> Vec<ValidatorStakeVariableValue<F>> {
+    next_bps
+        .map(|next_bps| {
+            next_bps
+                .into_iter()
+                .take(NUM_BLOCK_PRODUCER_SEATS)
+                .map(Into::<ValidatorStake>::into)
+                .map(Into::<ValidatorStakeVariableValue<F>>::into)
+                .collect()
+        })
+        .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
 }
 
-impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
+#[derive(CircuitVariable, Clone, Debug)]
+pub struct BpsApprovals<const AMT: usize> {
+    pub is_active: BpsArr<BoolVariable, AMT>,
+    pub signatures: BpsArr<EDDSASignatureVariable, AMT>,
+}
+
+impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
+    for BpsApprovalsValue<AMT, F>
+{
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
-        let mut is_active = vec![];
-        let mut signatures = vec![];
-        // TODO: bounding here
+        let mut is_active = vec![false; AMT];
+        let mut signatures = vec![Default::default(); AMT];
+
         approvals
             .into_iter()
-            .take(NUM_BLOCK_PRODUCER_SEATS)
-            .for_each(|s| {
-                is_active.push(s.is_some());
+            .take(AMT)
+            .enumerate()
+            .for_each(|(i, s)| {
+                is_active[i] = s.is_some();
                 let s: SignatureVariableValue<F> = s.into();
-                signatures.push(s.signature);
+                signatures[i] = s;
             });
-
-        assert_eq!(is_active.len(), NUM_BLOCK_PRODUCER_SEATS);
-        assert_eq!(signatures.len(), NUM_BLOCK_PRODUCER_SEATS);
 
         Self {
             is_active: is_active.into(),
-            signatures: signatures.into(),
+            signatures: signatures
+                .into_iter()
+                .map(|x| x.signature)
+                .collect_vec()
+                .into(),
         }
     }
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ValidatorStakeVariable {
-    /// Account that stakes money.
     pub account_id: AccountIdVariable,
-    /// Public key of the proposed validator.
     pub public_key: PublicKeyVariable,
-    /// Stake / weight of the validator.
     pub stake: BalanceVariable,
 }
 
 impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
-    fn from(stake: ValidatorStake) -> Self {
-        let pk = stake.public_key().key_data();
-        let y = CompressedEdwardsY::from_slice(&pk).expect("CompressedEdwardsY::from_slice");
-        // TODO: fixme
-        let mut id_bytes = borsh::to_vec(stake.account_id()).unwrap();
-        id_bytes.resize(AccountId::MAX_LEN, 0);
+    fn from(vs: ValidatorStake) -> Self {
+        let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
+        let stake = vs.stake();
+        let mut account_id = vs.take_account_id().as_str().as_bytes().to_vec();
+        account_id.resize(AccountId::MAX_LEN, 0);
         Self {
-            account_id: id_bytes.try_into().unwrap(),
-            public_key: y.into(),
-            stake: stake.stake().into(),
+            account_id: account_id.try_into().unwrap(), // SAFETY: already checked this above
+            public_key: public_key.into(),
+            stake: stake.into(),
+        }
+    }
+}
+
+impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
+    fn default() -> Self {
+        let bytes: [u8; AccountId::MAX_LEN] = [0u8; AccountId::MAX_LEN];
+        let pk = CompressedEdwardsY::default();
+        let stake = 0_u128;
+
+        Self {
+            account_id: bytes.into(),
+            public_key: pk.into(),
+            stake: stake.into(),
         }
     }
 }
@@ -240,31 +304,38 @@ pub struct SignatureVariable {
 
 impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
     fn from(sig: Option<Box<Signature>>) -> Self {
-        let dummy_r = CompressedEdwardsY(DUMMY_SIGNATURE[0..32].try_into().unwrap());
-        let dummy_s = U256::from_little_endian(&DUMMY_SIGNATURE[32..]);
-
-        let signature = sig
-            .map(|s| match *s {
-                Signature::ED25519(s) => EDDSASignatureVariableValue {
+        sig.and_then(|s| match *s {
+            Signature::ED25519(s) => Some(Self {
+                signature: EDDSASignatureVariableValue {
                     r: CompressedEdwardsY(*s.r_bytes()),
                     s: U256::from_little_endian(s.s_bytes()),
                 },
-                Signature::SECP256K1(_) => {
-                    panic!("ECDSA is being phased out and validators don't use it")
-                }
-            })
-            .unwrap_or_else(|| EDDSASignatureVariableValue {
-                r: dummy_r,
-                s: dummy_s,
-            });
-        Self { signature }
+            }),
+            // Silently ignores invalid signatures (ECDSA)
+            // The reasoning being that ECDSA is being phased out and almost all validators
+            // use EDDSA.
+            // If we still need this, we should implement ECDSA.
+            _ => None,
+        })
+        .unwrap_or_default()
+    }
+}
+
+impl<F: RichField> Default for SignatureVariableValue<F> {
+    fn default() -> Self {
+        Self {
+            signature: EDDSASignatureVariableValue {
+                r: CompressedEdwardsY::default(),
+                s: Default::default(),
+            },
+        }
     }
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ProofVariable<const OPD: usize, const ORPD: usize, const BPD: usize> {
     pub head_block_root: CryptoHashVariable,
-    // TODO: constrain the outcome hash by borsh encoding
+    // TODO: constrain the outcome hash by borsh encoding in the circuit, not here
     pub outcome_hash: CryptoHashVariable,
     pub outcome_proof_block_hash: CryptoHashVariable,
     pub outcome_proof: MerklePathVariable<OPD>, // TODO: get real number here
@@ -347,11 +418,12 @@ impl<F: RichField> From<StakeInfo> for StakeInfoVariableValue<F> {
 //     }
 // }
 
+pub type ApprovalMessage = BytesVariable<41>;
 // TODO: not sure these even need to be hints
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BuildEndorsement<const N: usize>;
+pub struct BuildEndorsement;
 
-impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for BuildEndorsement<N> {
+impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let mut bytes = vec![];
         let next_block_hash = input_stream.read_value::<CryptoHashVariable>();
@@ -359,10 +431,9 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Build
 
         bytes.push(0u8);
         bytes.extend_from_slice(&next_block_hash.as_bytes());
-        bytes.extend_from_slice(&next_block_height.to_le_bytes());
+        bytes.extend_from_slice(&(next_block_height + 2).to_le_bytes());
 
-        assert_eq!(bytes.len(), N, "expected {} bytes, got {}", N, bytes.len());
-        output_stream.write_value::<BytesVariable<N>>(bytes.try_into().unwrap());
+        output_stream.write_value::<ApprovalMessage>(bytes.try_into().unwrap());
     }
 }
 // impl<const N: usize> BuildEndorsement<N> {
@@ -383,13 +454,3 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Build
 //         Self
 //     }
 // }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn write_tests() {
-        todo!()
-    }
-}

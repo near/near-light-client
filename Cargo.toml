@@ -39,3 +39,6 @@ near-jsonrpc-client     = "0.7"
 near-jsonrpc-primitives = "0.19"
 near-primitives         = "0.19"
 near-primitives-core    = "0.19"
+
+# [patch."https://github.com/succinctlabs/succinctx.git"]
+# plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
