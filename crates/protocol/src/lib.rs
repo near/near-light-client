@@ -12,6 +12,7 @@ pub use near_primitives::{
     },
 };
 
+pub mod config;
 pub mod error;
 pub mod merkle_util;
 pub mod prelude;
