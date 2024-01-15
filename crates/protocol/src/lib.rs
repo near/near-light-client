@@ -607,4 +607,11 @@ mod tests {
     fn statically_test_lens() {
         println!("approval: {:?}", std::mem::size_of::<ApprovalInner>());
     }
+
+    // Missed a part of LC spec regarding BPS handover, only the MAX_SEATS need to be taken
+    // TODO: change epoch_bps to only store MAX_SEATS and then for next
+    #[test]
+    fn test_enough_stake_in_next_epoch_not_this() {
+        todo!();
+    }
 }

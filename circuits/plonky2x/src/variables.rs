@@ -1,9 +1,11 @@
 use ethers::types::{H256, U256};
-use near_light_client_protocol::prelude::Header;
+use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
+use near_light_client_protocol::prelude::{Header, Itertools};
 use near_light_client_protocol::{
     merkle_util::MerklePath, prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView,
     LightClientBlockView, Signature, ValidatorStake,
 };
+use near_light_client_protocol::{Proof, StakeInfo};
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::{
     EDDSASignatureVariable, DUMMY_SIGNATURE,
@@ -25,8 +27,9 @@ use serde::{Deserialize, Serialize};
 // EVM write synced
 // EVM write proof
 
-pub const MAX_ACCOUNT_ID_LEN: usize = 32; // TODO: get real number here
-pub const MAX_EPOCH_VALIDATORS: usize = 100; // TODO: real number
+// TODO: check if this BPS seats changers for testnet/mainnet
+/// Type for omitting the size across the codebase for arrays that are the same size as BPS
+pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
 pub type BlockHeightVariable = U64Variable;
@@ -45,6 +48,7 @@ impl<F: RichField, const M: usize> From<MerklePath> for MerklePathVariableValue<
         let indices: Vec<bool> = value
             .iter()
             .map(|x| match x.direction {
+                // TODO: add tests for this
                 near_light_client_protocol::Direction::Left => true,
                 near_light_client_protocol::Direction::Right => false,
             })
@@ -103,7 +107,8 @@ impl<F: RichField> From<BlockHeaderInnerLiteView> for HeaderInnerVariableValue<F
     }
 }
 
-// TODO: test this individually as i think they arent borsh encoded
+// TODO: test this individually as i think they arent borsh encoded correctly
+// this is incredibly error prone
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnerLiteHash<const N: usize>;
 impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for InnerLiteHash<N> {
@@ -140,14 +145,12 @@ pub struct BlockVariable {
     pub next_block_inner_hash: CryptoHashVariable,
     pub inner_lite: HeaderInnerVariable,
     pub inner_rest_hash: CryptoHashVariable,
-    // TODO: sparse arrays for this and approvals
-    pub next_bps: ArrayVariable<ValidatorStakeVariable, MAX_EPOCH_VALIDATORS>,
+    pub next_bps: BpsArr<ValidatorStakeVariable>,
     pub approvals_after_next: BpsApprovals,
 }
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
-        assert_eq!(block.next_bps.as_ref().unwrap().len(), MAX_EPOCH_VALIDATORS);
         Self {
             prev_block_hash: block.prev_block_hash.0.into(),
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
@@ -174,24 +177,26 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct BpsApprovals {
-    pub is_active: ArrayVariable<BoolVariable, MAX_EPOCH_VALIDATORS>,
-    pub signatures: ArrayVariable<EDDSASignatureVariable, MAX_EPOCH_VALIDATORS>,
+    pub is_active: BpsArr<BoolVariable>,
+    pub signatures: BpsArr<EDDSASignatureVariable>,
 }
 
 impl<F: RichField> From<Vec<Option<Box<Signature>>>> for BpsApprovalsValue<F> {
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
         let mut is_active = vec![];
-        let signatures = approvals
+        let mut signatures = vec![];
+        // TODO: bounding here
+        approvals
             .into_iter()
-            .map(|sig| {
-                is_active.push(sig.is_some());
-                let sig: SignatureVariableValue<F> = sig.into();
-                sig.ed25519
-            })
-            .collect::<Vec<EDDSASignatureVariableValue<F>>>();
+            .take(NUM_BLOCK_PRODUCER_SEATS)
+            .for_each(|s| {
+                is_active.push(s.is_some());
+                let s: SignatureVariableValue<F> = s.into();
+                signatures.push(s.signature);
+            });
 
-        assert_eq!(is_active.len(), MAX_EPOCH_VALIDATORS);
-        assert_eq!(signatures.len(), MAX_EPOCH_VALIDATORS);
+        assert_eq!(is_active.len(), NUM_BLOCK_PRODUCER_SEATS);
+        assert_eq!(signatures.len(), NUM_BLOCK_PRODUCER_SEATS);
 
         Self {
             is_active: is_active.into(),
@@ -225,49 +230,41 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     }
 }
 
-// TODO: k256 ECDSA and manual enum impl for signatures and public keys
-// #[derive( Clone, Debug)]
-// enum PublicKey {
-//     Ed25519(CompressedEdwardsYVariable),
-// }
 pub type PublicKeyVariable = CompressedEdwardsYVariable;
 pub type PublicKeyVariableValue = CompressedEdwardsY;
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct SignatureVariable {
-    pub ed25519: EDDSASignatureVariable,
-    //TODO: pub ecdsa: Option<ECDSASignatureVariable>
+    pub signature: EDDSASignatureVariable,
 }
 
 impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
     fn from(sig: Option<Box<Signature>>) -> Self {
-        let (r, s) = sig
+        let dummy_r = CompressedEdwardsY(DUMMY_SIGNATURE[0..32].try_into().unwrap());
+        let dummy_s = U256::from_little_endian(&DUMMY_SIGNATURE[32..]);
+
+        let signature = sig
             .map(|s| match *s {
-                Signature::ED25519(s) => (*s.r_bytes(), *s.s_bytes()),
+                Signature::ED25519(s) => EDDSASignatureVariableValue {
+                    r: CompressedEdwardsY(*s.r_bytes()),
+                    s: U256::from_little_endian(s.s_bytes()),
+                },
                 Signature::SECP256K1(_) => {
                     panic!("ECDSA is being phased out and validators don't use it")
                 }
             })
-            .unwrap_or_else(|| {
-                (
-                    DUMMY_SIGNATURE[0..32].try_into().unwrap(),
-                    DUMMY_SIGNATURE[32..64].try_into().unwrap(),
-                )
+            .unwrap_or_else(|| EDDSASignatureVariableValue {
+                r: dummy_r,
+                s: dummy_s,
             });
-        let sig = EDDSASignatureVariableValue {
-            r: CompressedEdwardsY(r),
-            s: U256::from_little_endian(&s),
-        };
-        Self {
-            ed25519: sig.into(),
-        }
+        Self { signature }
     }
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ProofVariable<const OPD: usize, const ORPD: usize, const BPD: usize> {
     pub head_block_root: CryptoHashVariable,
-    // TODO: make variable pub outcome_proof: ExecutionOutcomeWithId,
+    // TODO: constrain the outcome hash by borsh encoding
     pub outcome_hash: CryptoHashVariable,
     pub outcome_proof_block_hash: CryptoHashVariable,
     pub outcome_proof: MerklePathVariable<OPD>, // TODO: get real number here
@@ -276,14 +273,14 @@ pub struct ProofVariable<const OPD: usize, const ORPD: usize, const BPD: usize> 
     pub block_proof: MerklePathVariable<BPD>, // TODO: get real number here
 }
 
-impl<F, const OPD: usize, const ORPD: usize, const BPD: usize>
-    From<near_light_client_protocol::Proof> for ProofVariableValue<OPD, ORPD, BPD, F>
+impl<F, const OPD: usize, const ORPD: usize, const BPD: usize> From<Proof>
+    for ProofVariableValue<OPD, ORPD, BPD, F>
 where
     F: RichField,
 {
-    fn from(proof: near_light_client_protocol::Proof) -> Self {
+    fn from(proof: Proof) -> Self {
         match proof {
-            near_light_client_protocol::Proof::Basic {
+            Proof::Basic {
                 head_block_root,
                 proof,
             } => Self {
@@ -297,7 +294,7 @@ where
                 block_header: proof.block_header_lite.into(),
                 block_proof: proof.block_proof.into(),
             },
-            near_light_client_protocol::Proof::Experimental(_) => todo!("Batch proving"),
+            Proof::Experimental(_) => todo!("Batch proving"),
         }
     }
 }
@@ -327,8 +324,8 @@ pub struct StakeInfoVariable {
     pub total: BalanceVariable,
 }
 
-impl<F: RichField> From<near_light_client_protocol::StakeInfo> for StakeInfoVariableValue<F> {
-    fn from(value: near_light_client_protocol::StakeInfo) -> Self {
+impl<F: RichField> From<StakeInfo> for StakeInfoVariableValue<F> {
+    fn from(value: StakeInfo) -> Self {
         Self {
             approved: value.approved.into(),
             total: value.total.into(),
@@ -350,6 +347,7 @@ impl<F: RichField> From<near_light_client_protocol::StakeInfo> for StakeInfoVari
 //     }
 // }
 
+// TODO: not sure these even need to be hints
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BuildEndorsement<const N: usize>;
 
@@ -389,24 +387,9 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Build
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2x::frontend::vars::EvmVariable;
 
     #[test]
-    fn test_encodepacked() {
-        let mut builder = DefaultBuilder::new();
-        let mut pw = PartialWitness::new();
-        let x1 = 10;
-        let x = builder.init::<U64Variable>();
-
-        x.set(&mut pw, x1);
-
-        assert_eq!(x.get(&pw), x1);
-
-        println!("x1: {:?}", x1.to_le_bytes());
-        println!("x: {:?}", x.encode(&mut builder));
-
-        let circuit = builder.build();
-        let proof = circuit.data.prove(pw).unwrap();
-        circuit.data.verify(proof).unwrap();
+    fn write_tests() {
+        todo!()
     }
 }
