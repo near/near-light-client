@@ -4,6 +4,7 @@ use crate::variables::{
     CryptoHashVariable, HeaderVariable, MerklePathVariable, ProofVariable, StakeInfoVariable,
     ValidatorStakeVariable,
 };
+use near_light_client_protocol::prelude::Itertools;
 use plonky2x::prelude::plonky2::plonk::config::GenericHashOut;
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
@@ -292,15 +293,25 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         let next_block_hash =
             self.curta_sha256_pair(next_block.next_block_inner_hash, next_header_hash);
 
-        let mut input_stream = VariableStream::new();
-        input_stream.write(&next_block_hash);
-        input_stream.write(&next_block.header.inner_lite.height);
-
-        let output_stream = self.hint(input_stream, BuildEndorsement);
-
-        let msg = output_stream.read::<ApprovalMessage>(self);
-        self.watch(&msg, "approval_message");
-        msg
+        let should_hint = false;
+        // TODO: decide if we should constrain this way or just hint in the manual encodes
+        if should_hint {
+            let mut input_stream = VariableStream::new();
+            input_stream.write(&next_block_hash);
+            input_stream.write(&next_block.header.inner_lite.height);
+            let output_stream = self.hint(input_stream, BuildEndorsement);
+            let msg = output_stream.read::<ApprovalMessage>(self);
+            self.watch(&msg, "approval_message");
+            msg
+        } else {
+            let mut bytes = vec![ByteVariable::zero(self)];
+            bytes.extend_from_slice(&next_block_hash.as_bytes());
+            let blocks_to_advance = self.constant::<U64Variable>(2u64.into());
+            let height = self.add(blocks_to_advance, next_block.header.inner_lite.height);
+            bytes.extend_from_slice(&to_le_bytes::<_, _, D, 8>(self, &height).0);
+            let bytes: [ByteVariable; 41] = bytes.try_into().unwrap();
+            BytesVariable(bytes)
+        }
     }
 }
 
@@ -340,10 +351,32 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
     }
 }
 
+fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const N: usize>(
+    b: &mut CircuitBuilder<L, D>,
+    v: &V,
+) -> BytesVariable<N> {
+    let mut bytes = vec![];
+    for target in v.targets() {
+        let mut bits = b.api.split_le(target, 32);
+        bits.reverse();
+        let to_extend = bits
+            .chunks(8)
+            .rev()
+            .map(|chunk| {
+                let targets = chunk.iter().map(|b| b.target).collect_vec();
+                ByteVariable::from_targets(&targets)
+            })
+            .collect_vec();
+        bytes.extend(to_extend);
+    }
+    BytesVariable(bytes.try_into().unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::variables::*;
+    use ethers::types::U64;
     use near_light_client_protocol::{
         prelude::{BasicProof, Header, Itertools},
         LightClientBlockView, Proof, Protocol, StakeInfo, ValidatorStake,
@@ -776,11 +809,21 @@ mod tests {
         let (_, _, next_block) = test_state();
         let define = |builder: &mut B| {
             let next_block = builder.read::<BlockVariable>();
-            let height_bits = next_block.header.inner_lite.height.to_le_bits(builder);
-            let bytes = height_bits
-                .chunks(8)
-                .map(|chunk| ByteVariable(chunk.try_into().unwrap()))
-                .collect_vec();
+
+            let mut bytes = vec![];
+            for target in next_block.header.inner_lite.height.targets() {
+                let mut bits = builder.api.split_le(target, 32);
+                bits.reverse();
+                let to_extend = bits
+                    .chunks(8)
+                    .rev()
+                    .map(|chunk| {
+                        let targets = chunk.iter().map(|b| b.target).collect_vec();
+                        ByteVariable::from_targets(&targets)
+                    })
+                    .collect_vec();
+                bytes.extend(to_extend);
+            }
             builder.write::<BytesVariable<8>>(BytesVariable(bytes.try_into().unwrap()));
         };
         let writer = |input: &mut PI| {
@@ -788,6 +831,7 @@ mod tests {
         };
         let assertions = |mut output: PO| {
             let bytes = output.read::<BytesVariable<8>>();
+            println!("{:?}", bytes);
             assert_eq!(bytes, next_block.inner_lite.height.to_le_bytes());
         };
         builder_suite(define, writer, assertions);
