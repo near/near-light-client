@@ -197,15 +197,25 @@ pub struct BlockVariable {
     pub next_block_inner_hash: CryptoHashVariable,
     pub next_bps: BpsArr<ValidatorStakeVariable>,
     pub approvals_after_next: BpsApprovals<NUM_BLOCK_PRODUCER_SEATS>,
+    pub next_bp_hash: CryptoHashVariable,
 }
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
+        let next_bp_hash = block
+            .next_bps
+            .as_ref()
+            .map(|bps| CryptoHash::hash_borsh(bps))
+            .unwrap_or_default()
+            .0
+            .into();
+
         Self {
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
             header: block.clone().into(),
             next_bps: bps_to_variable(block.next_bps),
             approvals_after_next: block.approvals_after_next.into(),
+            next_bp_hash,
         }
     }
 }

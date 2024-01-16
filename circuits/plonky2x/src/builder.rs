@@ -273,14 +273,14 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         self.assertx(d);
 
         // TODO: hashing bps
-        // if next_block.next_bps.len() > 0 {
-        // let c = self.ensure_next_bps_is_valid(
-        //     &head.inner_lite.next_bp_hash,
-        //     Some(&next_block.next_bps),
-        // );
-        // self.assertx(c);
-        // self.write::<BpsArr<ValidatorStakeVariable>>(next_block.next_bps);
-        //}
+        if next_block.next_bps.len() > 0 {
+            let c = self.ensure_next_bps_is_valid(
+                &next_block.header.inner_lite.next_bp_hash,
+                Some(&next_block.next_bp_hash),
+            );
+            self.assertx(c);
+            self.write::<BpsArr<ValidatorStakeVariable>>(next_block.next_bps);
+        }
         self.watch(&next_block.header, "new_head");
         self.write::<HeaderVariable>(next_block.header);
         // TODO: decide what to write here for evm
