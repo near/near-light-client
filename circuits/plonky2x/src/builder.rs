@@ -2,10 +2,9 @@ use crate::merkle::NearMerkleTree;
 use crate::variables::{
     ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr, BuildEndorsement,
     CryptoHashVariable, HeaderVariable, MerklePathVariable, ProofVariable, StakeInfoVariable,
-    ValidatorStakeVariable,
+    SyncedVariable, ValidatorStakeVariable,
 };
 use near_light_client_protocol::prelude::Itertools;
-use plonky2x::prelude::plonky2::plonk::config::GenericHashOut;
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 
@@ -132,6 +131,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             total_stake = self.add(total_stake, vs.stake);
         }
 
+        // TODO: what happens if a conditionally active signature fails?
         self.curta_eddsa_verify_sigs_conditional(
             approvals_after_next.is_active.clone(),
             None,
@@ -177,6 +177,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         outcome_proof_block_hash: &CryptoHashVariable,
     ) -> BoolVariable {
         let hash = head.hash(self);
+        self.watch(&hash, "header hash");
         self.is_equal(hash, *outcome_proof_block_hash)
     }
 
@@ -200,17 +201,17 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             &outcome_proof.indices,
             *outcome_hash,
         );
-        self.watch(&outcome_root, "outcome_proof_root");
+        self.watch(&outcome_root, "outcome proof root");
 
         let leaf = self.curta_sha256(&outcome_root.0 .0);
-        self.watch(&leaf, "outcome_leaf");
+        self.watch(&leaf, "outcome root leaf");
 
         let outcome_root = self.get_root_from_merkle_proof_hashed_leaf_unindex(
             &outcome_root_proof.path,
             &outcome_root_proof.indices,
             leaf,
         );
-        self.watch(&outcome_root, "outcome_root");
+        self.watch(&outcome_root, "outcome root");
         self.is_equal(outcome_root, *expected)
     }
 
@@ -225,6 +226,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             &block_proof.indices,
             *block_hash,
         );
+        self.watch(&block_root, "block root");
         self.is_equal(block_root, *expected)
     }
 
@@ -240,7 +242,7 @@ pub trait SyncCircuit<L: PlonkParameters<D>, const D: usize> {
         head: HeaderVariable,
         epoch_bps: BpsArr<ValidatorStakeVariable>,
         next_block: BlockVariable,
-    );
+    ) -> SyncedVariable;
 
     fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage;
 }
@@ -251,7 +253,7 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         head: HeaderVariable,
         epoch_bps: BpsArr<ValidatorStakeVariable>,
         next_block: BlockVariable,
-    ) {
+    ) -> SyncedVariable {
         let a = self.ensure_not_already_verified(&head, &next_block.header.inner_lite.height);
         self.assertx(a);
 
@@ -272,22 +274,30 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         let d = self.ensure_stake_is_sufficient(&stake);
         self.assertx(d);
 
-        // TODO: hashing bps
-        if next_block.next_bps.len() > 0 {
-            let c = self.ensure_next_bps_is_valid(
+        let (next_bps_epoch, next_bps) = if next_block.next_bps.len() > 0 {
+            // TODO: hashing bps in circut
+            let e = self.ensure_next_bps_is_valid(
                 &next_block.header.inner_lite.next_bp_hash,
                 Some(&next_block.next_bp_hash),
             );
-            self.assertx(c);
-            self.write::<BpsArr<ValidatorStakeVariable>>(next_block.next_bps);
-        }
+            self.assertx(e);
+            (
+                next_block.header.inner_lite.next_epoch_id,
+                next_block.next_bps,
+            )
+        } else {
+            let eid = self.constant::<CryptoHashVariable>([0u8; 32].into());
+            let bps = self.constant::<BpsArr<ValidatorStakeVariable>>(Default::default());
+            (eid, bps)
+        };
         self.watch(&next_block.header, "new_head");
-        self.write::<HeaderVariable>(next_block.header);
-        // TODO: decide what to write here for evm
-        // self.evm_write(next_block.inner_lite.block_merkle_root);
+        SyncedVariable {
+            new_head: next_block.header,
+            next_bps_epoch,
+            next_bps,
+        }
     }
 
-    // TODO: make const fn here to test len with real approval
     fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage {
         let next_header_hash = next_block.header.hash(self);
         let next_block_hash =
@@ -328,9 +338,9 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
         proof: ProofVariable<OPD, ORPD, BPD>,
     ) -> BoolVariable {
         let block_hash = proof.block_header.hash(self);
+        self.watch(&block_hash, "proof header hash");
 
         let block_hash_matches = self.is_equal(block_hash, proof.outcome_proof_block_hash);
-        self.watch(&block_hash_matches, "block_hash_matches");
 
         let outcome_matches = self.verify_outcome(
             &proof.block_header.inner_lite.outcome_root,
@@ -338,19 +348,19 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
             &proof.outcome_hash,
             &proof.outcome_root_proof,
         );
-        self.watch(&outcome_matches, "outcome_matches");
 
         let block_matches =
             self.verify_block(&proof.head_block_root, &proof.block_proof, &block_hash);
-        self.watch(&block_matches, "block_matches");
 
         let comp = self.and(block_matches, outcome_matches);
         let verified = self.and(comp, block_hash_matches);
+        self.watch(&verified, "proof verified");
         self.assertx(verified);
         verified
     }
 }
 
+// TODO: test this and reuse for block header inner
 fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<L, D>,
     v: &V,
@@ -376,20 +386,13 @@ fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const 
 mod tests {
     use super::*;
     use crate::variables::*;
-    use ethers::types::U64;
     use near_light_client_protocol::{
         prelude::{BasicProof, Header, Itertools},
-        LightClientBlockView, Proof, Protocol, StakeInfo, ValidatorStake,
+        LightClientBlockView, Protocol, StakeInfo, ValidatorStake,
     };
     use near_primitives::hash::CryptoHash;
-    use plonky2x::frontend::{
-        ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable, vars::EvmVariable,
-    };
-    use plonky2x::{
-        backend::circuit::{PublicInput, PublicOutput},
-        frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue,
-    };
-    use pretty_assertions::{assert_eq, assert_ne};
+    use plonky2x::backend::circuit::{PublicInput, PublicOutput};
+    use pretty_assertions::assert_eq;
     use serde::de::DeserializeOwned;
     use std::str::FromStr;
 
@@ -434,6 +437,7 @@ mod tests {
             next,
         )
     }
+
     fn to_header(bv: LightClientBlockView) -> Header {
         Header {
             prev_block_hash: bv.prev_block_hash,
@@ -694,14 +698,15 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_across_boundaries_blackbox() {
+    fn test_sync_across_epoch_boundaries() {
         let (head, next_bps, next_block) = test_state();
 
         let define = |builder: &mut B| {
-            let header = builder.read::<HeaderVariable>();
+            let head = builder.read::<HeaderVariable>();
             let bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
             let next_block = builder.read::<BlockVariable>();
-            builder.sync(header, bps, next_block);
+            let synced = builder.sync(head, bps, next_block);
+            builder.write::<SyncedVariable>(synced);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(head.into());
@@ -709,48 +714,10 @@ mod tests {
             input.write::<BlockVariable>(next_block.clone().into());
         };
         let assertions = |mut output: PO| {
-            let header = output.read::<HeaderVariable>();
+            let header = output.read::<SyncedVariable>();
             println!("header: {:?}", header);
         };
         builder_suite(define, writer, assertions);
-
-        // TODO: let mut sync_and_update = |next_block: LightClientBlockView| {
-        //     let next_bps = builder
-        //         .constant::<BpsArr<ValidatorStakeVariable>>(
-        //             bps_var
-        //                 .clone()
-        //                 .into_iter()
-        //                 .map(|s| Into::<ValidatorStake>::into(s))
-        //                 .map(Into::into)
-        //                 .collect(),
-        //         );
-        //     let next_block = builder.constant::<BlockVariable>(next_block.clone().into());
-        //     //     // Assert we matched the epoch id for the new BPS
-        //     //     assert_eq!(
-        //     //         head.inner_lite.next_epoch_id,
-        //     //         sync_next.next_bps.as_ref().unwrap().0 .0
-        //     //     );
-        //     //
-        //     //     head = sync_next.new_head;
-        //     //     next_bps = sync_next.next_bps.unwrap().1;
-        //     //
-        //     //     // Assert new head is the new block
-        //     //     assert_eq!(head.inner_lite, next_block.inner_lite);
-        //     //     // Assert new BPS is from the next block producers because we're
-        //     //     // in an epoch boundary
-        //     //     assert_eq!(
-        //     //         &next_bps,
-        //     //         &next_block
-        //     //             .next_bps
-        //     //             .unwrap()
-        //     //             .into_iter()
-        //     //             .map(Into::into)
-        //     //             .collect_vec()
-        //     //     );
-        //     //     next_epoch_id.0 = head.inner_lite.next_epoch_id;
-        // };
-        // sync_and_update(next_block_var.clone());
-        //
     }
 
     #[test]

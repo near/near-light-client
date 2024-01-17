@@ -1,5 +1,7 @@
 use plonky2x::prelude::*;
 
+/// This is an unprefixed merkle tree without collision resistance, this should probably adapt the
+/// tendermint tree or introduce this functionality to succintx's simple tree
 pub trait NearMerkleTree {
     fn get_root_from_merkle_proof_hashed_leaf_unindex<const PROOF_DEPTH: usize>(
         &mut self,

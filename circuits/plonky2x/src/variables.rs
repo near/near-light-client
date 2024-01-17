@@ -6,7 +6,7 @@ use near_light_client_protocol::{
     merkle_util::MerklePath, prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView,
     LightClientBlockView, Signature, ValidatorStake,
 };
-use near_light_client_protocol::{Proof, StakeInfo};
+use near_light_client_protocol::{Proof, StakeInfo, Synced};
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue;
@@ -464,3 +464,41 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
 //         Self
 //     }
 // }
+
+#[derive(CircuitVariable, Clone, Debug)]
+pub struct SyncedVariable {
+    pub new_head: HeaderVariable,
+    pub next_bps_epoch: CryptoHashVariable,
+    pub next_bps: BpsArr<ValidatorStakeVariable>,
+}
+
+impl<F> From<Synced> for SyncedVariableValue<F>
+where
+    F: RichField,
+{
+    fn from(value: Synced) -> Self {
+        let default_bps = vec![ValidatorStakeVariableValue::default(); NUM_BLOCK_PRODUCER_SEATS];
+        Self {
+            new_head: value.new_head.into(),
+            next_bps_epoch: value
+                .next_bps
+                .as_ref()
+                .map(|v| v.0 .0 .0.into())
+                .unwrap_or_default(),
+            next_bps: value
+                .next_bps
+                .map(|v| v.1.into_iter().map(Into::into).collect_vec())
+                .unwrap_or(default_bps),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tests() {
+        todo!()
+    }
+}
