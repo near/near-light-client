@@ -34,13 +34,10 @@ impl<L: PlonkParameters<D>, const D: usize> NearMerkleTree for CircuitBuilder<L,
     fn inner_hash(&mut self, left: &Bytes32Variable, right: &Bytes32Variable) -> Bytes32Variable {
         let mut encoded_leaf = vec![];
 
-        // Append the left bytes to the one byte.
         encoded_leaf.extend(left.as_bytes().to_vec());
 
-        // Append the right bytes to the bytes so far.
         encoded_leaf.extend(right.as_bytes().to_vec());
 
-        // Load the output of the hash.
         self.curta_sha256(&encoded_leaf)
     }
 }

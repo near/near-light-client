@@ -1,4 +1,6 @@
 {
+    "last_block_hash": "G2zUHxU5d5mbXXCAgQdKtK3c9epb1mjqg3QYhzYSN7pZ",
+    "body": {
     "approvals_after_next": [
         null,
         null,
@@ -717,4 +719,5 @@
         }
     ],
     "prev_block_hash": "B7dCe8xYAY8b379K626jDq7UiLqHDGSaN99YWZvixVAo"
+}
 }

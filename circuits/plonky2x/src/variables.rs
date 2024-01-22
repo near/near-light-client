@@ -6,13 +6,15 @@ use near_light_client_protocol::{
     merkle_util::MerklePath, prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView,
     LightClientBlockView, Signature, ValidatorStake,
 };
-use near_light_client_protocol::{Proof, StakeInfo, Synced};
+use near_light_client_protocol::{
+    ED25519PublicKey, Proof, PublicKey, StakeInfo, Synced, ValidatorStakeView, ValidatorStakeViewV1,
+};
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
+use plonky2x::frontend::curta::ec::point::CompressedEdwardsYVariable;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue;
 use plonky2x::frontend::hint::simple::hint::Hint;
 use plonky2x::frontend::vars::EvmVariable;
-use plonky2x::frontend::{curta::ec::point::CompressedEdwardsYVariable, uint::Uint};
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
@@ -47,6 +49,8 @@ impl<F: RichField, const A: usize> From<MerklePath> for MerklePathVariableValue<
             .collect_vec();
         // FIXME: Hmm, this seems problematic potentially since it might hash the wrong way
         // verify.
+        //
+        // TODO: grow these but exclude them in tree
         indices.resize(A, Default::default());
 
         let mut path = path.iter().map(|x| x.hash.0.into()).collect_vec();
@@ -88,8 +92,62 @@ impl HeaderVariable {
         let inner_lite = self.inner_lite.hash(b);
         let lite_rest = b.curta_sha256_pair(inner_lite, self.inner_rest_hash);
         let hash = b.curta_sha256_pair(lite_rest, self.prev_block_hash);
-        b.watch(&hash, "header_hash");
         hash
+    }
+}
+impl EvmVariable for HeaderVariable {
+    fn encode<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<L, D>,
+    ) -> Vec<ByteVariable> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&self.prev_block_hash.encode(builder));
+        bytes.extend_from_slice(&self.inner_rest_hash.encode(builder));
+        bytes.extend_from_slice(&self.inner_lite.encode(builder));
+        assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
+        log::debug!("encoded header {:?}", bytes.len());
+        bytes
+    }
+
+    fn decode<L: PlonkParameters<D>, const D: usize>(
+        builder: &mut CircuitBuilder<L, D>,
+        bytes: &[ByteVariable],
+    ) -> Self {
+        assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
+        let prev_block_hash = CryptoHashVariable::decode(builder, &bytes[0..32]);
+        let inner_rest_hash = CryptoHashVariable::decode(builder, &bytes[32..64]);
+        let inner_lite = HeaderInnerVariable::decode(builder, &bytes[64..64 + INNER_ENCODED_LEN]);
+        Self {
+            prev_block_hash,
+            inner_rest_hash,
+            inner_lite,
+        }
+    }
+
+    fn encode_value<F: RichField>(value: Self::ValueType<F>) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(
+            value.prev_block_hash,
+        ));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(
+            value.inner_rest_hash,
+        ));
+        bytes.extend_from_slice(&HeaderInnerVariable::encode_value::<F>(value.inner_lite));
+        assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
+        log::debug!("encoded header value {:?}", bytes.len());
+        bytes
+    }
+
+    fn decode_value<F: RichField>(bytes: &[u8]) -> Self::ValueType<F> {
+        assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
+        let prev_block_hash = CryptoHashVariable::decode_value::<F>(&bytes[0..32]);
+        let inner_rest_hash = CryptoHashVariable::decode_value::<F>(&bytes[32..64]);
+        let inner_lite = HeaderInnerVariable::decode_value::<F>(&bytes[64..]);
+        Self::ValueType {
+            prev_block_hash,
+            inner_rest_hash,
+            inner_lite,
+        }
     }
 }
 
@@ -124,9 +182,8 @@ impl<F: RichField> From<BlockHeaderInnerLiteView> for HeaderInnerVariableValue<F
     }
 }
 pub const INNER_ENCODED_LEN: usize = 208;
-
 impl HeaderInnerVariable {
-    pub(crate) fn encode<L: PlonkParameters<D>, const D: usize>(
+    pub(crate) fn encode_borsh<L: PlonkParameters<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<L, D>,
     ) -> BytesVariable<INNER_ENCODED_LEN> {
@@ -142,16 +199,102 @@ impl HeaderInnerVariable {
         input_stream.write(&self.block_merkle_root);
 
         let output_bytes = b.hint(input_stream, EncodeInner);
-        let bytes = output_bytes.read::<BytesVariable<208>>(b);
-        b.watch(&bytes, "inner_lite_bytes");
+        let bytes = output_bytes.read::<BytesVariable<INNER_ENCODED_LEN>>(b);
         bytes
     }
     pub(crate) fn hash<L: PlonkParameters<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<L, D>,
     ) -> CryptoHashVariable {
-        let bytes = self.encode(b);
+        let bytes = self.encode_borsh(b);
         b.curta_sha256(&bytes.0)
+    }
+}
+impl EvmVariable for HeaderInnerVariable {
+    fn encode<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<L, D>,
+    ) -> Vec<ByteVariable> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&self.height.encode(builder));
+        bytes.extend_from_slice(&self.epoch_id.encode(builder));
+        bytes.extend_from_slice(&self.next_epoch_id.encode(builder));
+        bytes.extend_from_slice(&self.prev_state_root.encode(builder));
+        bytes.extend_from_slice(&self.outcome_root.encode(builder));
+        bytes.extend_from_slice(&self.timestamp.encode(builder));
+        bytes.extend_from_slice(&self.next_bp_hash.encode(builder));
+        bytes.extend_from_slice(&self.block_merkle_root.encode(builder));
+        log::debug!("encoded inner: {:?}", bytes.len());
+        assert_eq!(bytes.len(), INNER_ENCODED_LEN);
+        bytes
+    }
+
+    fn decode<L: PlonkParameters<D>, const D: usize>(
+        builder: &mut CircuitBuilder<L, D>,
+        bytes: &[ByteVariable],
+    ) -> Self {
+        assert_eq!(bytes.len(), INNER_ENCODED_LEN);
+        let height = U64Variable::decode(builder, &bytes[0..8]);
+        let epoch_id = CryptoHashVariable::decode(builder, &bytes[8..40]);
+        let next_epoch_id = CryptoHashVariable::decode(builder, &bytes[40..72]);
+        let prev_state_root = CryptoHashVariable::decode(builder, &bytes[72..104]);
+        let outcome_root = CryptoHashVariable::decode(builder, &bytes[104..136]);
+        let timestamp = U64Variable::decode(builder, &bytes[136..144]);
+        let next_bp_hash = CryptoHashVariable::decode(builder, &bytes[144..176]);
+        let block_merkle_root = CryptoHashVariable::decode(builder, &bytes[176..INNER_ENCODED_LEN]);
+        Self {
+            height,
+            epoch_id,
+            next_epoch_id,
+            prev_state_root,
+            outcome_root,
+            timestamp,
+            next_bp_hash,
+            block_merkle_root,
+        }
+    }
+
+    fn encode_value<F: RichField>(value: Self::ValueType<F>) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&U64Variable::encode_value::<F>(value.height));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.epoch_id));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.next_epoch_id));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(
+            value.prev_state_root,
+        ));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.outcome_root));
+        bytes.extend_from_slice(&U64Variable::encode_value::<F>(value.timestamp));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.next_bp_hash));
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(
+            value.block_merkle_root,
+        ));
+        log::debug!("encoded inner value: {:?}", bytes.len());
+        assert_eq!(bytes.len(), INNER_ENCODED_LEN);
+        bytes
+    }
+
+    fn decode_value<F: RichField>(bytes: &[u8]) -> Self::ValueType<F> {
+        assert_eq!(bytes.len(), INNER_ENCODED_LEN);
+        let height = U64Variable::decode_value::<F>(&bytes[0..8]);
+        let epoch_id = CryptoHashVariable::decode_value::<F>(&bytes[8..40]);
+        let next_epoch_id = CryptoHashVariable::decode_value::<F>(&bytes[40..72]);
+        let prev_state_root = CryptoHashVariable::decode_value::<F>(&bytes[72..104]);
+        let outcome_root = CryptoHashVariable::decode_value::<F>(&bytes[104..136]);
+        let timestamp = U64Variable::decode_value::<F>(&bytes[136..144]);
+        let next_bp_hash = CryptoHashVariable::decode_value::<F>(&bytes[144..176]);
+        let block_merkle_root =
+            CryptoHashVariable::decode_value::<F>(&bytes[176..INNER_ENCODED_LEN]);
+
+        Self::ValueType {
+            height,
+            epoch_id,
+            next_epoch_id,
+            prev_state_root,
+            outcome_root,
+            timestamp,
+            next_bp_hash,
+            block_merkle_root,
+        }
     }
 }
 
@@ -197,12 +340,12 @@ pub struct BlockVariable {
     pub next_block_inner_hash: CryptoHashVariable,
     pub next_bps: BpsArr<ValidatorStakeVariable>,
     pub approvals_after_next: BpsApprovals<NUM_BLOCK_PRODUCER_SEATS>,
-    pub next_bp_hash: CryptoHashVariable,
+    pub next_bps_hash: CryptoHashVariable,
 }
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
-        let next_bp_hash = block
+        let next_bps_hash = block
             .next_bps
             .as_ref()
             .map(|bps| CryptoHash::hash_borsh(bps))
@@ -215,7 +358,7 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
             header: block.clone().into(),
             next_bps: bps_to_variable(block.next_bps),
             approvals_after_next: block.approvals_after_next.into(),
-            next_bp_hash,
+            next_bps_hash,
         }
     }
 }
@@ -225,12 +368,14 @@ pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
 ) -> Vec<ValidatorStakeVariableValue<F>> {
     next_bps
         .map(|next_bps| {
-            next_bps
+            let mut bps = next_bps
                 .into_iter()
                 .take(NUM_BLOCK_PRODUCER_SEATS)
                 .map(Into::<ValidatorStake>::into)
                 .map(Into::<ValidatorStakeVariableValue<F>>::into)
-                .collect()
+                .collect_vec();
+            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
+            bps
         })
         .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
 }
@@ -276,17 +421,36 @@ pub struct ValidatorStakeVariable {
     pub stake: BalanceVariable,
 }
 
+const ACCOUNT_ID_PADDING_BYTE: u8 = b'#';
 impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     fn from(vs: ValidatorStake) -> Self {
         let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
         let stake = vs.stake();
         let mut account_id = vs.take_account_id().as_str().as_bytes().to_vec();
-        account_id.resize(AccountId::MAX_LEN, 0);
+        account_id.resize(AccountId::MAX_LEN, ACCOUNT_ID_PADDING_BYTE);
         Self {
             account_id: account_id.try_into().unwrap(), // SAFETY: already checked this above
             public_key: public_key.into(),
             stake: stake.into(),
         }
+    }
+}
+
+impl<F: RichField> Into<ValidatorStakeView> for ValidatorStakeVariableValue<F> {
+    fn into(self) -> ValidatorStakeView {
+        let unpadded_bytes = self
+            .account_id
+            .split(|x| *x == ACCOUNT_ID_PADDING_BYTE)
+            .collect_vec()[0];
+        let account_id = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
+        println!("account id: {}", account_id);
+        let account_id = account_id.parse().expect("invalid account id");
+        let public_key = PublicKey::ED25519(ED25519PublicKey(self.public_key.0.into()));
+        ValidatorStakeView::V1(ValidatorStakeViewV1 {
+            account_id,
+            public_key,
+            stake: self.stake.as_u128(),
+        })
     }
 }
 
@@ -414,21 +578,8 @@ impl<F: RichField> From<StakeInfo> for StakeInfoVariableValue<F> {
     }
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize)]
-// pub struct HeaderHash<const N: usize>;
-//
-// impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for HeaderHash<N> {
-//     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
-//         let inner_lite_hash = input_stream.read_value::<CryptoHash>();
-//         let inner_rest_hash = input_stream.read_value::<CryptoHash>();
-//         let prev_block_hash = input_stream.read_value::<CryptoHash>();
-//
-//         let next_block_hash = sh;
-//         output_stream.write_value::<CryptoHash>(next_block_hash);
-//     }
-// }
-
 pub type ApprovalMessage = BytesVariable<41>;
+
 // TODO: not sure these even need to be hints
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BuildEndorsement;
@@ -446,24 +597,6 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
         output_stream.write_value::<ApprovalMessage>(bytes.try_into().unwrap());
     }
 }
-// impl<const N: usize> BuildEndorsement<N> {
-//     pub fn build(
-//         &self,
-//         builder: &mut CircuitBuilder<Fr, D>,
-//         next_block_hash: CryptoHash,
-//         next_block_height: U64Variable,
-//     ) -> BytesVariable<N> {
-//         let mut input_stream = VariableStream::new();
-//         input_stream.write(&next_block_hash);
-//         input_stream.write(&next_block_height);
-//
-//         let mut output_stream = VariableStream::new();
-//         let hint = BuildEndorsement::<N>;
-//         let output_stream = hint.hint(&mut input_stream, &mut output_stream);
-//         let next_header = output_stream.read::<Bytes32Variable>(self);
-//         Self
-//     }
-// }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct SyncedVariable {
@@ -490,6 +623,44 @@ where
                 .map(|v| v.1.into_iter().map(Into::into).collect_vec())
                 .unwrap_or(default_bps),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HashBpsInputs;
+
+impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
+    fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
+        let bps = input_stream.read_value::<BpsArr<ValidatorStakeVariable>>();
+        let default_validator =
+            ValidatorStakeVariableValue::<<L as PlonkParameters<D>>::Field>::default();
+
+        let bps = bps
+            .into_iter()
+            .filter(|x| x.account_id != default_validator.account_id)
+            .map(Into::<ValidatorStakeView>::into)
+            .collect_vec();
+        log::debug!("Bps to hash: {:#?}", bps);
+        let hash = CryptoHash::hash_borsh(bps);
+        log::debug!("Hash: {:#?}", hash);
+
+        // TODO: figure out how to hash this in circuit
+        // It's non trivial because the account id is padded to the max len
+        output_stream.write_value::<CryptoHashVariable>(hash.0.into());
+    }
+}
+
+impl HashBpsInputs {
+    pub fn hash<L: PlonkParameters<D>, const D: usize>(
+        self,
+        b: &mut CircuitBuilder<L, D>,
+        bps: &BpsArr<ValidatorStakeVariable>,
+    ) -> CryptoHashVariable {
+        let mut input_stream = VariableStream::new();
+        input_stream.write::<BpsArr<ValidatorStakeVariable>>(&bps);
+
+        let output_stream = b.hint(input_stream, self);
+        output_stream.read::<CryptoHashVariable>(b)
     }
 }
 

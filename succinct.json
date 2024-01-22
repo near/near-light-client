@@ -1,0 +1,14 @@
+{
+    "entrypoints": [
+        {
+            "name": "sync",
+            "framework": "plonky2x",
+            "baseDir": ".",
+            "buildCommand": "cargo build --release --bin sync && mv target/release/sync build/ && RUST_LOG=debug ./build/sync build",
+            "proveCommand": "RUST_LOG=debug ./build/sync prove input.json",
+            "requiredArtifacts": [
+                "sync"
+            ]
+        }
+    ]
+}

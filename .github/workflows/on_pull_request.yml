@@ -5,6 +5,7 @@ on:
     branches:
       - master
 
+        # TODO: beefy machine for tests
 jobs:
   lint:
     name: "Lint"
@@ -32,5 +33,18 @@ jobs:
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
       - name: "Run tests"
-        run: cargo nextest run --workspace --locked
+        run: cargo nextest run --workspace --locked --no-default-features
 
+  test-beefy-proofs:
+    name: "Test Beefy Proofs"
+    runs-on:
+      group: beefygroup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: "Install cargo-nextest"
+        run: cargo install cargo-nextest
+      - name: "Run tests"
+        run: cargo nextest run --workspace --locked --no-default-features

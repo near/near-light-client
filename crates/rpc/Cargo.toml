@@ -1,16 +1,19 @@
 [package]
 edition.workspace = true
 license.workspace = true
-name              = "near-light-client-protocol"
+name              = "near-light-client-rpc"
 version.workspace = true
 
 [dependencies]
 anyhow.workspace                  = true
+async-trait.workspace             = true
 borsh.workspace                   = true
 either.workspace                  = true
+futures.workspace                 = true
 itertools.workspace               = true
 log.workspace                     = true
 near-crypto.workspace             = true
+near-jsonrpc-client.workspace     = true
 near-jsonrpc-primitives.workspace = true
 near-primitives-core.workspace    = true
 near-primitives.workspace         = true
@@ -31,4 +34,3 @@ hex.workspace               = true
 pretty_env_logger.workspace = true
 rand                        = "*"
 serde_json.workspace        = true
-test-utils.workspace        = true

@@ -1,0 +1,15 @@
+{
+  "prev_block_hash": "5dbt6rh82Xx6nNG1PuKoQj96g4jnWw6cyb8HNWPPkVJE",
+  "inner_rest_hash": "DZT9p28adyuiTSbUV5bsuPRxX9K7R1bag1AeUEMhm4bh",
+  "inner_lite": {
+    "height": 154654776,
+    "epoch_id": "FsJbcG3yvQQC81FVLgAsaHZrMBFbrPM22kgqfGcCdrFb",
+    "next_epoch_id": "Fjn8T3phCCSCXSdjtQ4DqHGV86yeS2MQ92qcufCEpwbf",
+    "prev_state_root": "F2NNVhJJJdC7oWMbjpaJL3HVNK9RxcCWuTXjrM32ShuP",
+    "outcome_root": "7SYchEDbwawjP2MVfZ2GinP8bBQU1hKFRz34b2ZzG3A8",
+    "timestamp": 1705334624027402581,
+    "timestamp_nanosec": "1705334624027402581",
+    "next_bp_hash": "AcNatyPz9nmg2e5dMKQAbNLjFfkLgBN7AbR31vcpVJ7z",
+    "block_merkle_root": "3huzCnEQhgDDMWyVNR9kNbQFJ7qJGy1J4MBrCJAWndW9"
+  }
+}

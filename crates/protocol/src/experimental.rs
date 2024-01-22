@@ -328,23 +328,10 @@ pub fn verify_proof(proof: Proof) -> bool {
 pub(crate) mod tests {
     use super::*;
     use crate::merkle_util::{compute_root_from_path, compute_root_from_path_and_item};
-    use near_primitives_core::types::AccountId;
     use std::str::FromStr;
+    use test_utils::fixture;
 
     pub const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
-    pub const LIGHT_CLIENT_HEAD: &str = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU";
-
-    pub fn get_constants() -> (CryptoHash, CryptoHash) {
-        let block_root = CryptoHash::from_str(BLOCK_MERKLE_ROOT).unwrap();
-        let light_client_head = CryptoHash::from_str(LIGHT_CLIENT_HEAD).unwrap();
-        (light_client_head, block_root)
-    }
-
-    fn read_proof<T: for<'a> Deserialize<'a>>(path: &str) -> T {
-        println!("Reading {}", path);
-        let path = format!("../../{path}");
-        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap()
-    }
 
     fn write_proof(path: &str, proof: &Proof) {
         std::fs::write(
@@ -358,12 +345,8 @@ pub(crate) mod tests {
     }
 
     fn proof_fixture(is_new: bool) -> BasicProof {
-        let path = if is_new {
-            "fixtures/new.json"
-        } else {
-            "fixtures/old.json"
-        };
-        read_proof(path)
+        let path = if is_new { "new.json" } else { "old.json" };
+        fixture(path)
     }
 
     #[test]
@@ -490,10 +473,10 @@ pub(crate) mod tests {
         })
         .all(|(block_root, path)| {
             let proof = if path.contains("old") {
-                let proof: BasicProof = read_proof(&path);
+                let proof: BasicProof = fixture(&path);
                 Proof::new(block_root, vec![proof])
             } else {
-                read_proof(&path)
+                fixture(&path)
             };
 
             write_proof(&path, &proof);
@@ -502,17 +485,10 @@ pub(crate) mod tests {
         assert!(rewritten);
     }
 
-    // This test populates a reasonably large batch of proofs for verifying the
-    // slimmer onchain light client
     #[test]
     fn batch_proofs() {
         let _ = pretty_env_logger::try_init();
-        let (head, common_root) = get_constants();
-        let receiver_id = AccountId::from_str("da.topgunbakugo.testnet").unwrap();
-
-        let path = "fixtures/batch.json";
-
-        let p = read_proof(path);
+        let p = fixture("batch.json");
         assert!(verify_proof(p));
     }
 }
