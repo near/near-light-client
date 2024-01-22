@@ -6,16 +6,18 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-borsh.workspace   = true
-ethers            = "2.0.11"
-pretty_assertions = "1.4.0"
-serde.workspace   = true
-
+async-trait.workspace = true
+borsh.workspace       = true
+ethers                = "2.0.11"
+log.workspace         = true
+pretty_assertions     = "1.4.0"
+serde.workspace       = true
 # Circuits
 plonky2  = { git = "https://github.com/mir-protocol/plonky2.git" }
 plonky2x = { git = "https://github.com/succinctlabs/succinctx.git" }
 
 near-light-client-protocol = { path = "../../crates/protocol" }
+near-light-client-rpc      = { path = "../../crates/rpc" }
 
 [dev-dependencies]
 borsh.workspace             = true

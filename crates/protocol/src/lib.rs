@@ -7,6 +7,7 @@ pub use near_primitives::{
     block_header::BlockHeaderInnerLite,
     merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
+    views::LightClientBlockLiteView,
     views::{
         validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView, LightClientBlockView,
     },

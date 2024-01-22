@@ -1,16 +1,22 @@
-use super::message::GetProof;
 use crate::prelude::*;
+use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
-    methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
+    methods::{
+        self, light_client_proof::RpcLightClientExecutionProofResponse,
+        validators::RpcValidatorResponse,
+    },
     JsonRpcClient,
 };
-use near_primitives::views::LightClientBlockView;
+use near_primitives::{
+    types::{validator_stake::ValidatorStake, ValidatorStakeV1},
+    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
+};
 use std::fmt::{Display, Formatter};
 
-// TODO: retry, failover rpcs
+pub mod prelude;
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum Network {
     Mainnet,
     #[default]
@@ -38,6 +44,7 @@ impl Network {
         }
     }
 }
+
 impl Display for Network {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -68,11 +75,28 @@ impl NearRpcClient {
 
         NearRpcClient { client, archive }
     }
+}
 
-    pub async fn fetch_latest_header(
+#[async_trait]
+pub trait LightClientRpc {
+    async fn fetch_latest_header(
         &self,
         latest_verified: &CryptoHash,
-    ) -> Option<LightClientBlockView> {
+    ) -> Result<Option<LightClientBlockView>>;
+    async fn fetch_light_client_proof(
+        &self,
+        req: GetProof,
+        latest_verified: CryptoHash,
+    ) -> Result<RpcLightClientExecutionProofResponse>;
+    async fn fetch_epoch_bps(&self, epoch_id: &CryptoHash) -> Result<Vec<ValidatorStakeView>>;
+}
+
+#[async_trait]
+impl LightClientRpc for NearRpcClient {
+    async fn fetch_latest_header(
+        &self,
+        latest_verified: &CryptoHash,
+    ) -> Result<Option<LightClientBlockView>> {
         let req = methods::next_light_client_block::RpcLightClientNextBlockRequest {
             last_block_hash: *latest_verified,
         };
@@ -84,20 +108,16 @@ impl NearRpcClient {
                 self.archive.call(&req)
             })
             .await
-            .map_err(|e| {
-                log::error!("Error fetching latest header: {:?}", e);
-                e
-            })
-            .ok()?
+            .map_err(|e| anyhow::format_err!("{:?}", e))
     }
 
-    pub async fn fetch_light_client_proof(
+    async fn fetch_light_client_proof(
         &self,
         req: GetProof,
         latest_verified: CryptoHash,
     ) -> Result<RpcLightClientExecutionProofResponse> {
         let req = methods::light_client_proof::RpcLightClientExecutionProofRequest {
-            id: req.0,
+            id: req,
             light_client_head: latest_verified,
         };
         self.client
@@ -109,4 +129,29 @@ impl NearRpcClient {
             .await
             .map_err(|e| anyhow::format_err!("{:?}:{}", req.id, e))
     }
+
+    async fn fetch_epoch_bps(&self, epoch_id: &CryptoHash) -> Result<Vec<ValidatorStakeView>> {
+        let req = methods::validators::RpcValidatorRequest {
+            epoch_reference: near_primitives::types::EpochReference::EpochId(
+                near_primitives::types::EpochId(*epoch_id),
+            ),
+        };
+        self.client
+            .call(&req)
+            .or_else(|e| {
+                debug!("Error hitting main rpc, falling back to archive: {:?}", e);
+                self.archive.call(&req)
+            })
+            .await
+            .map(|x| x.current_proposals)
+            .map_err(|e| anyhow::format_err!("{:?}:{}", epoch_id, e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name() {}
 }

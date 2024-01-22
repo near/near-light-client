@@ -88,7 +88,6 @@ impl HeaderVariable {
         let inner_lite = self.inner_lite.hash(b);
         let lite_rest = b.curta_sha256_pair(inner_lite, self.inner_rest_hash);
         let hash = b.curta_sha256_pair(lite_rest, self.prev_block_hash);
-        b.watch(&hash, "header_hash");
         hash
     }
 }
@@ -143,7 +142,6 @@ impl HeaderInnerVariable {
 
         let output_bytes = b.hint(input_stream, EncodeInner);
         let bytes = output_bytes.read::<BytesVariable<208>>(b);
-        b.watch(&bytes, "inner_lite_bytes");
         bytes
     }
     pub(crate) fn hash<L: PlonkParameters<D>, const D: usize>(
@@ -225,12 +223,14 @@ pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
 ) -> Vec<ValidatorStakeVariableValue<F>> {
     next_bps
         .map(|next_bps| {
-            next_bps
+            let mut bps = next_bps
                 .into_iter()
                 .take(NUM_BLOCK_PRODUCER_SEATS)
                 .map(Into::<ValidatorStake>::into)
                 .map(Into::<ValidatorStakeVariableValue<F>>::into)
-                .collect()
+                .collect_vec();
+            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
+            bps
         })
         .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
 }

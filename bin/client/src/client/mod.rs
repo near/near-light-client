@@ -8,11 +8,11 @@ use coerce::actor::{context::ActorContext, message::Handler, Actor};
 use message::{Archive, GetProof, Head, Shutdown, VerifyProof};
 use near_primitives::views::validator_stake_view::ValidatorStakeView;
 use protocol::{Proof, Protocol};
+use rpc::LightClientRpc;
 use std::{str::FromStr, sync::Arc};
 use tokio::time;
 
 pub mod message;
-pub mod rpc;
 mod store;
 
 pub struct LightClient {
@@ -132,7 +132,7 @@ impl LightClient {
             let starting_head = self
                 .client
                 .fetch_latest_header(&sync_from)
-                .await
+                .await?
                 .ok_or_else(|| anyhow::anyhow!("We need a starting header"))?;
 
             log::info!("starting head: {:?}", starting_head.inner_lite.height);
@@ -202,14 +202,14 @@ impl LightClient {
         client: rpc::NearRpcClient,
     ) -> Result<bool> {
         let head = store.head().await?;
-        log::debug!("Current head: {:#?}", head.inner_lite);
+        log::debug!("Current head: {:#?}", head);
 
         let next_header = client
             .fetch_latest_header(
                 &CryptoHash::from_str(&format!("{}", head.hash()))
                     .map_err(|e| anyhow!("Failed to parse hash: {:?}", e))?,
             )
-            .await
+            .await?
             .ok_or_else(|| anyhow!("Failed to fetch latest header"))?;
         log::trace!("Got new header: {:#?}", next_header.inner_lite);
 
@@ -252,7 +252,7 @@ impl LightClient {
         for req in p.0 {
             let proof = self
                 .client
-                .fetch_light_client_proof(req, *last_verified_hash);
+                .fetch_light_client_proof(req.0, *last_verified_hash);
             futs.push(proof);
         }
         let unpin_futs: Vec<_> = futs.into_iter().map(Box::pin).collect();
@@ -305,4 +305,12 @@ impl LightClient {
 
         Ok((p, errors))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t() {}
 }
