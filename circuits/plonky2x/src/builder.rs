@@ -4,11 +4,12 @@ use crate::variables::{
     CryptoHashVariable, HeaderVariable, MerklePathVariable, ProofVariable, StakeInfoVariable,
     SyncedVariable, ValidatorStakeVariable,
 };
+use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::Itertools;
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 
-pub trait Verify<L: PlonkParameters<D>, const D: usize> {
+pub trait Ensure<L: PlonkParameters<D>, const D: usize> {
     fn ensure_not_already_verified(
         &mut self,
         head: &HeaderVariable,
@@ -30,8 +31,8 @@ pub trait Verify<L: PlonkParameters<D>, const D: usize> {
 
     fn validate_signatures<const LEN: usize>(
         &mut self,
-        approvals: BpsApprovals<LEN>,
-        bps: BpsArr<ValidatorStakeVariable, LEN>,
+        approvals: &BpsApprovals<LEN>,
+        bps: &BpsArr<ValidatorStakeVariable, LEN>,
         approval_message: ApprovalMessage,
     ) -> StakeInfoVariable;
 
@@ -73,7 +74,7 @@ pub trait Verify<L: PlonkParameters<D>, const D: usize> {
     fn assertx(&mut self, condition: BoolVariable);
 }
 
-impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D> {
+impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D> {
     fn ensure_not_already_verified(
         &mut self,
         head: &HeaderVariable,
@@ -87,9 +88,10 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         head: &HeaderVariable,
         epoch_id: &CryptoHashVariable,
     ) -> BoolVariable {
-        let epoch = self.is_equal(head.inner_lite.epoch_id, *epoch_id);
-        let next_epoch = self.is_equal(head.inner_lite.next_epoch_id, *epoch_id);
-        self.or(epoch, next_epoch)
+        let epoch_id = *epoch_id;
+        let this = self.is_equal(epoch_id, head.inner_lite.epoch_id);
+        let next = self.is_equal(epoch_id, head.inner_lite.next_epoch_id);
+        self.or(this, next)
     }
 
     fn ensure_if_next_epoch_contains_next_bps(
@@ -106,8 +108,8 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
 
     fn validate_signatures<const LEN: usize>(
         &mut self,
-        approvals_after_next: BpsApprovals<LEN>,
-        epoch_bps: BpsArr<ValidatorStakeVariable, LEN>,
+        approvals_after_next: &BpsApprovals<LEN>,
+        epoch_bps: &BpsArr<ValidatorStakeVariable, LEN>,
         approval_message: ApprovalMessage,
     ) -> StakeInfoVariable {
         assert_eq!(approvals_after_next.is_active.len(), LEN);
@@ -136,7 +138,7 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             approvals_after_next.is_active.clone(),
             None,
             ArrayVariable::new(messages.to_vec()),
-            approvals_after_next.signatures,
+            approvals_after_next.signatures.clone(),
             ArrayVariable::new(pubkeys),
         );
 
@@ -153,9 +155,6 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
 
         let threshold = self.mul(stake.total, numerator);
         let approved = self.mul(stake.approved, denominator);
-        self.watch(&approved, "approved");
-        self.watch(&threshold, "threshold");
-
         self.gte(approved, threshold)
     }
 
@@ -177,7 +176,6 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
         outcome_proof_block_hash: &CryptoHashVariable,
     ) -> BoolVariable {
         let hash = head.hash(self);
-        self.watch(&hash, "header hash");
         self.is_equal(hash, *outcome_proof_block_hash)
     }
 
@@ -201,17 +199,14 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             &outcome_proof.indices,
             *outcome_hash,
         );
-        self.watch(&outcome_root, "outcome proof root");
 
         let leaf = self.curta_sha256(&outcome_root.0 .0);
-        self.watch(&leaf, "outcome root leaf");
 
         let outcome_root = self.get_root_from_merkle_proof_hashed_leaf_unindex(
             &outcome_root_proof.path,
             &outcome_root_proof.indices,
             leaf,
         );
-        self.watch(&outcome_root, "outcome root");
         self.is_equal(outcome_root, *expected)
     }
 
@@ -226,7 +221,6 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
             &block_proof.indices,
             *block_hash,
         );
-        self.watch(&block_root, "block root");
         self.is_equal(block_root, *expected)
     }
 
@@ -236,23 +230,23 @@ impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D
     }
 }
 
-pub trait SyncCircuit<L: PlonkParameters<D>, const D: usize> {
+pub trait Sync<L: PlonkParameters<D>, const D: usize> {
     fn sync(
         &mut self,
-        head: HeaderVariable,
-        epoch_bps: BpsArr<ValidatorStakeVariable>,
-        next_block: BlockVariable,
+        head: &HeaderVariable,
+        epoch_bps: &BpsArr<ValidatorStakeVariable>,
+        next_block: &BlockVariable,
     ) -> SyncedVariable;
 
     fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage;
 }
 
-impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder<L, D> {
+impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> {
     fn sync(
         &mut self,
-        head: HeaderVariable,
-        epoch_bps: BpsArr<ValidatorStakeVariable>,
-        next_block: BlockVariable,
+        head: &HeaderVariable,
+        epoch_bps: &BpsArr<ValidatorStakeVariable>,
+        next_block: &BlockVariable,
     ) -> SyncedVariable {
         let a = self.ensure_not_already_verified(&head, &next_block.header.inner_lite.height);
         self.assertx(a);
@@ -268,31 +262,32 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
         self.assertx(c);
 
         let approval = self.reconstruct_approval_message(&next_block);
-
-        let stake = self.validate_signatures(next_block.approvals_after_next, epoch_bps, approval);
-
+        let stake = self.validate_signatures(&next_block.approvals_after_next, epoch_bps, approval);
         let d = self.ensure_stake_is_sufficient(&stake);
         self.assertx(d);
 
+        // TODO: might not need this now, also the logic is wrong because nbps is always >0
         let (next_bps_epoch, next_bps) = if next_block.next_bps.len() > 0 {
             // TODO: hashing bps in circut
             let e = self.ensure_next_bps_is_valid(
                 &next_block.header.inner_lite.next_bp_hash,
-                Some(&next_block.next_bp_hash),
+                Some(&next_block.next_bps_hash),
             );
             self.assertx(e);
+            assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
             (
                 next_block.header.inner_lite.next_epoch_id,
-                next_block.next_bps,
+                next_block.next_bps.to_owned(),
             )
         } else {
             let eid = self.constant::<CryptoHashVariable>([0u8; 32].into());
-            let bps = self.constant::<BpsArr<ValidatorStakeVariable>>(Default::default());
+            let bps = self.constant::<BpsArr<ValidatorStakeVariable>>(
+                vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS].into(),
+            );
             (eid, bps)
         };
-        self.watch(&next_block.header, "new_head");
         SyncedVariable {
-            new_head: next_block.header,
+            new_head: next_block.header.to_owned(),
             next_bps_epoch,
             next_bps,
         }
@@ -311,7 +306,6 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
             input_stream.write(&next_block.header.inner_lite.height);
             let output_stream = self.hint(input_stream, BuildEndorsement);
             let msg = output_stream.read::<ApprovalMessage>(self);
-            self.watch(&msg, "approval_message");
             msg
         } else {
             let mut bytes = vec![ByteVariable::zero(self)];
@@ -325,20 +319,19 @@ impl<L: PlonkParameters<D>, const D: usize> SyncCircuit<L, D> for CircuitBuilder
     }
 }
 
-pub trait VerifyCircuit<L: PlonkParameters<D>, const D: usize> {
+pub trait Verify<L: PlonkParameters<D>, const D: usize> {
     fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
         &mut self,
         proof: ProofVariable<OPD, ORPD, BPD>,
     ) -> BoolVariable;
 }
 
-impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuilder<L, D> {
+impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D> {
     fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
         &mut self,
         proof: ProofVariable<OPD, ORPD, BPD>,
     ) -> BoolVariable {
         let block_hash = proof.block_header.hash(self);
-        self.watch(&block_hash, "proof header hash");
 
         let block_hash_matches = self.is_equal(block_hash, proof.outcome_proof_block_hash);
 
@@ -354,7 +347,6 @@ impl<L: PlonkParameters<D>, const D: usize> VerifyCircuit<L, D> for CircuitBuild
 
         let comp = self.and(block_matches, outcome_matches);
         let verified = self.and(comp, block_hash_matches);
-        self.watch(&verified, "proof verified");
         self.assertx(verified);
         verified
     }
@@ -384,97 +376,16 @@ fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const 
 
 #[cfg(test)]
 mod tests {
+    use self::assert_eq;
     use super::*;
+    use crate::test_utils::*;
     use crate::variables::*;
-    use near_light_client_protocol::{
-        prelude::{BasicProof, Header, Itertools},
-        LightClientBlockView, Protocol, StakeInfo, ValidatorStake,
-    };
-    use near_primitives::hash::CryptoHash;
-    use plonky2x::backend::circuit::{PublicInput, PublicOutput};
-    use pretty_assertions::assert_eq;
-    use serde::de::DeserializeOwned;
-    use std::str::FromStr;
-
-    type B<const D: usize = 2> = CircuitBuilder<DefaultParameters, D>;
-    type PI<const D: usize = 2> = PublicInput<DefaultParameters, D>;
-    type PO<const D: usize = 2> = PublicOutput<DefaultParameters, D>;
-
-    fn fixture<T: DeserializeOwned>(file: &str) -> T {
-        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
-            .unwrap()
-    }
-
-    fn get_next_epoch() -> LightClientBlockView {
-        fixture("2.json")
-    }
-
-    fn get_first_epoch() -> LightClientBlockView {
-        fixture("1.json")
-    }
-
-    fn view_to_lite_view(h: LightClientBlockView) -> Header {
-        Header {
-            prev_block_hash: h.prev_block_hash,
-            inner_rest_hash: h.inner_rest_hash,
-            inner_lite: h.inner_lite,
-        }
-    }
-
-    fn test_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
-        let first = get_first_epoch();
-        let next = get_next_epoch();
-
-        (
-            view_to_lite_view(first.clone()),
-            first
-                .next_bps
-                .clone()
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            next,
-        )
-    }
-
-    fn to_header(bv: LightClientBlockView) -> Header {
-        Header {
-            prev_block_hash: bv.prev_block_hash,
-            inner_rest_hash: bv.inner_rest_hash,
-            inner_lite: bv.inner_lite,
-        }
-    }
-
-    fn builder_suite<F, WriteInputs, Assertions>(
-        define: F,
-        writer: WriteInputs,
-        assertions: Assertions,
-    ) where
-        F: FnOnce(&mut B),
-        WriteInputs: FnOnce(&mut PI),
-        Assertions: FnOnce(PO),
-    {
-        pretty_env_logger::try_init().unwrap_or_default();
-
-        let mut builder = B::new();
-        define(&mut builder);
-
-        let circuit = builder.build();
-
-        let mut inputs = circuit.input();
-        writer(&mut inputs);
-
-        let (proof, output) = circuit.prove(&inputs);
-
-        assertions(output.clone());
-
-        circuit.verify(&proof, &inputs, &output);
-    }
+    use near_light_client_protocol::Protocol;
+    use near_light_client_protocol::StakeInfo;
 
     #[test]
     fn test_header_hash() {
-        let header = to_header(fixture("1.json"));
+        let header = to_header(test_first().body);
         let expected_hash = header.hash().0;
 
         let define = |builder: &mut B| {
@@ -495,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stake() {
+    fn test_ensure_stake() {
         let approved_stakes = [200, 199, 201, 0];
 
         let define = |builder: &mut B| {
@@ -535,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_ensure_height() {
-        let test_header = to_header(get_first_epoch());
+        let test_header = to_header(test_next().body);
         let define = |builder: &mut B| {
             let header = builder.read::<HeaderVariable>();
 
@@ -561,10 +472,8 @@ mod tests {
 
     #[test]
     fn test_ensure_next_bps() {
-        let header = get_first_epoch();
-        let bps = header.next_bps.clone().unwrap_or_default();
+        let (header, bps, nbps_hash) = testnet_state();
         let bps_hash = CryptoHash::hash_borsh(bps.clone());
-        let header = to_header(header);
 
         let define = |builder: &mut B| {
             let header = builder.read::<HeaderVariable>();
@@ -603,7 +512,119 @@ mod tests {
     }
 
     #[test]
-    fn test_ensure_proofs() {
+    fn test_reconstruct_approval_msg() {
+        let (_, _, next_block) = test_state();
+        let define = |builder: &mut B| {
+            let next_block = builder.read::<BlockVariable>();
+            let os = builder.reconstruct_approval_message(&next_block);
+            builder.write::<ApprovalMessage>(os);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<BlockVariable>(next_block.clone().into());
+        };
+        let assertions = |mut output: PO| {
+            let created = output.read::<ApprovalMessage>();
+            let msg = Protocol::reconstruct_approval_message(&next_block).unwrap();
+            assert_eq!(msg, created);
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_raw_le_bytes() {
+        let (_, _, next_block) = test_state();
+        let define = |builder: &mut B| {
+            let next_block = builder.read::<BlockVariable>();
+
+            let mut bytes = vec![];
+            for target in next_block.header.inner_lite.height.targets() {
+                let mut bits = builder.api.split_le(target, 32);
+                bits.reverse();
+                let to_extend = bits
+                    .chunks(8)
+                    .rev()
+                    .map(|chunk| {
+                        let targets = chunk.iter().map(|b| b.target).collect_vec();
+                        ByteVariable::from_targets(&targets)
+                    })
+                    .collect_vec();
+                bytes.extend(to_extend);
+            }
+            builder.write::<BytesVariable<8>>(BytesVariable(bytes.try_into().unwrap()));
+        };
+        let writer = |input: &mut PI| {
+            input.write::<BlockVariable>(next_block.clone().into());
+        };
+        let assertions = |mut output: PO| {
+            let bytes = output.read::<BytesVariable<8>>();
+            println!("{:?}", bytes);
+            assert_eq!(bytes, next_block.inner_lite.height.to_le_bytes());
+        };
+        builder_suite(define, writer, assertions);
+    }
+}
+
+/// These tests require either:
+/// - A LOT of time if running in debug mode
+/// - A LOT of RAM if running in release
+///
+/// TODO: CI for only beefy tests
+#[cfg(feature = "beefy-tests")]
+#[cfg(test)]
+mod beefy_tests {
+    use crate::builder::Ensure;
+    use crate::builder::Sync;
+    use crate::builder::Verify;
+    use crate::test_utils::*;
+    use crate::variables::*;
+    use near_light_client_protocol::prelude::BasicProof;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn beefy_test_next_bps() {
+        let (header, bps, _) = testnet_state();
+        let bps_hash = CryptoHash::hash_borsh(bps.clone());
+
+        let define = |builder: &mut B| {
+            let header = builder.read::<HeaderVariable>();
+            let next_bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
+
+            let current =
+                builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
+            builder.write::<BoolVariable>(current);
+            let next =
+                builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.next_epoch_id);
+            builder.write::<BoolVariable>(next);
+
+            let contains_next_bps = builder.ensure_if_next_epoch_contains_next_bps(
+                &header,
+                &header.inner_lite.next_epoch_id,
+                &next_bps,
+            );
+            builder.write::<BoolVariable>(contains_next_bps);
+
+            let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
+            let is_valid = builder
+                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            builder.write::<BoolVariable>(is_valid);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(header.clone().into());
+            input.write::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(Some(bps)));
+        };
+        let assertions = |mut output: PO| {
+            assert!(output.read::<BoolVariable>(), "epoch is current");
+            assert!(output.read::<BoolVariable>(), "epoch is next");
+            assert!(output.read::<BoolVariable>(), "next epoch has bps");
+            assert!(output.read::<BoolVariable>(), "next bps is valid");
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    #[serial]
+    fn beefy_test_proof() {
         let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
         let p: BasicProof = fixture("old.json");
@@ -663,7 +684,8 @@ mod tests {
     }
 
     #[test]
-    fn test_inclusion_proof_blackbox() {
+    #[serial]
+    fn beefy_test_proof_blackbox() {
         let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
 
@@ -698,14 +720,15 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_across_epoch_boundaries() {
+    #[serial]
+    fn beefy_test_sync_across_epoch_boundaries() {
         let (head, next_bps, next_block) = test_state();
 
         let define = |builder: &mut B| {
             let head = builder.read::<HeaderVariable>();
             let bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
             let next_block = builder.read::<BlockVariable>();
-            let synced = builder.sync(head, bps, next_block);
+            let synced = builder.sync(&head, &bps, &next_block);
             builder.write::<SyncedVariable>(synced);
         };
         let writer = |input: &mut PI| {
@@ -717,11 +740,14 @@ mod tests {
             let header = output.read::<SyncedVariable>();
             println!("header: {:?}", header);
         };
+        // TODO: next two
         builder_suite(define, writer, assertions);
     }
 
+    // TODO: probably not needed
     #[test]
-    fn test_bounded_signatures() {
+    #[serial]
+    fn beefy_test_bounded_signatures() {
         let (_, bps, next_block) = test_state();
         const BPS_AMT: usize = 5;
 
@@ -740,7 +766,7 @@ mod tests {
 
             let msg = builder.reconstruct_approval_message(&next_block);
 
-            builder.validate_signatures(next_block_approvals, bps, msg);
+            builder.validate_signatures(&next_block_approvals, &bps, msg);
         };
         let writer = |input: &mut PI| {
             input.write::<BpsArr<ValidatorStakeVariable, BPS_AMT>>(
@@ -749,58 +775,6 @@ mod tests {
             input.write::<BlockVariable>(next_block.into());
         };
         let assertions = |mut _output: PO| {};
-        builder_suite(define, writer, assertions);
-    }
-
-    #[test]
-    fn test_reconstruct_approval_msg() {
-        let (_, _, next_block) = test_state();
-        let define = |builder: &mut B| {
-            let next_block = builder.read::<BlockVariable>();
-            let os = builder.reconstruct_approval_message(&next_block);
-            builder.write::<ApprovalMessage>(os);
-        };
-        let writer = |input: &mut PI| {
-            input.write::<BlockVariable>(next_block.clone().into());
-        };
-        let assertions = |mut output: PO| {
-            let created = output.read::<ApprovalMessage>();
-            let msg = Protocol::reconstruct_approval_message(&next_block).unwrap();
-            assert_eq!(msg, created);
-        };
-        builder_suite(define, writer, assertions);
-    }
-
-    #[test]
-    fn test_raw_le_bytes() {
-        let (_, _, next_block) = test_state();
-        let define = |builder: &mut B| {
-            let next_block = builder.read::<BlockVariable>();
-
-            let mut bytes = vec![];
-            for target in next_block.header.inner_lite.height.targets() {
-                let mut bits = builder.api.split_le(target, 32);
-                bits.reverse();
-                let to_extend = bits
-                    .chunks(8)
-                    .rev()
-                    .map(|chunk| {
-                        let targets = chunk.iter().map(|b| b.target).collect_vec();
-                        ByteVariable::from_targets(&targets)
-                    })
-                    .collect_vec();
-                bytes.extend(to_extend);
-            }
-            builder.write::<BytesVariable<8>>(BytesVariable(bytes.try_into().unwrap()));
-        };
-        let writer = |input: &mut PI| {
-            input.write::<BlockVariable>(next_block.clone().into());
-        };
-        let assertions = |mut output: PO| {
-            let bytes = output.read::<BytesVariable<8>>();
-            println!("{:?}", bytes);
-            assert_eq!(bytes, next_block.inner_lite.height.to_le_bytes());
-        };
         builder_suite(define, writer, assertions);
     }
 }

@@ -1,0 +1,86 @@
+[
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "01node.pool.f863973.m0",
+    "public_key": "ed25519:3iNqnvBgxJPXCxu6hNdvJso1PEAc1miAD35KQMBCA3aL",
+    "stake": "11170441638409425668975791338168"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "aurora.pool.f863973.m0",
+    "public_key": "ed25519:9c7mczZpNzJz98V1sDeGybfD4gMybP4JKHotH8RrrHTm",
+    "stake": "17889966138083499342131296757169"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "bee1stake.pool.f863973.m0",
+    "public_key": "ed25519:B7Mwy3sCCJ6GZzEojsKFXMjLQfVXPDC4Q1LjuHoZcyM6",
+    "stake": "951628760573009933043158953323"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "bisontrails.pool.f863973.m0",
+    "public_key": "ed25519:8g4P5EXyp2b2pfVMHY1QLfkRcY59hjPfWrFCKUWX3RmR",
+    "stake": "784322861597508336390510885838"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "everstake.pool.f863973.m0",
+    "public_key": "ed25519:4LDN8tZUTRRc4siGmYCPA67tRyxStACDchdGDZYKdFsw",
+    "stake": "3424542870162917789465110810613"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "forked.pool.f863973.m0",
+    "public_key": "ed25519:5CTpVEzEdmn5wK4y5e7DsqtRvQs3bM1ypUNU2RGj3mtL",
+    "stake": "19553588599682112903267112637"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "kiln.pool.f863973.m0",
+    "public_key": "ed25519:Bq8fe1eUgDRexX2CYDMhMMQBiN13j8vTAVFyTNhEfh1W",
+    "stake": "7466078259126542726635504903558"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "lavenderfive.pool.f863973.m0",
+    "public_key": "ed25519:AzwAiLDqprZKpDjhsH7dfyvFdfSasmPTjuJUAHfX1Pg4",
+    "stake": "30215218325260022435961435186"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "ni.pool.f863973.m0",
+    "public_key": "ed25519:GfCfFkLk2twbAWdsS3tr7C2eaiHN3znSfbshS5e8NqBS",
+    "stake": "3102526369640411151678859285501"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "p2p-org.pool.f863973.m0",
+    "public_key": "ed25519:5qyxefArHQfABdNv9ELuEiWcEo7DTzABM9LrMAKTCY3Z",
+    "stake": "100198001398444504508422270154"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "pathrocknetwork.pool.f863973.m0",
+    "public_key": "ed25519:CGzLGZEMb84nRSRZ7Au1ETAoQyN7SQXQi55fYafXq736",
+    "stake": "1716080041801977779897178399888"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "stakely_v2.pool.f863973.m0",
+    "public_key": "ed25519:7BanKZKGvFjK5Yy83gfJ71vPhqRwsDDyVHrV2FMJCUWr",
+    "stake": "5536803168134829098864689871766"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "stakesstone.pool.f863973.m0",
+    "public_key": "ed25519:3aAdsKUuzZbjW9hHnmLWFRKwXjmcxsnLNLfNL4gP1wJ8",
+    "stake": "1884761660283483727605426573806"
+  },
+  {
+    "validator_stake_struct_version": "V1",
+    "account_id": "wolfedge-capital-testnet.pool.f863973.m0",
+    "public_key": "ed25519:CQEMcPQz6sqhAgoBm9ka9UeVcXj5NpNpRtDYYGkPggvg",
+    "stake": "4110455987307868059339044490"
+  }
+]

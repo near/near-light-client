@@ -1,12 +1,15 @@
 use crate::prelude::*;
 use error::Error;
 pub use merkle_util::*;
+pub use near_crypto::ED25519PublicKey;
 pub use near_crypto::{PublicKey, Signature};
 pub use near_primitives::{
     block_header::ApprovalInner,
     block_header::BlockHeaderInnerLite,
     merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
+    views::LightClientBlockLiteView,
+    views::ValidatorStakeViewV1,
     views::{
         validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView, LightClientBlockView,
     },
@@ -219,7 +222,12 @@ impl Protocol {
         epoch_id: &CryptoHash,
     ) -> Result<(), Error> {
         if ![head.inner_lite.epoch_id, head.inner_lite.next_epoch_id].contains(epoch_id) {
-            log::debug!("Block is not in the current or next epoch");
+            log::debug!(
+                "Next Block Epoch({:?}) is not in the current({:?}) or next({:?}) epoch",
+                epoch_id,
+                head.inner_lite.epoch_id,
+                head.inner_lite.next_epoch_id
+            );
             Err(Error::BlockNotCurrentOrNextEpoch)
         } else {
             Ok(())
@@ -348,61 +356,23 @@ mod tests {
     use itertools::Itertools;
     use near_jsonrpc_primitives::types::light_client::RpcLightClientExecutionProofResponse;
     use serde_json::{self};
-
-    fn fixture(file: &str) -> LightClientBlockView {
-        serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
-            .unwrap()
-    }
-
-    fn get_next_epoch() -> LightClientBlockView {
-        fixture("2.json")
-    }
-
-    fn get_first_epoch() -> LightClientBlockView {
-        fixture("1.json")
-    }
-
-    fn get_current_epoch() -> LightClientBlockView {
-        fixture("current_epoch.json")
-    }
-
-    fn view_to_lite_view(h: LightClientBlockView) -> Header {
-        Header {
-            prev_block_hash: h.prev_block_hash,
-            inner_rest_hash: h.inner_rest_hash,
-            inner_lite: h.inner_lite,
-        }
-    }
-
-    fn test_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
-        let first = get_first_epoch();
-        let next = get_next_epoch();
-
-        (
-            view_to_lite_view(first.clone()),
-            first
-                .next_bps
-                .clone()
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            next,
-        )
-    }
+    use test_utils::*;
 
     #[test]
     fn test_sync_across_epoch_boundaries() {
-        let (mut head, mut next_bps, next_block) = test_state();
+        let (mut head, mut next_bps, next_block) = testnet_state();
+        println!("head: {:#?}", head.inner_lite);
         let mut next_epoch_id = EpochId(head.inner_lite.next_epoch_id);
 
         let mut sync_and_update = |next_block: LightClientBlockView| {
-            let sync_next = Protocol::sync(&head, &next_bps, next_block.clone()).unwrap();
+            let sync_next = Protocol::sync(&head, &next_bps[..], next_block.clone()).unwrap();
             // Assert we matched the epoch id for the new BPS
             assert_eq!(
                 head.inner_lite.next_epoch_id,
                 sync_next.next_bps.as_ref().unwrap().0 .0
             );
+
+            println!("new head: {:#?}", sync_next.new_head.inner_lite);
 
             head = sync_next.new_head;
             next_bps = sync_next.next_bps.unwrap().1;
@@ -427,14 +397,12 @@ mod tests {
         sync_and_update(next_block.clone());
 
         // Get next header, do next sync
-        let next_block = get_current_epoch();
-        sync_and_update(next_block.clone());
+        let next_block = test_last();
+        sync_and_update(next_block.body);
     }
 
     #[test]
     fn test_validate_already_verified() {
-        pretty_env_logger::try_init().ok();
-
         let (head, _, _) = test_state();
         assert_eq!(
             Protocol::ensure_not_already_verified(&head, &BlockHeight::MIN),
@@ -444,8 +412,6 @@ mod tests {
 
     #[test]
     fn test_validate_bad_epoch() {
-        pretty_env_logger::try_init().ok();
-
         let (head, _, _) = test_state();
         assert_eq!(
             Protocol::ensure_epoch_is_current_or_next(
@@ -458,8 +424,6 @@ mod tests {
 
     #[test]
     fn test_next_epoch_bps_invalid() {
-        pretty_env_logger::try_init().ok();
-
         let (head, _, mut next_block) = test_state();
         next_block.next_bps = None;
 
@@ -475,8 +439,6 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signature() {
-        pretty_env_logger::try_init().ok();
-
         let (_, next_bps, next_block) = test_state();
         assert_eq!(
             Protocol::validate_signature(
@@ -490,8 +452,6 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signatures_no_approved_stake() {
-        pretty_env_logger::try_init().ok();
-
         let (_, next_bps, mut next_block) = test_state();
 
         let approval_message = Protocol::reconstruct_approval_message(&next_block);
@@ -514,15 +474,13 @@ mod tests {
 
     #[test]
     fn test_next_invalid_signatures_stake_isnt_sufficient() {
-        pretty_env_logger::try_init().ok();
-
         let (_, next_bps, next_block) = test_state();
 
         let approval_message = Protocol::reconstruct_approval_message(&next_block);
 
         let StakeInfo { total, approved } = Protocol::validate_signatures(
             &next_block.approvals_after_next,
-            &next_bps,
+            &next_bps[..],
             &approval_message.unwrap(),
         );
 
@@ -546,8 +504,6 @@ mod tests {
 
     #[test]
     fn test_next_bps_invalid_hash() {
-        pretty_env_logger::try_init().ok();
-
         let (_, _, next_block) = test_state();
 
         assert_eq!(
@@ -561,8 +517,6 @@ mod tests {
 
     #[test]
     fn test_next_bps() {
-        pretty_env_logger::try_init().ok();
-
         let (_, _, next_block) = test_state();
 
         assert_eq!(
@@ -577,8 +531,6 @@ mod tests {
 
     #[test]
     fn test_next_bps_noop_on_empty() {
-        pretty_env_logger::try_init().ok();
-
         let (_, _, next_block) = test_state();
         assert_eq!(
             Protocol::ensure_next_bps_is_valid(&next_block.inner_lite.next_bp_hash, None).unwrap(),
@@ -588,7 +540,6 @@ mod tests {
 
     #[test]
     fn test_outcome_root() {
-        pretty_env_logger::try_init().ok();
         let req = r#"{"outcome_proof":{"proof":[],"block_hash":"5CY72FinjVV2Hd5zRikYYMaKh67pftXJsw8vwRXAUAQF","id":"9UhBumQ3eEmPH5ALc3NwiDCQfDrFakteRD7rHE9CfZ32","outcome":{"logs":[],"receipt_ids":["2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"],"gas_burnt":2434069818500,"tokens_burnt":"243406981850000000000","executor_id":"datayalla.testnet","status":{"SuccessReceiptId":"2mrt6jXKwWzkGrhucAtSc8R3mjrhkwCjnqVckPdCMEDo"},"metadata":{"version":1,"gas_profile":null}}},"outcome_root_proof":[{"hash":"9f7YjLvzvSspJMMJ3DDTrFaEyPQ5qFqQDNoWzAbSTjTy","direction":"Right"},{"hash":"67ZxFmzWXbWJSyi7Wp9FTSbbJx2nMr7wSuW3EP1cJm4K","direction":"Left"}],"block_header_lite":{"prev_block_hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","inner_rest_hash":"G25j8jSWRyrXV317cPC3qYA4SyJWXsBfErjhBYQkxw5A","inner_lite":{"height":134481525,"epoch_id":"4tBzDozzGED3QiCRURfViVuyJy5ikaN9dVH7m2MYkTyw","next_epoch_id":"9gYJSiT3TQbKbwui5bdbzBA9PCMSSfiffWhBdMtcasm2","prev_state_root":"EwkRecSP8GRvaxL7ynCEoHhsL1ksU6FsHVLCevcccF5q","outcome_root":"8Eu5qpDUMpW5nbmTrTKmDH2VYqFEHTKPETSTpPoyGoGc","timestamp":1691615068679535000,"timestamp_nanosec":"1691615068679535094","next_bp_hash":"8LCFsP6LeueT4X3PEni9CMvH7maDYpBtfApWZdXmagss","block_merkle_root":"583vb6csYnczHyt5z6Msm4LzzGkceTZHdvXjC8vcWeGK"}},"block_proof":[{"hash":"AEnTyGRrk2roQkYSWoqYhzkbp5SWWJtCd71ZYyj1P26i","direction":"Left"},{"hash":"HgZaHXpb5zs4rxUQTeW69XBNLBJoo4sz2YEDh7aFnMpC","direction":"Left"},{"hash":"EYNXYsnESQkXo7B27a9xu6YgbDSyynNcByW5Q2SqAaKH","direction":"Right"},{"hash":"AbKbsD7snoSnmzAtwNqXLBT5sm7bZr48GCCLSdksFuzi","direction":"Left"},{"hash":"7KKmS7n3MtCfv7UqciidJ24Abqsk8m85jVQTh94KTjYS","direction":"Left"},{"hash":"5nKA1HCZMJbdCccZ16abZGEng4sMoZhKez74rcCFjnhL","direction":"Left"},{"hash":"BupagAycSLD7v42ksgMKJFiuCzCdZ6ksrGLwukw7Vfe3","direction":"Right"},{"hash":"D6v37P4kcVJh8N9bV417eqJoyMeQbuZ743oNsbKxsU7z","direction":"Right"},{"hash":"8sWxxbe1rdquP5VdYfQbw1UvtcXDRansJYJV5ySzyow4","direction":"Right"},{"hash":"CmKVKWRqEqi4UaeKKYXpPSesYqdQYwHQM3E4xLKEUAj8","direction":"Left"},{"hash":"3TvjFzVyPBvPpph5zL6VCASLCxdNeiKV6foPwUpAGqRv","direction":"Left"},{"hash":"AnzSG9f91ePS6L6ii3eAkocp4iKjp6wjzSwWsDYWLnMX","direction":"Right"},{"hash":"FYVJDL4T6c87An3pdeBvntB68NzpcPtpvLP6ifjxxNkr","direction":"Left"},{"hash":"2YMF6KE8XTz7Axj3uyAoFbZisWej9Xo8mxgVtauWCZaV","direction":"Left"},{"hash":"4BHtLcxqNfWSneBdW76qsd8om8Gjg58Qw5BX8PHz93hf","direction":"Left"},{"hash":"7G3QUT7NQSHyXNQyzm8dsaYrFk5LGhYaG7aVafKAekyG","direction":"Left"},{"hash":"3XaMNnvnX69gGqBJX43Na1bSTJ4VUe7z6h5ZYJsaSZZR","direction":"Left"},{"hash":"FKu7GtfviPioyAGXGZLBVTJeG7KY5BxGwuL447oAZxiL","direction":"Right"},{"hash":"BePd7DPKUQnGtnSds5fMJGBUwHGxSNBpaNLwceJGUcJX","direction":"Left"},{"hash":"2BVKWMd9pXZTEyE9D3KL52hAWAyMrXj1NqutamyurrY1","direction":"Left"},{"hash":"EWavHKhwQiT8ApnXvybvc9bFY6aJYJWqBhcrZpubKXtA","direction":"Left"},{"hash":"83Fsd3sdx5tsJkb6maBE1yViKiqbWCCNfJ4XZRsKnRZD","direction":"Left"},{"hash":"AaT9jQmUvVpgDHdFkLR2XctaUVdTti49enmtbT5hsoyL","direction":"Left"}]}"#;
         let p: RpcLightClientExecutionProofResponse = serde_json::from_str(req).unwrap();
 
@@ -603,12 +554,7 @@ mod tests {
         assert!(root_matches);
     }
 
-    #[test]
-    fn statically_test_lens() {
-        println!("approval: {:?}", std::mem::size_of::<ApprovalInner>());
-    }
-
-    // Missed a part of LC spec regarding BPS handover, only the MAX_SEATS need to be taken
+    // FIXME: Missed a part of LC spec regarding BPS handover, only the MAX_SEATS need to be taken
     // TODO: change epoch_bps to only store MAX_SEATS and then for next
     #[test]
     fn test_enough_stake_in_next_epoch_not_this() {
