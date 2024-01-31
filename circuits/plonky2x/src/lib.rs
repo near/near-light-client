@@ -2,11 +2,18 @@
 
 use builder::Sync;
 use hint::FetchNextHeaderInputs;
+use plonky2x::frontend::mapreduce::generator::{MapReduceDynamicGenerator, MapReduceGenerator};
+use plonky2x::prelude::plonky2::hash::hashing::PlonkyPermutation;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use variables::{
-    BpsArr, CryptoHashVariable, HashBpsInputs, HeaderVariable, ValidatorStakeVariable,
+    BlockHeightVariable, BpsArr, CryptoHashVariable, HashBpsInputs, HeaderVariable,
+    ValidatorStakeVariable,
 };
 use variables::{BuildEndorsement, EncodeInner, SyncedVariable};
+
+use crate::builder::Verify;
+use crate::hint::FetchProofInputs;
+use crate::variables::{ProofVariable, TransactionOrReceiptIdVariable};
 
 /// Building blocks injected into the CircuitBuilder
 mod builder;
@@ -31,9 +38,9 @@ mod test_utils;
 // protocol crate
 // TODO: determine fees, allows integrators to charge
 #[derive(Debug, Clone)]
-pub struct SyncCircuit<const AMT: usize>;
+pub struct SyncCircuit;
 
-impl<const AMT: usize> Circuit for SyncCircuit<AMT> {
+impl Circuit for SyncCircuit {
     fn define<L: PlonkParameters<D>, const D: usize>(b: &mut CircuitBuilder<L, D>)
     where
         <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
@@ -71,15 +78,124 @@ impl<const AMT: usize> Circuit for SyncCircuit<AMT> {
     }
 }
 
+#[derive(CircuitVariable, Debug, Clone)]
+pub struct ProofMapReduceState<const B: usize> {
+    pub height_indices: ArrayVariable<BlockHeightVariable, B>,
+    pub results: ArrayVariable<BoolVariable, B>,
+}
+
+#[derive(CircuitVariable, Debug, Clone)]
+pub struct ProofMapReduceCtx {
+    pub zero: BlockHeightVariable,
+    pub result: BoolVariable,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProofCircuit<const N: usize, const B: usize>;
+
+impl<const N: usize, const B: usize> Circuit for ProofCircuit<N, B> {
+    fn define<L: PlonkParameters<D>, const D: usize>(b: &mut CircuitBuilder<L, D>)
+    where
+        <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
+            plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
+    {
+        assert!(N % B == 0, "Cannot batch by this configuration");
+
+        let network = near_light_client_rpc::Network::Testnet;
+
+        let trusted_head = b.read::<HeaderVariable>();
+        let ids = b.read::<ArrayVariable<TransactionOrReceiptIdVariable, N>>();
+
+        let proofs = FetchProofInputs::<N>(network).fetch(b, &trusted_head, &ids.data);
+
+        let zero = b.zero::<BlockHeightVariable>();
+        let _false = b._false();
+
+        let ctx = ProofMapReduceCtx {
+            zero,
+            result: _false,
+        };
+
+        let output = b
+            .mapreduce_dynamic::<_, ProofVariable, ProofMapReduceState<N>, Self, B, _, _>(
+                ctx,
+                proofs.data,
+                |ctx, proofs, b| {
+                    let mut heights = vec![];
+                    let mut results = vec![];
+                    for p in proofs.data {
+                        heights.push(p.block_header.inner_lite.height);
+                        results.push(b.verify(p));
+                    }
+                    b.watch_slice(&heights, "map job -- heights");
+                    b.watch_slice(&results, "map job -- results");
+
+                    heights.resize(N, ctx.zero);
+                    results.resize(N, ctx.result);
+
+                    let state = ProofMapReduceState {
+                        height_indices: heights.into(),
+                        results: results.into(),
+                    };
+
+                    state
+                },
+                |ctx, mut left, right, b| {
+                    let mut r_heights = right.height_indices.data;
+                    let mut r_results = right.results.data;
+
+                    left.height_indices
+                        .data
+                        .iter_mut()
+                        .zip(left.results.data.iter_mut())
+                        .for_each(|(h, r)| {
+                            let is_zero = b.is_equal(h.clone(), ctx.zero);
+                            *h = b.select(is_zero, r_heights.pop().unwrap(), *h);
+                            *r = b.select(is_zero, r_results.pop().unwrap(), *r);
+                        });
+
+                    left
+                },
+            );
+        b.write::<ProofMapReduceState<N>>(output);
+    }
+
+    fn register_generators<L: PlonkParameters<D>, const D: usize>(registry: &mut HintRegistry<L, D>)
+    where
+        <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
+            plonky2::plonk::config::AlgebraicHasher<L::Field>,
+    {
+        registry.register_async_hint::<FetchProofInputs<N>>();
+        registry.register_hint::<EncodeInner>();
+
+        let dynamic_id = MapReduceDynamicGenerator::<L, (), (), (), Self, 1, D>::id();
+
+        registry.register_simple::<MapReduceDynamicGenerator<
+            L,
+            ProofMapReduceCtx,
+            ProofVariable,
+            ProofMapReduceState<N>,
+            Self,
+            B,
+            D,
+        >>(dynamic_id);
+    }
+}
+
 #[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
+    use std::str::FromStr;
+
     use super::*;
-    use crate::test_utils::{builder_suite, testnet_state, B, PI, PO};
+    use crate::{
+        test_utils::{builder_suite, testnet_state, B, PI, PO},
+        variables::TransactionOrReceiptIdVariableValue,
+    };
     use ::test_utils::CryptoHash;
     use near_light_client_protocol::{prelude::Itertools, ValidatorStake};
     use near_light_client_rpc::{LightClientRpc, NearRpcClient};
-    use near_primitives::types::AccountId;
+    use near_primitives::types::{AccountId, TransactionOrReceiptId};
     use serial_test::serial;
 
     #[test]
@@ -89,7 +205,7 @@ mod beefy_tests {
         let (header, _, _) = testnet_state();
 
         let define = |b: &mut B| {
-            SyncCircuit::<SYNC_AMT>::define(b);
+            SyncCircuit::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<HeaderVariable>(header.into());
@@ -127,8 +243,74 @@ mod beefy_tests {
     }
 
     #[test]
-    fn test_prove() {}
+    #[serial]
+    fn beefy_test_verify_e2e() {
+        let (header, _, _) = testnet_state();
 
-    #[test]
-    fn test_verify() {}
+        const AMT: usize = 4;
+        const BATCH: usize = 1;
+
+        fn tx(hash: &str, sender: &str) -> TransactionOrReceiptId {
+            TransactionOrReceiptId::Transaction {
+                transaction_hash: CryptoHash::from_str(hash).unwrap(),
+                sender_id: sender.parse().unwrap(),
+            }
+        }
+        fn rx(hash: &str, receiver: &str) -> TransactionOrReceiptId {
+            TransactionOrReceiptId::Receipt {
+                receipt_id: CryptoHash::from_str(hash).unwrap(),
+                receiver_id: receiver.parse().unwrap(),
+            }
+        }
+
+        let txs: Vec<TransactionOrReceiptIdVariableValue<GoldilocksField>> = vec![
+            tx(
+                "3z2zqitrXNYQs19z5tK5a4bZSxdx7baqzGFUyGAkW9Mz",
+                "zavodil.testnet",
+            ),
+            // rx(
+            //     "9cVuYLKYF26QevZ315RLb9ArU3gbcgPc4LDRJfZQyZHo",
+            //     "priceoracle.testnet",
+            // ),
+            // rx("3UzHjFP8hVR2P6JJHwWchhcXPUV3vuPCDhtdWK7JmTy9", "system"),
+            // tx(
+            //     "3V1qYGZe9NBc4EQjg5RzM5CrDiRgxqbQsYaRvMTyU4UR",
+            //     "hotwallet.dev-kaiching.testnet",
+            // ),
+            // rx(
+            //     "CjaBC9EJE2eYg1vAy6sjJWpzgAroMv7tbFkhyz5Nhk3h",
+            //     "wallet.dev-kaiching.testnet",
+            // ),
+            // rx("9Zp41hsK5NEfkjiv3PhtqpgbRiHqsvpFcwe6CHrQ2kh2", "system"),
+            tx(
+                "4VqSnHtFPGsgRJ7f4iz75bibCfbEiqYjnyEdentUyvbr",
+                "operator_manager.orderly.testnet",
+            ),
+            tx(
+                "FTLQF8KxwThbfriNk8jNHJsmNk9mteXwQ71Q6hc7JLbg",
+                "operator-manager.orderly-qa.testnet",
+            ),
+            tx(
+                "4VvKfzUzQVA6zNSSG1CZRbiTe4QRz5rwAzcZadKi1EST",
+                "operator-manager.orderly-dev.testnet",
+            ),
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect_vec();
+
+        assert_eq!(txs.len(), AMT);
+
+        let define = |b: &mut B| {
+            ProofCircuit::<AMT, BATCH>::define(b);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<HeaderVariable>(header.into());
+            input.write::<ArrayVariable<TransactionOrReceiptIdVariable, AMT>>(txs.into());
+        };
+        let assertions = |mut output: PO| {
+            println!("{:#?}", output.read::<ProofMapReduceState<AMT>>());
+        };
+        builder_suite(define, writer, assertions);
+    }
 }

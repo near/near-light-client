@@ -1,8 +1,8 @@
-use crate::merkle::NearMerkleTree;
+use crate::merkle::{MerklePathVariable, NearMerkleTree};
 use crate::variables::{
     ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr, BuildEndorsement,
-    CryptoHashVariable, HeaderVariable, MerklePathVariable, ProofVariable, StakeInfoVariable,
-    SyncedVariable, ValidatorStakeVariable,
+    CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable, SyncedVariable,
+    ValidatorStakeVariable,
 };
 use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::Itertools;
@@ -266,8 +266,7 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
         let d = self.ensure_stake_is_sufficient(&stake);
         self.assertx(d);
 
-        // TODO: might not need this now, also the logic is wrong because nbps is always >0
-        let (next_bps_epoch, next_bps) = if next_block.next_bps.len() > 0 {
+        if next_block.next_bps.len() > 0 {
             // TODO: hashing bps in circut
             let e = self.ensure_next_bps_is_valid(
                 &next_block.header.inner_lite.next_bp_hash,
@@ -275,21 +274,11 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
             );
             self.assertx(e);
             assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
-            (
-                next_block.header.inner_lite.next_epoch_id,
-                next_block.next_bps.to_owned(),
-            )
-        } else {
-            let eid = self.constant::<CryptoHashVariable>([0u8; 32].into());
-            let bps = self.constant::<BpsArr<ValidatorStakeVariable>>(
-                vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS].into(),
-            );
-            (eid, bps)
-        };
+        }
         SyncedVariable {
             new_head: next_block.header.to_owned(),
-            next_bps_epoch,
-            next_bps,
+            next_bps_epoch: next_block.header.inner_lite.next_epoch_id,
+            next_bps: next_block.next_bps.to_owned(),
         }
     }
 
@@ -320,17 +309,11 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
 }
 
 pub trait Verify<L: PlonkParameters<D>, const D: usize> {
-    fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
-        &mut self,
-        proof: ProofVariable<OPD, ORPD, BPD>,
-    ) -> BoolVariable;
+    fn verify(&mut self, proof: ProofVariable) -> BoolVariable;
 }
 
 impl<L: PlonkParameters<D>, const D: usize> Verify<L, D> for CircuitBuilder<L, D> {
-    fn verify<const OPD: usize, const ORPD: usize, const BPD: usize>(
-        &mut self,
-        proof: ProofVariable<OPD, ORPD, BPD>,
-    ) -> BoolVariable {
+    fn verify(&mut self, proof: ProofVariable) -> BoolVariable {
         let block_hash = proof.block_header.hash(self);
 
         let block_hash_matches = self.is_equal(block_hash, proof.outcome_proof_block_hash);
@@ -635,11 +618,7 @@ mod beefy_tests {
         const BLOCK_PROOF_AMT: usize = 26;
 
         let define = |builder: &mut B| {
-            let proof = builder.read::<ProofVariable<
-                OUTCOME_PROOF_AMT,
-                OUTCOME_ROOT_PROOF_AMT,
-                BLOCK_PROOF_AMT,
-            >>();
+            let proof = builder.read::<ProofVariable>();
             let expected_outcome_root = builder.read::<CryptoHashVariable>();
             let expected_block_root = builder.read::<CryptoHashVariable>();
 
@@ -664,14 +643,13 @@ mod beefy_tests {
             builder.write::<BoolVariable>(proof_verified);
         };
         let writer = |input: &mut PI| {
-            input
-                .write::<ProofVariable<OUTCOME_PROOF_AMT, OUTCOME_ROOT_PROOF_AMT, BLOCK_PROOF_AMT>>(
-                    near_light_client_protocol::Proof::Basic {
-                        head_block_root: block_root,
-                        proof: Box::new(fixture("old.json")),
-                    }
-                    .into(),
-                );
+            input.write::<ProofVariable>(
+                near_light_client_protocol::Proof::Basic {
+                    head_block_root: block_root,
+                    proof: Box::new(fixture("old.json")),
+                }
+                .into(),
+            );
             input.write::<CryptoHashVariable>(p.block_header_lite.inner_lite.outcome_root.0.into());
             input.write::<CryptoHashVariable>(block_root.0.clone().into());
         };
@@ -694,24 +672,19 @@ mod beefy_tests {
         const BLOCK_PROOF_AMT: usize = 26;
 
         let define = |builder: &mut B| {
-            let registered_proof = builder.read::<ProofVariable<
-                OUTCOME_PROOF_AMT,
-                OUTCOME_ROOT_PROOF_AMT,
-                BLOCK_PROOF_AMT,
-            >>();
+            let registered_proof = builder.read::<ProofVariable>();
 
             let proof_verified = builder.verify(registered_proof);
             builder.write::<BoolVariable>(proof_verified);
         };
         let writer = |input: &mut PI| {
-            input
-                .write::<ProofVariable<OUTCOME_PROOF_AMT, OUTCOME_ROOT_PROOF_AMT, BLOCK_PROOF_AMT>>(
-                    near_light_client_protocol::Proof::Basic {
-                        head_block_root: block_root,
-                        proof: Box::new(fixture("old.json")),
-                    }
-                    .into(),
-                );
+            input.write::<ProofVariable>(
+                near_light_client_protocol::Proof::Basic {
+                    head_block_root: block_root,
+                    proof: Box::new(fixture("old.json")),
+                }
+                .into(),
+            );
         };
         let assertions = |mut output: PO| {
             assert!(output.read::<BoolVariable>(), "proof verified");
