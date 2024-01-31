@@ -75,6 +75,27 @@ impl NearRpcClient {
 
         NearRpcClient { client, archive }
     }
+    pub async fn batch_fetch_proofs(
+        &self,
+        last_verified_hash: &CryptoHash,
+        reqs: Vec<GetProof>,
+        collect_errors: bool,
+    ) -> Result<(Vec<BasicProof>, Vec<anyhow::Error>)> {
+        let mut futs = vec![];
+        for req in reqs {
+            let proof = self.fetch_light_client_proof(req, *last_verified_hash);
+            futs.push(proof);
+        }
+        let unpin_futs: Vec<_> = futs.into_iter().map(Box::pin).collect();
+
+        let proofs: Vec<Result<BasicProof>> = futures::future::join_all(unpin_futs).await;
+        let (proofs, errors): (Vec<_>, Vec<_>) = if collect_errors {
+            proofs.into_iter().partition_result()
+        } else {
+            (proofs.into_iter().collect::<Result<Vec<_>>>()?, vec![])
+        };
+        Ok((proofs, errors))
+    }
 }
 
 #[async_trait]
@@ -104,7 +125,7 @@ impl LightClientRpc for NearRpcClient {
         self.client
             .call(&req)
             .or_else(|e| {
-                debug!("Error hitting main rpc, falling back to archive: {:?}", e);
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
                 self.archive.call(&req)
             })
             .await
@@ -123,7 +144,7 @@ impl LightClientRpc for NearRpcClient {
         self.client
             .call(&req)
             .or_else(|e| {
-                debug!("Error hitting main rpc, falling back to archive: {:?}", e);
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
                 self.archive.call(&req)
             })
             .await
@@ -140,7 +161,7 @@ impl LightClientRpc for NearRpcClient {
         self.client
             .call(&req)
             .or_else(|e| {
-                debug!("Error hitting main rpc, falling back to archive: {:?}", e);
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
                 self.archive.call(&req)
             })
             .await

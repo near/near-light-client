@@ -1,15 +1,13 @@
-use crate::variables::bps_to_variable;
+use crate::variables::normalise_account_id;
 use crate::variables::BlockVariable;
-use crate::variables::BpsArr;
 use crate::variables::CryptoHashVariable;
 use crate::variables::HeaderVariable;
-use crate::variables::ValidatorStakeVariable;
+use crate::variables::ProofVariable;
+use crate::variables::TransactionOrReceiptIdVariable;
 use async_trait::async_trait;
-use near_light_client_protocol::prelude::anyhow;
-use near_light_client_protocol::prelude::izip;
 use near_light_client_protocol::prelude::CryptoHash;
-use near_light_client_protocol::prelude::Itertools;
-use near_light_client_protocol::LightClientBlockLiteView;
+use near_light_client_protocol::Proof;
+use near_light_client_rpc::prelude::GetProof;
 use near_light_client_rpc::{LightClientRpc, NearRpcClient, Network};
 use plonky2x::{frontend::hint::asynchronous::hint::AsyncHint, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -52,17 +50,84 @@ impl FetchNextHeaderInputs {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FetchProofInputs<const B: usize>(pub Network);
+
+#[async_trait]
+impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
+    for FetchProofInputs<B>
+{
+    async fn hint(
+        &self,
+        input_stream: &mut ValueStream<L, D>,
+        output_stream: &mut ValueStream<L, D>,
+    ) {
+        let client = NearRpcClient::new(self.0.clone());
+        let block_merkle_root = input_stream.read_value::<CryptoHashVariable>().0;
+        let last_verified = input_stream.read_value::<CryptoHashVariable>().0;
+
+        let mut reqs = vec![];
+        for _ in 0..B {
+            let tx = input_stream.read_value::<TransactionOrReceiptIdVariable>();
+            reqs.push(if tx.is_transaction {
+                GetProof::Transaction {
+                    transaction_hash: CryptoHash(tx.id.into()),
+                    sender_id: normalise_account_id::<L::Field>(&tx.account),
+                }
+            } else {
+                GetProof::Receipt {
+                    receipt_id: CryptoHash(tx.id.into()),
+                    receiver_id: normalise_account_id::<L::Field>(&tx.account),
+                }
+            });
+        }
+
+        let proofs = client
+            .batch_fetch_proofs(&CryptoHash(last_verified), reqs, false)
+            .await
+            .expect("Failed to fetch proofs")
+            .0;
+        assert_eq!(proofs.len(), B, "Invalid number of proofs");
+
+        log::info!("Fetched {} proofs", proofs.len());
+
+        for p in proofs.into_iter() {
+            output_stream.write_value::<ProofVariable>(
+                Proof::Basic {
+                    proof: Box::new(p),
+                    head_block_root: CryptoHash(block_merkle_root),
+                }
+                .into(),
+            );
+        }
+    }
+}
+impl<const N: usize> FetchProofInputs<N> {
+    pub fn fetch<L: PlonkParameters<D>, const D: usize>(
+        self,
+        b: &mut CircuitBuilder<L, D>,
+        head: &HeaderVariable,
+        reqs: &[TransactionOrReceiptIdVariable],
+    ) -> ArrayVariable<ProofVariable, N> {
+        let mut input_stream = VariableStream::new();
+
+        input_stream.write::<CryptoHashVariable>(&head.inner_lite.block_merkle_root);
+        input_stream.write::<CryptoHashVariable>(&head.hash(b));
+        input_stream.write_slice::<TransactionOrReceiptIdVariable>(reqs);
+
+        let output_stream = b.async_hint(input_stream, self);
+        let proofs = output_stream.read_vec::<ProofVariable>(b, N);
+        proofs.into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         test_utils::{builder_suite, test_state, B, PI, PO},
-        variables::{BlockVariableValue, HeaderVariableValue},
+        variables::{BlockVariableValue, HeaderVariable},
     };
-    use near_light_client_protocol::{
-        prelude::Header, BlockHeaderInnerLiteView, LightClientBlockView,
-    };
-    use std::str::FromStr;
 
     #[test]
     fn test_fetch_header() {
@@ -85,66 +150,4 @@ mod tests {
         };
         builder_suite(define, writer, assertions);
     }
-    // #[test]
-    // fn test_fetch_info2() {
-    //     let head = Header {
-    //         prev_block_hash: CryptoHash::from_str("5dbt6rh82Xx6nNG1PuKoQj96g4jnWw6cyb8HNWPPkVJE")
-    //             .unwrap(),
-    //         inner_rest_hash: CryptoHash::from_str("DZT9p28adyuiTSbUV5bsuPRxX9K7R1bag1AeUEMhm4bh")
-    //             .unwrap(),
-    //         inner_lite: BlockHeaderInnerLiteView {
-    //             height: 154654776,
-    //             epoch_id: CryptoHash::from_str("FsJbcG3yvQQC81FVLgAsaHZrMBFbrPM22kgqfGcCdrFb")
-    //                 .unwrap(),
-    //             next_epoch_id: CryptoHash::from_str("Fjn8T3phCCSCXSdjtQ4DqHGV86yeS2MQ92qcufCEpwbf")
-    //                 .unwrap(),
-    //             prev_state_root: CryptoHash::from_str(
-    //                 "F2NNVhJJJdC7oWMbjpaJL3HVNK9RxcCWuTXjrM32ShuP",
-    //             )
-    //             .unwrap(),
-    //             outcome_root: CryptoHash::from_str("7SYchEDbwawjP2MVfZ2GinP8bBQU1hKFRz34b2ZzG3A8")
-    //                 .unwrap(),
-    //             timestamp: 1705334624027402581,
-    //             timestamp_nanosec: 1705334624027402581,
-    //             next_bp_hash: CryptoHash::from_str("AcNatyPz9nmg2e5dMKQAbNLjFfkLgBN7AbR31vcpVJ7z")
-    //                 .unwrap(),
-    //             block_merkle_root: CryptoHash::from_str(
-    //                 "3huzCnEQhgDDMWyVNR9kNbQFJ7qJGy1J4MBrCJAWndW9",
-    //             )
-    //             .unwrap(),
-    //         },
-    //     };
-    //
-    //     let define = |b: &mut B| {
-    //         let header = b.read::<HeaderVariable>();
-    //         let header_hash = header.hash(b);
-    //         let mut outputs = b.async_hint(
-    //             FetchBatchInputs::<2>::write_inputs(&header, &header_hash),
-    //             FetchBatchInputs::<2>(near_light_client_rpc::Network::Testnet),
-    //         );
-    //         let outputs = FetchBatchInputs::<2>::read_outputs(&mut outputs, b);
-    //
-    //         b.write::<BpsArr<ValidatorStakeVariable>>(outputs.0);
-    //         for i in outputs.1.as_vec() {
-    //             b.write::<HeaderInput>(i);
-    //         }
-    //     };
-    //     let writer = |input: &mut PI| {
-    //         input.write::<HeaderVariable>(head.into());
-    //     };
-    //     let assertions = |mut output: PO| {
-    //         let bps = output
-    //             .read::<BpsArr<ValidatorStakeVariable>>()
-    //             .into_iter()
-    //             .map(|x| x.account_id)
-    //             .collect_vec();
-    //         assert_eq!(bps.len(), 50);
-    //
-    //         let inputs = output.read::<HeaderInput>();
-    //         println!("inputs: {:?}", inputs);
-    //         let inputs = output.read::<HeaderInput>();
-    //         println!("inputs: {:?}", inputs);
-    //     };
-    //     builder_suite(define, writer, assertions);
-    // }
 }

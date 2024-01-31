@@ -3,7 +3,7 @@ use near_light_clientx::{plonky2x::backend::function::Plonky2xFunction, SyncCirc
 fn main() {
     cfg_if::cfg_if! {
         if #[cfg(feature = "sync")] {
-            SyncCircuit::<1>::entrypoint();
+            SyncCircuit::entrypoint();
         } else {
             panic!("No circuit feature enabled");
         }

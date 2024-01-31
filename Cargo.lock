@@ -3697,7 +3697,7 @@ dependencies = [
  "near-primitives-core",
  "pretty_env_logger",
  "protobuf 3.2.0",
- "rand 0.8.5",
+ "rand 0.7.3",
  "reqwest",
  "serde",
  "serde_json",
@@ -3721,7 +3721,7 @@ dependencies = [
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
- "rand 0.8.5",
+ "rand 0.7.3",
  "serde",
  "serde_json",
  "test-utils",
@@ -3746,7 +3746,7 @@ dependencies = [
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
- "rand 0.8.5",
+ "rand 0.7.3",
  "serde",
  "serde_json",
  "thiserror",
@@ -4901,7 +4901,6 @@ source = "git+https://github.com/mir-protocol/plonky2.git#b8a16b39c7f84491dfae9b
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#889643f4b1c331ce585b992c02cadbccaa79cfc8"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4927,6 +4926,7 @@ dependencies = [
  "num-bigint 0.4.4",
  "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
  "plonky2x-derive",
+ "pretty_assertions",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -4943,7 +4943,6 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#889643f4b1c331ce585b992c02cadbccaa79cfc8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6635,7 +6634,7 @@ dependencies = [
  "near-primitives-core",
  "pretty_assertions",
  "pretty_env_logger",
- "rand 0.8.5",
+ "rand 0.7.3",
  "serde",
  "serde_json",
  "thiserror",

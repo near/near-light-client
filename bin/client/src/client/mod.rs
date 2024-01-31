@@ -242,30 +242,6 @@ impl LightClient {
             .ok()
     }
 
-    pub async fn batch_fetch_proofs(
-        &self,
-        last_verified_hash: &CryptoHash,
-        p: BatchGetProof,
-        collect_errors: bool,
-    ) -> Result<(Vec<BasicProof>, Vec<anyhow::Error>)> {
-        let mut futs = vec![];
-        for req in p.0 {
-            let proof = self
-                .client
-                .fetch_light_client_proof(req.0, *last_verified_hash);
-            futs.push(proof);
-        }
-        let unpin_futs: Vec<_> = futs.into_iter().map(Box::pin).collect();
-
-        let proofs: Vec<Result<BasicProof>> = futures::future::join_all(unpin_futs).await;
-        let (proofs, errors): (Vec<_>, Vec<_>) = if collect_errors {
-            proofs.into_iter().partition_result()
-        } else {
-            (proofs.into_iter().collect::<Result<Vec<_>>>()?, vec![])
-        };
-        Ok((proofs, errors))
-    }
-
     pub async fn verify_proof(&self, p: Proof) -> Result<bool> {
         anyhow::ensure!(
             self.store
@@ -278,9 +254,14 @@ impl LightClient {
     }
 
     // TODO: this and below are the same except from two lines
-    pub async fn get_proofs(&self, p: BatchGetProof) -> Result<Vec<Proof>> {
+    pub async fn get_proofs(&self, req: BatchGetProof) -> Result<Vec<Proof>> {
+        let req = req.0.into_iter().map(|p| p.0).collect();
         let head = self.store.head().await?;
-        let proofs = self.batch_fetch_proofs(&head.hash(), p, false).await?.0;
+        let proofs = self
+            .client
+            .batch_fetch_proofs(&head.hash(), req, false)
+            .await?
+            .0;
 
         self.store
             .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
@@ -294,10 +275,15 @@ impl LightClient {
 
     pub async fn experimental_get_proofs(
         &self,
-        p: BatchGetProof,
+        req: BatchGetProof,
     ) -> Result<(ExperimentalProof, Vec<anyhow::Error>)> {
+        let req = req.0.into_iter().map(|p| p.0).collect();
+
         let head = self.store.head().await?;
-        let (proofs, errors) = self.batch_fetch_proofs(&head.hash(), p, true).await?;
+        let (proofs, errors) = self
+            .client
+            .batch_fetch_proofs(&head.hash(), req, true)
+            .await?;
         let p = protocol::experimental::Proof::new(head.inner_lite.block_merkle_root, proofs);
         self.store
             .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])

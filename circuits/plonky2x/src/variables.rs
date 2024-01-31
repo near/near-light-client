@@ -1,14 +1,14 @@
-use crate::merkle::determine_direction;
 use ethers::types::U256;
 use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::{Header, Itertools};
 use near_light_client_protocol::{
-    merkle_util::MerklePath, prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView,
-    LightClientBlockView, Signature, ValidatorStake,
+    prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView, LightClientBlockView,
+    Signature, ValidatorStake,
 };
 use near_light_client_protocol::{
     ED25519PublicKey, Proof, PublicKey, StakeInfo, Synced, ValidatorStakeView, ValidatorStakeViewV1,
 };
+use near_light_client_rpc::prelude::GetProof;
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
 use plonky2x::frontend::curta::ec::point::CompressedEdwardsYVariable;
 use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
@@ -19,46 +19,19 @@ use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
-// TODO: remove any unused fields like account id etc?
-// TODO: if we use borsh here be careful of order
+use crate::merkle::MerklePathVariable;
 
+// TODO: remove any unused fields like account id etc?
 /// TODO: check if BPS seats changes for testnet/mainnet
+
 /// Type for omitting the size across the codebase for arrays that are the same size as BPS
 pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
 pub type BlockHeightVariable = U64Variable;
 pub type BalanceVariable = U128Variable;
-pub type AccountIdVariable = BytesVariable<{ AccountId::MAX_LEN }>; // TODO: decide if this is a
-                                                                    // reasonable way
-
-// TODO: add handling of empty path elements
-#[derive(CircuitVariable, Clone, Debug)]
-pub struct MerklePathVariable<const A: usize> {
-    pub path: ArrayVariable<Bytes32Variable, A>,
-    pub indices: ArrayVariable<BoolVariable, A>,
-}
-impl<F: RichField, const A: usize> From<MerklePath> for MerklePathVariableValue<A, F> {
-    fn from(path: MerklePath) -> Self {
-        assert!(path.len() <= A);
-
-        let mut indices = path
-            .iter()
-            .map(|x| &x.direction)
-            .map(determine_direction)
-            .collect_vec();
-        // FIXME: Hmm, this seems problematic potentially since it might hash the wrong way
-        // verify.
-        //
-        // TODO: grow these but exclude them in tree
-        indices.resize(A, Default::default());
-
-        let mut path = path.iter().map(|x| x.hash.0.into()).collect_vec();
-        path.resize(A, Default::default());
-
-        Self { path, indices }
-    }
-}
+pub type AccountIdVariable = BytesVariable<{ AccountId::MAX_LEN }>;
+pub type AccountIdVariableValue<F> = <AccountIdVariable as CircuitVariable>::ValueType<F>;
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct HeaderVariable {
@@ -363,23 +336,6 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     }
 }
 
-pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
-    next_bps: Option<Vec<T>>,
-) -> Vec<ValidatorStakeVariableValue<F>> {
-    next_bps
-        .map(|next_bps| {
-            let mut bps = next_bps
-                .into_iter()
-                .take(NUM_BLOCK_PRODUCER_SEATS)
-                .map(Into::<ValidatorStake>::into)
-                .map(Into::<ValidatorStakeVariableValue<F>>::into)
-                .collect_vec();
-            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
-            bps
-        })
-        .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
-}
-
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct BpsApprovals<const AMT: usize> {
     pub is_active: BpsArr<BoolVariable, AMT>,
@@ -414,6 +370,23 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
     }
 }
 
+pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
+    next_bps: Option<Vec<T>>,
+) -> Vec<ValidatorStakeVariableValue<F>> {
+    next_bps
+        .map(|next_bps| {
+            let mut bps = next_bps
+                .into_iter()
+                .take(NUM_BLOCK_PRODUCER_SEATS)
+                .map(Into::<ValidatorStake>::into)
+                .map(Into::<ValidatorStakeVariableValue<F>>::into)
+                .collect_vec();
+            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
+            bps
+        })
+        .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
+}
+
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ValidatorStakeVariable {
     pub account_id: AccountIdVariable,
@@ -426,8 +399,7 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     fn from(vs: ValidatorStake) -> Self {
         let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
         let stake = vs.stake();
-        let mut account_id = vs.take_account_id().as_str().as_bytes().to_vec();
-        account_id.resize(AccountId::MAX_LEN, ACCOUNT_ID_PADDING_BYTE);
+        let account_id = pad_account_id(&vs.take_account_id());
         Self {
             account_id: account_id.try_into().unwrap(), // SAFETY: already checked this above
             public_key: public_key.into(),
@@ -436,15 +408,26 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     }
 }
 
+pub(crate) fn pad_account_id(account_id: &AccountId) -> [u8; AccountId::MAX_LEN] {
+    let mut account_id = account_id.as_str().as_bytes().to_vec();
+    account_id.resize(AccountId::MAX_LEN, ACCOUNT_ID_PADDING_BYTE);
+    account_id.try_into().expect("invalid account bytes")
+}
+
+pub(crate) fn normalise_account_id<F: RichField>(
+    account_id: &AccountIdVariableValue<F>,
+) -> AccountId {
+    let unpadded_bytes = account_id
+        .split(|x| *x == ACCOUNT_ID_PADDING_BYTE)
+        .collect_vec()[0];
+    let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
+    log::trace!("account id: {}", account_str);
+    account_str.parse().expect("invalid account id")
+}
+
 impl<F: RichField> Into<ValidatorStakeView> for ValidatorStakeVariableValue<F> {
     fn into(self) -> ValidatorStakeView {
-        let unpadded_bytes = self
-            .account_id
-            .split(|x| *x == ACCOUNT_ID_PADDING_BYTE)
-            .collect_vec()[0];
-        let account_id = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
-        println!("account id: {}", account_id);
-        let account_id = account_id.parse().expect("invalid account id");
+        let account_id = normalise_account_id::<F>(&self.account_id);
         let public_key = PublicKey::ED25519(ED25519PublicKey(self.public_key.0.into()));
         ValidatorStakeView::V1(ValidatorStakeViewV1 {
             account_id,
@@ -507,19 +490,18 @@ impl<F: RichField> Default for SignatureVariableValue<F> {
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
-pub struct ProofVariable<const OPD: usize, const ORPD: usize, const BPD: usize> {
+pub struct ProofVariable {
     pub head_block_root: CryptoHashVariable,
     // TODO: constrain the outcome hash by borsh encoding in the circuit, not here
     pub outcome_hash: CryptoHashVariable,
     pub outcome_proof_block_hash: CryptoHashVariable,
-    pub outcome_proof: MerklePathVariable<OPD>, // TODO: get real number here
-    pub outcome_root_proof: MerklePathVariable<ORPD>, // TODO: get real number here
+    pub outcome_proof: MerklePathVariable<16>, // TODO: get real number here
+    pub outcome_root_proof: MerklePathVariable<8>, // TODO: get real number here
     pub block_header: HeaderVariable,
-    pub block_proof: MerklePathVariable<BPD>, // TODO: get real number here
+    pub block_proof: MerklePathVariable<64>, // TODO: get real number here
 }
 
-impl<F, const OPD: usize, const ORPD: usize, const BPD: usize> From<Proof>
-    for ProofVariableValue<OPD, ORPD, BPD, F>
+impl<F> From<Proof> for ProofVariableValue<F>
 where
     F: RichField,
 {
@@ -543,25 +525,6 @@ where
         }
     }
 }
-
-// TODO: likely these don't need to be constrained in the circuit so wont need to
-// implement circuit variable for these, we blind these in the batch proofs anyway
-// pub struct ExecutionOutcomeWithId {
-//     pub proof: MerklePath<32>,
-//     pub block_hash: CryptoHash,
-//     pub id: CryptoHash,
-//     pub outcome: ExecutionOutcome,
-// }
-//
-// pub pub struct ExecutionOutcome {
-//     pub logs: Vec<String>,
-//     pub receipt_ids: Vec<CryptoHash>,
-//     pub gas_burnt: U64Variable,
-//     pub tokens_burnt: Balance,
-//     pub executor_id: AccountId,
-//     pub status: ExecutionStatusView,
-//     pub metadata: ExecutionMetadataView,
-// }
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct StakeInfoVariable {
@@ -661,6 +624,36 @@ impl HashBpsInputs {
 
         let output_stream = b.hint(input_stream, self);
         output_stream.read::<CryptoHashVariable>(b)
+    }
+}
+
+#[derive(CircuitVariable, Clone, Debug)]
+pub struct TransactionOrReceiptIdVariable {
+    pub is_transaction: BoolVariable,
+    pub id: CryptoHashVariable,
+    pub account: AccountIdVariable,
+}
+
+impl<F: RichField> From<GetProof> for TransactionOrReceiptIdVariableValue<F> {
+    fn from(value: GetProof) -> Self {
+        match value {
+            GetProof::Transaction {
+                transaction_hash,
+                sender_id,
+            } => Self {
+                is_transaction: true.into(),
+                id: transaction_hash.0.into(),
+                account: pad_account_id(&sender_id).into(),
+            },
+            GetProof::Receipt {
+                receipt_id,
+                receiver_id,
+            } => Self {
+                is_transaction: false.into(),
+                id: receipt_id.0.into(),
+                account: pad_account_id(&receiver_id).into(),
+            },
+        }
     }
 }
 
