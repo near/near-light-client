@@ -1,10 +1,16 @@
 #![feature(generic_const_exprs)]
 
+use std::collections::VecDeque;
+
 use builder::Sync;
 use hint::FetchNextHeaderInputs;
+use near_light_client_protocol::prelude::Itertools;
+use plonky2x::frontend::hint::simple::hint::Hint;
 use plonky2x::frontend::mapreduce::generator::{MapReduceDynamicGenerator, MapReduceGenerator};
 use plonky2x::prelude::plonky2::hash::hashing::PlonkyPermutation;
+use plonky2x::prelude::plonky2::iop::target::BoolTarget;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
+use serde::{Deserialize, Serialize};
 use variables::{
     BlockHeightVariable, BpsArr, CryptoHashVariable, HashBpsInputs, HeaderVariable,
     ValidatorStakeVariable,
@@ -140,22 +146,7 @@ impl<const N: usize, const B: usize> Circuit for ProofCircuit<N, B> {
 
                     state
                 },
-                |ctx, mut left, right, b| {
-                    let mut r_heights = right.height_indices.data;
-                    let mut r_results = right.results.data;
-
-                    left.height_indices
-                        .data
-                        .iter_mut()
-                        .zip(left.results.data.iter_mut())
-                        .for_each(|(h, r)| {
-                            let is_zero = b.is_equal(h.clone(), ctx.zero);
-                            *h = b.select(is_zero, r_heights.pop().unwrap(), *h);
-                            *r = b.select(is_zero, r_results.pop().unwrap(), *r);
-                        });
-
-                    left
-                },
+                |_ctx, left, right, b| MergeProofReductionHint::<N>.merge(b, &left, &right),
             );
         b.write::<ProofMapReduceState<N>>(output);
     }
@@ -179,6 +170,71 @@ impl<const N: usize, const B: usize> Circuit for ProofCircuit<N, B> {
             B,
             D,
         >>(dynamic_id);
+        registry.register_hint::<MergeProofReductionHint<N>>();
+    }
+}
+
+// Hinting for this as it's taking too much effort to do it in a constrained way
+//
+// |ctx, mut left, right, b| {
+// let mut r_heights = right.height_indices.data;
+// let mut r_results = right.results.data;
+//
+// left.height_indices
+//     .data
+//     .iter_mut()
+//     .zip(left.results.data.iter_mut())
+//     .for_each(|(h, r)| {
+//         let is_zero = b.is_equal(h.clone(), ctx.zero);
+//         *h = b.select(is_zero, r_heights.pop().unwrap(), *h);
+//         *r = b.select(is_zero, r_results.pop().unwrap(), *r);
+//     });
+//
+// left
+// },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeProofReductionHint<const N: usize>;
+
+impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D>
+    for MergeProofReductionHint<N>
+{
+    fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
+        let left = input_stream.read_value::<ProofMapReduceState<N>>();
+        let right = input_stream.read_value::<ProofMapReduceState<N>>();
+
+        let (mut height_indices, mut results): (Vec<_>, Vec<_>) = left
+            .height_indices
+            .iter()
+            .chain(right.height_indices.iter())
+            .zip(left.results.iter().chain(right.results.iter()))
+            .filter_map(|(h, r)| if *h != 0 { Some((*h, *r)) } else { None })
+            .inspect(|(h, r)| log::debug!("heights/results: {:#?}, {:#?}", h, r))
+            .unzip();
+        height_indices.resize(N, 0);
+        results.resize(N, false);
+
+        output_stream.write_value::<ProofMapReduceState<N>>(
+            ProofMapReduceStateValue::<N, L::Field> {
+                height_indices,
+                results,
+            },
+        )
+    }
+}
+
+impl<const N: usize> MergeProofReductionHint<N> {
+    fn merge<L: PlonkParameters<D>, const D: usize>(
+        self,
+        b: &mut CircuitBuilder<L, D>,
+        left: &ProofMapReduceState<N>,
+        right: &ProofMapReduceState<N>,
+    ) -> ProofMapReduceState<N> {
+        let mut input_stream = VariableStream::new();
+        input_stream.write::<ProofMapReduceState<N>>(left);
+        input_stream.write::<ProofMapReduceState<N>>(right);
+
+        let output_stream = b.hint(input_stream, self);
+        output_stream.read::<ProofMapReduceState<N>>(b)
     }
 }
 
@@ -247,8 +303,8 @@ mod beefy_tests {
     fn beefy_test_verify_e2e() {
         let (header, _, _) = testnet_state();
 
-        const AMT: usize = 4;
-        const BATCH: usize = 1;
+        const AMT: usize = 8;
+        const BATCH: usize = 2;
 
         fn tx(hash: &str, sender: &str) -> TransactionOrReceiptId {
             TransactionOrReceiptId::Transaction {
@@ -268,19 +324,19 @@ mod beefy_tests {
                 "3z2zqitrXNYQs19z5tK5a4bZSxdx7baqzGFUyGAkW9Mz",
                 "zavodil.testnet",
             ),
-            // rx(
-            //     "9cVuYLKYF26QevZ315RLb9ArU3gbcgPc4LDRJfZQyZHo",
-            //     "priceoracle.testnet",
-            // ),
-            // rx("3UzHjFP8hVR2P6JJHwWchhcXPUV3vuPCDhtdWK7JmTy9", "system"),
-            // tx(
-            //     "3V1qYGZe9NBc4EQjg5RzM5CrDiRgxqbQsYaRvMTyU4UR",
-            //     "hotwallet.dev-kaiching.testnet",
-            // ),
-            // rx(
-            //     "CjaBC9EJE2eYg1vAy6sjJWpzgAroMv7tbFkhyz5Nhk3h",
-            //     "wallet.dev-kaiching.testnet",
-            // ),
+            rx(
+                "9cVuYLKYF26QevZ315RLb9ArU3gbcgPc4LDRJfZQyZHo",
+                "priceoracle.testnet",
+            ),
+            rx("3UzHjFP8hVR2P6JJHwWchhcXPUV3vuPCDhtdWK7JmTy9", "system"),
+            tx(
+                "3V1qYGZe9NBc4EQjg5RzM5CrDiRgxqbQsYaRvMTyU4UR",
+                "hotwallet.dev-kaiching.testnet",
+            ),
+            rx(
+                "CjaBC9EJE2eYg1vAy6sjJWpzgAroMv7tbFkhyz5Nhk3h",
+                "wallet.dev-kaiching.testnet",
+            ),
             // rx("9Zp41hsK5NEfkjiv3PhtqpgbRiHqsvpFcwe6CHrQ2kh2", "system"),
             tx(
                 "4VqSnHtFPGsgRJ7f4iz75bibCfbEiqYjnyEdentUyvbr",

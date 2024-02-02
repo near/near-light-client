@@ -47,5 +47,5 @@ near-light-client-rpc      = { path = "crates/rpc" }
 near-light-clientx         = { path = "circuits/plonky2x" }
 test-utils                 = { path = "crates/test-utils" }
 
-[patch."https://github.com/succinctlabs/succinctx.git"]
-plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
+# [patch."https://github.com/succinctlabs/succinctx.git"]
+# plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
