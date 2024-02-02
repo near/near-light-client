@@ -11,10 +11,16 @@ name              = "sync"
 path              = "src/main.rs"
 required-features = [ "sync" ]
 
+[[bin]]
+name              = "verify"
+path              = "src/main.rs"
+required-features = [ "verify" ]
+
 [dependencies]
 cfg-if                       = "*"
 near-light-clientx.workspace = true
 
 [features]
-default = [ "sync" ]
+default = [  ]
 sync    = [  ]
+verify  = [  ]

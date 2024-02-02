@@ -45,6 +45,16 @@ impl Network {
     }
 }
 
+impl From<usize> for Network {
+    fn from(n: usize) -> Self {
+        match n {
+            0 => Self::Mainnet,
+            1 => Self::Testnet,
+            _ => Self::Localnet,
+        }
+    }
+}
+
 impl Display for Network {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {

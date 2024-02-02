@@ -4,10 +4,20 @@
             "name": "sync",
             "framework": "plonky2x",
             "baseDir": ".",
-            "buildCommand": "cargo build --release --bin sync && mv target/release/sync build/ && RUST_LOG=debug ./build/sync build",
+            "buildCommand": "cargo build --release --bin sync --features=sync && mv target/release/sync build/ && RUST_LOG=debug ./build/sync build",
             "proveCommand": "RUST_LOG=debug ./build/sync prove input.json",
             "requiredArtifacts": [
                 "sync"
+            ]
+        },
+        {
+            "name": "verify",
+            "framework": "plonky2x",
+            "baseDir": ".",
+            "buildCommand": "cargo build --release --bin verify --features=verify && mv target/release/verify build/ && RUST_LOG=debug ./build/verify build",
+            "proveCommand": "RUST_LOG=debug ./build/verify prove input.json",
+            "requiredArtifacts": [
+                "verify"
             ]
         }
     ]
