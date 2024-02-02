@@ -1,21 +1,11 @@
-#![feature(generic_const_exprs)]
-
-use std::collections::VecDeque;
-
 use builder::Sync;
 use hint::FetchNextHeaderInputs;
-use near_light_client_protocol::prelude::Itertools;
 use plonky2x::frontend::hint::simple::hint::Hint;
-use plonky2x::frontend::mapreduce::generator::{MapReduceDynamicGenerator, MapReduceGenerator};
-use plonky2x::prelude::plonky2::hash::hashing::PlonkyPermutation;
-use plonky2x::prelude::plonky2::iop::target::BoolTarget;
+use plonky2x::frontend::mapreduce::generator::MapReduceDynamicGenerator;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use serde::{Deserialize, Serialize};
-use variables::{
-    BlockHeightVariable, BpsArr, CryptoHashVariable, HashBpsInputs, HeaderVariable,
-    ValidatorStakeVariable,
-};
-use variables::{BuildEndorsement, EncodeInner, SyncedVariable};
+use variables::{BlockHeightVariable, HashBpsInputs, HeaderVariable};
+use variables::{BuildEndorsement, EncodeInner};
 
 use crate::builder::Verify;
 use crate::hint::FetchProofInputs;
@@ -44,28 +34,30 @@ mod test_utils;
 // protocol crate
 // TODO: determine fees, allows integrators to charge
 #[derive(Debug, Clone)]
-pub struct SyncCircuit;
+pub struct SyncCircuit<const NETWORK: usize>;
 
-impl Circuit for SyncCircuit {
+impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
     fn define<L: PlonkParameters<D>, const D: usize>(b: &mut CircuitBuilder<L, D>)
     where
         <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
             plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
-        let network = near_light_client_rpc::Network::Testnet;
         let trusted_head = b.evm_read::<HeaderVariable>();
 
-        // This is a very interesting cheat to be able to get the BPS for the next epoch
-        // without the need to store the BPS, we can verify the hash of the BPS in the circuit
-        let bps = FetchNextHeaderInputs(near_light_client_rpc::Network::Testnet)
+        // This is a very interesting trick to be able to get the BPS for the next epoch
+        // without the need to store the BPS, we verify the hash of the BPS in the circuit
+        let bps = FetchNextHeaderInputs(NETWORK.into())
             .fetch(b, &trusted_head.inner_lite.next_epoch_id)
             .unwrap()
             .next_bps;
+
         let bps_hash = HashBpsInputs.hash(b, &bps);
         b.assert_is_equal(trusted_head.inner_lite.next_bp_hash, bps_hash);
 
         let head_hash = trusted_head.hash(b);
-        let next_block = FetchNextHeaderInputs(network).fetch(b, &head_hash).unwrap();
+        let next_block = FetchNextHeaderInputs(NETWORK.into())
+            .fetch(b, &head_hash)
+            .unwrap();
         b.watch(&bps_hash, "calculate_bps_hash");
 
         let synced = b.sync(&trusted_head, &bps, &next_block);
@@ -97,36 +89,34 @@ pub struct ProofMapReduceCtx {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProofCircuit<const N: usize, const B: usize>;
+pub struct VerifyCircuit<const N: usize, const B: usize, const NETWORK: usize = 1>;
 
-impl<const N: usize, const B: usize> Circuit for ProofCircuit<N, B> {
+impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
+    for VerifyCircuit<N, B, NETWORK>
+{
     fn define<L: PlonkParameters<D>, const D: usize>(b: &mut CircuitBuilder<L, D>)
     where
         <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
             plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
-        assert!(N % B == 0, "Cannot batch by this configuration");
-
-        let network = near_light_client_rpc::Network::Testnet;
+        assert!(
+            N % B == 0,
+            "Cannot batch by this configuration, must be a power of 2"
+        );
 
         let trusted_head = b.read::<HeaderVariable>();
         let ids = b.read::<ArrayVariable<TransactionOrReceiptIdVariable, N>>();
 
-        let proofs = FetchProofInputs::<N>(network).fetch(b, &trusted_head, &ids.data);
-
-        let zero = b.zero::<BlockHeightVariable>();
-        let _false = b._false();
-
-        let ctx = ProofMapReduceCtx {
-            zero,
-            result: _false,
-        };
+        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids.data);
 
         let output = b
             .mapreduce_dynamic::<_, ProofVariable, ProofMapReduceState<N>, Self, B, _, _>(
-                ctx,
+                (),
                 proofs.data,
                 |ctx, proofs, b| {
+                    let zero = b.zero::<BlockHeightVariable>();
+                    let _false = b._false();
+
                     let mut heights = vec![];
                     let mut results = vec![];
                     for p in proofs.data {
@@ -136,8 +126,8 @@ impl<const N: usize, const B: usize> Circuit for ProofCircuit<N, B> {
                     b.watch_slice(&heights, "map job -- heights");
                     b.watch_slice(&results, "map job -- results");
 
-                    heights.resize(N, ctx.zero);
-                    results.resize(N, ctx.result);
+                    heights.resize(N, zero);
+                    results.resize(N, _false);
 
                     let state = ProofMapReduceState {
                         height_indices: heights.into(),
@@ -250,18 +240,18 @@ mod beefy_tests {
     };
     use ::test_utils::CryptoHash;
     use near_light_client_protocol::{prelude::Itertools, ValidatorStake};
-    use near_light_client_rpc::{LightClientRpc, NearRpcClient};
     use near_primitives::types::{AccountId, TransactionOrReceiptId};
     use serial_test::serial;
+
+    const NETWORK: usize = 1;
 
     #[test]
     #[serial]
     fn beefy_test_sync_e2e() {
-        const SYNC_AMT: usize = 1;
         let (header, _, _) = testnet_state();
 
         let define = |b: &mut B| {
-            SyncCircuit::define(b);
+            SyncCircuit::<NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<HeaderVariable>(header.into());
@@ -270,32 +260,6 @@ mod beefy_tests {
             println!("{:#?}", output.evm_read::<HeaderVariable>());
         };
         builder_suite(define, writer, assertions);
-    }
-
-    fn account_ids<T: Into<ValidatorStake>>(bps: Vec<T>) -> Vec<AccountId> {
-        bps.into_iter()
-            .map(Into::<ValidatorStake>::into)
-            .map(|x| x.account_id().clone())
-            .collect_vec()
-    }
-
-    #[tokio::test]
-    async fn test_epoch_madness() {
-        use pretty_assertions::assert_eq;
-        let c = NearRpcClient::new(near_light_client_rpc::Network::Testnet);
-        let (h, bps, n) = testnet_state();
-        println!("{:#?}", h);
-
-        assert_eq!(h.inner_lite.next_bp_hash, CryptoHash::hash_borsh(&bps));
-        let bps = account_ids(bps);
-
-        let next_epoch = c.fetch_latest_header(&h.inner_lite.next_epoch_id).await;
-        let ne_nbps = account_ids(next_epoch.unwrap().unwrap().next_bps.unwrap());
-        assert_eq!(ne_nbps, bps);
-
-        let nb_epoch = c.fetch_latest_header(&n.inner_lite.epoch_id).await;
-        let nb_nbps = account_ids(nb_epoch.unwrap().unwrap().next_bps.unwrap());
-        assert_eq!(nb_nbps, bps);
     }
 
     #[test]
@@ -358,7 +322,7 @@ mod beefy_tests {
         assert_eq!(txs.len(), AMT);
 
         let define = |b: &mut B| {
-            ProofCircuit::<AMT, BATCH>::define(b);
+            VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(header.into());

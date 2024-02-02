@@ -27,11 +27,9 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
     let mut inputs = circuit.input();
     writer(&mut inputs);
 
-    // if let PublicInput::Bytes(bytes) = &mut inputs {
-    //     std::fs::write("input.bin", hex!(bytes)).unwrap();
-    // } else {
-    //     panic!("input is not bytes");
-    // }
+    if let PublicInput::Bytes(bytes) = &mut inputs {
+        std::fs::write("input.bin", hex!(bytes)).unwrap();
+    }
 
     let (proof, output) = circuit.prove(&inputs);
 
