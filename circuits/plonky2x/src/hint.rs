@@ -47,6 +47,7 @@ impl FetchNextHeaderInputs {
     }
 }
 
+// TODO: refactor into some client-like carrier for all hints that is serdeable
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FetchProofInputs<const B: usize>(pub Network);
 
