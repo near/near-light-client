@@ -1,0 +1,8 @@
+# Justification: Rust will be moving to this going forward
+group_imports = "StdExternalCrate"
+
+# Justification: Just cleaner
+imports_granularity = "Crate"
+
+format_code_in_doc_comments = true
+wrap_comments               = true

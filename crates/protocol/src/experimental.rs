@@ -1,4 +1,3 @@
-use crate::{prelude::*, Protocol};
 use either::Either;
 use itertools::Itertools;
 use near_primitives::{
@@ -8,6 +7,8 @@ use near_primitives::{
 };
 use near_primitives_core::hash::CryptoHash;
 use serde::{Deserialize, Serialize};
+
+use crate::{prelude::*, Protocol};
 
 /// Requires only needed parts of the LightClientBlockLiteView, and pre hashes
 /// the inner_lite.
@@ -326,10 +327,12 @@ pub fn verify_proof(proof: Proof) -> bool {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::str::FromStr;
+
+    use test_utils::fixture;
+
     use super::*;
     use crate::merkle_util::{compute_root_from_path, compute_root_from_path_and_item};
-    use std::str::FromStr;
-    use test_utils::fixture;
 
     pub const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
 
@@ -397,8 +400,8 @@ pub(crate) mod tests {
         let mut blinded = original.into_iter().map(BlindedProof::from).collect_vec();
         let mut cache = MerkleCache::default();
         cache.cache(&mut blinded);
-        // Since the proofs were the same, the cache should contain all of the paths for all of the
-        // proofs
+        // Since the proofs were the same, the cache should contain all of the paths for
+        // all of the proofs
         itertools::assert_equal(paths, cache.items);
     }
 

@@ -1,8 +1,7 @@
-use crate::prelude::*;
-pub use near_primitives::merkle::combine_hash;
-pub use near_primitives::merkle::MerklePath;
-pub use near_primitives::merkle::{Direction, MerklePathItem};
+pub use near_primitives::merkle::{combine_hash, Direction, MerklePath, MerklePathItem};
 use near_primitives_core::types::MerkleHash;
+
+use crate::prelude::*;
 
 pub fn verify_hash<'a>(
     root: MerkleHash,

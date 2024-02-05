@@ -1,7 +1,8 @@
-use crate::prelude::*;
 use coerce::actor::message::Message;
 use near_primitives::types::TransactionOrReceiptId;
 use protocol::{experimental::Proof as ExperimentalProof, Proof};
+
+use crate::prelude::*;
 
 pub struct Shutdown;
 

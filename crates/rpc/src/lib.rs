@@ -1,4 +1,5 @@
-use crate::prelude::*;
+use std::fmt::{Display, Formatter};
+
 use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
@@ -8,7 +9,8 @@ use near_jsonrpc_client::{
 use near_primitives::views::{
     validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1,
 };
-use std::fmt::{Display, Formatter};
+
+use crate::prelude::*;
 
 pub mod prelude;
 

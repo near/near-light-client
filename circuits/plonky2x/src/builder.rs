@@ -1,13 +1,15 @@
-use crate::merkle::{MerklePathVariable, NearMerkleTree};
-use crate::variables::{
-    ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr, BuildEndorsement,
-    CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable, SyncedVariable,
-    ValidatorStakeVariable,
-};
-use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
-use near_light_client_protocol::prelude::Itertools;
+use near_light_client_protocol::{config::NUM_BLOCK_PRODUCER_SEATS, prelude::Itertools};
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
+
+use crate::{
+    merkle::{MerklePathVariable, NearMerkleTree},
+    variables::{
+        ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,
+        BuildEndorsement, CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable,
+        SyncedVariable, ValidatorStakeVariable,
+    },
+};
 
 pub trait Ensure<L: PlonkParameters<D>, const D: usize> {
     fn ensure_not_already_verified(
@@ -288,7 +290,8 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
             self.curta_sha256_pair(next_block.next_block_inner_hash, next_header_hash);
 
         let should_hint = false;
-        // TODO: decide if we should constrain this way or just hint in the manual encodes
+        // TODO: decide if we should constrain this way or just hint in the manual
+        // encodes
         if should_hint {
             let mut input_stream = VariableStream::new();
             input_stream.write(&next_block_hash);
@@ -359,12 +362,11 @@ fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const 
 
 #[cfg(test)]
 mod tests {
+    use near_light_client_protocol::{Protocol, StakeInfo};
+
     use self::assert_eq;
     use super::*;
-    use crate::test_utils::*;
-    use crate::variables::*;
-    use near_light_client_protocol::Protocol;
-    use near_light_client_protocol::StakeInfo;
+    use crate::{test_utils::*, variables::*};
 
     #[test]
     fn test_header_hash() {
@@ -555,13 +557,14 @@ mod tests {
 #[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
-    use crate::builder::Ensure;
-    use crate::builder::Sync;
-    use crate::builder::Verify;
-    use crate::test_utils::*;
-    use crate::variables::*;
     use near_light_client_protocol::prelude::BasicProof;
     use serial_test::serial;
+
+    use crate::{
+        builder::{Ensure, Sync, Verify},
+        test_utils::*,
+        variables::*,
+    };
 
     #[test]
     #[serial]

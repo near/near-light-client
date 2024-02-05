@@ -1,5 +1,3 @@
-use crate::prelude::*;
-use crate::{client::LightClient, config::Config};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -9,6 +7,8 @@ use axum::{
 };
 use coerce::actor::LocalActorRef;
 use tokio::task::JoinHandle;
+
+use crate::{client::LightClient, config::Config, prelude::*};
 
 // TODO: replace with jsonrpc
 pub(crate) fn init(config: &Config, ctx: LocalActorRef<LightClient>) -> JoinHandle<Result<()>> {
@@ -78,10 +78,11 @@ mod header {
 }
 
 mod proof {
-    use super::*;
-    use crate::client::message::{BatchGetProof, GetProof, VerifyProof};
     use axum::Json;
     use protocol::Proof;
+
+    use super::*;
+    use crate::client::message::{BatchGetProof, GetProof, VerifyProof};
 
     pub(super) async fn post_get_proof(
         State(client): State<LocalActorRef<LightClient>>,

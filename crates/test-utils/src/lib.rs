@@ -1,5 +1,4 @@
-use derive_more::AsRef;
-use derive_more::Into;
+use derive_more::{AsRef, Into};
 use near_light_client_protocol::{
     prelude::{BasicProof, Header, Itertools},
     LightClientBlockView, Protocol, StakeInfo, ValidatorStake,

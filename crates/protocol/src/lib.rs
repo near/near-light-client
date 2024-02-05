@@ -1,19 +1,17 @@
-use crate::prelude::*;
 use error::Error;
 pub use merkle_util::*;
-pub use near_crypto::ED25519PublicKey;
-pub use near_crypto::{PublicKey, Signature};
+pub use near_crypto::{ED25519PublicKey, PublicKey, Signature};
 pub use near_primitives::{
-    block_header::ApprovalInner,
-    block_header::BlockHeaderInnerLite,
+    block_header::{ApprovalInner, BlockHeaderInnerLite},
     merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
-    views::LightClientBlockLiteView,
-    views::ValidatorStakeViewV1,
     views::{
-        validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView, LightClientBlockView,
+        validator_stake_view::ValidatorStakeView, BlockHeaderInnerLiteView,
+        LightClientBlockLiteView, LightClientBlockView, ValidatorStakeViewV1,
     },
 };
+
+use crate::prelude::*;
 
 pub mod config;
 pub mod error;
@@ -352,11 +350,12 @@ macro_rules! cvec {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use itertools::Itertools;
     use near_jsonrpc_primitives::types::light_client::RpcLightClientExecutionProofResponse;
     use serde_json::{self};
     use test_utils::*;
+
+    use super::*;
 
     #[test]
     fn test_sync_across_epoch_boundaries() {
@@ -554,8 +553,9 @@ mod tests {
         assert!(root_matches);
     }
 
-    // FIXME: Missed a part of LC spec regarding BPS handover, only the MAX_SEATS need to be taken
-    // TODO: change epoch_bps to only store MAX_SEATS and then for next
+    // FIXME: Missed a part of LC spec regarding BPS handover, only the MAX_SEATS
+    // need to be taken TODO: change epoch_bps to only store MAX_SEATS and then
+    // for next
     #[test]
     fn test_enough_stake_in_next_epoch_not_this() {
         todo!();

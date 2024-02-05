@@ -1,7 +1,10 @@
-pub use near_primitives::hash::CryptoHash;
-pub use plonky2x::backend::circuit::{PublicInput, PublicOutput};
-pub use plonky2x::prelude::*;
 pub use std::str::FromStr;
+
+pub use near_primitives::hash::CryptoHash;
+pub use plonky2x::{
+    backend::circuit::{PublicInput, PublicOutput},
+    prelude::*,
+};
 pub use test_utils::*;
 
 pub type B<const D: usize = 2> = CircuitBuilder<DefaultParameters, D>;

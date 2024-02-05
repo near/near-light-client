@@ -1,11 +1,11 @@
-pub use anyhow::anyhow;
-pub use anyhow::Result;
-pub use itertools::izip;
-pub use itertools::Itertools;
+pub use anyhow::{anyhow, Result};
+pub use itertools::{izip, Itertools};
 pub use log::{debug, error, info, trace, warn};
 pub use near_primitives::types::AccountId;
-pub use near_primitives_core::borsh::{self, BorshDeserialize, BorshSerialize};
-pub use near_primitives_core::hash::CryptoHash;
+pub use near_primitives_core::{
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    hash::CryptoHash,
+};
 pub use serde::{Deserialize, Serialize};
 
 pub type Header = near_primitives::views::LightClientBlockLiteView;
