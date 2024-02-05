@@ -34,3 +34,4 @@ hex.workspace               = true
 pretty_env_logger.workspace = true
 rand                        = "*"
 serde_json.workspace        = true
+tokio.workspace             = true

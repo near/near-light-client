@@ -627,6 +627,7 @@ impl HashBpsInputs {
     }
 }
 
+// TODO: EVM these, maybe macro?
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct TransactionOrReceiptIdVariable {
     pub is_transaction: BoolVariable,

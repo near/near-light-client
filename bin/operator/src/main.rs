@@ -1,6 +1,6 @@
 use near_light_clientx::plonky2x::backend::function::Plonky2xFunction;
 
-// Testnet
+// Testnet, FIXME: this is error prone, use something else
 const NETWORK: usize = 1;
 
 fn main() {
