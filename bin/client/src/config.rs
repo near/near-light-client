@@ -27,6 +27,8 @@ impl Config {
         let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK")
             .unwrap_or_else(|_| "testnet".into())
             .to_lowercase();
+        log::debug!("Run mode {run_mode}");
+
         let default_path =
             env::var("NEAR_LIGHT_CLIENT_CONFIG_FILE").unwrap_or_else(|_| "default".to_string());
 

@@ -5,31 +5,33 @@ name              = "near-light-client"
 version.workspace = true
 
 [dependencies]
-anyhow.workspace               = true
-async-trait.workspace          = true
-axum.workspace                 = true
-borsh.workspace                = true
-coerce.workspace               = true
-config.workspace               = true
-either.workspace               = true
-futures.workspace              = true
-hex.workspace                  = true
-itertools.workspace            = true
-log.workspace                  = true
+anyhow.workspace      = true
+async-trait.workspace = true
+axum.workspace        = true
+borsh.workspace       = true
+reqwest.workspace     = true
+serde.workspace       = true
+serde_json.workspace  = true
+sled.workspace        = true
+thiserror.workspace   = true
+tokio.workspace       = true
+coerce.workspace            = true
+config.workspace            = true
+either.workspace            = true
+futures.workspace           = true
+hex.workspace               = true
+itertools.workspace         = true
+log.workspace               = true
+pretty_env_logger.workspace = true
+protobuf.workspace          = true
+
 near-crypto.workspace          = true
 near-jsonrpc-client.workspace  = true
 near-primitives-core.workspace = true
 near-primitives.workspace      = true
-pretty_env_logger.workspace    = true
-protobuf.workspace             = true
-protocol                       = { path = "../../crates/protocol", package = "near-light-client-protocol" }
-reqwest.workspace              = true
-rpc                            = { path = "../../crates/rpc", package = "near-light-client-rpc" }
-serde.workspace                = true
-serde_json.workspace           = true
-sled.workspace                 = true
-thiserror.workspace            = true
-tokio.workspace                = true
+
+protocol = { path = "../../crates/protocol", package = "near-light-client-protocol" }
+rpc      = { path = "../../crates/rpc", package = "near-light-client-rpc" }
 
 [dev-dependencies]
 rand = "*"
