@@ -1,0 +1,5 @@
+catchup       = true
+host          = "0.0.0.0:3030"
+network       = "Statelessnet"
+starting_head = "HqbXSLFKKvNiqruwkYj2pittRZJyXuBKHRWTVHRVcwEb"
+state_path    = "statelessnetstate.db"

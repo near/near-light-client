@@ -2,15 +2,11 @@ use crate::prelude::*;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
-    methods::{
-        self, light_client_proof::RpcLightClientExecutionProofResponse,
-        validators::RpcValidatorResponse,
-    },
+    methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
-use near_primitives::{
-    types::{validator_stake::ValidatorStake, ValidatorStakeV1},
-    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1},
+use near_primitives::views::{
+    validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1,
 };
 use std::fmt::{Display, Formatter};
 
@@ -22,6 +18,7 @@ pub enum Network {
     #[default]
     Testnet,
     Localnet,
+    Statelessnet,
 }
 
 impl Network {
@@ -31,6 +28,7 @@ impl Network {
         match self {
             Self::Mainnet => MAINNET_RPC_ENDPOINT,
             Self::Testnet => TESTNET_RPC_ENDPOINT,
+            Self::Statelessnet => "https://rpc.statelessnet.near.org",
             _ => "http://`localhost:3030",
         }
     }
@@ -40,6 +38,7 @@ impl Network {
         match self {
             Self::Mainnet => MAINNET_RPC_ARCHIVE_ENDPOINT,
             Self::Testnet => TESTNET_RPC_ARCHIVE_ENDPOINT,
+            Self::Statelessnet => "https://archival-rpc.statelessnet.near.org",
             _ => "http://`localhost:3030",
         }
     }
@@ -50,6 +49,7 @@ impl From<usize> for Network {
         match n {
             0 => Self::Mainnet,
             1 => Self::Testnet,
+            48 => Self::Statelessnet,
             _ => Self::Localnet,
         }
     }
@@ -60,6 +60,7 @@ impl Display for Network {
         let s = match self {
             Self::Mainnet => "mainnet",
             Self::Testnet => "testnet",
+            Self::Statelessnet => "statelessnet",
             _ => "localnet",
         };
         write!(f, "{}", s)
