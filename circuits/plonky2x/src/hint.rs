@@ -1,16 +1,13 @@
-use crate::variables::normalise_account_id;
-use crate::variables::BlockVariable;
-use crate::variables::CryptoHashVariable;
-use crate::variables::HeaderVariable;
-use crate::variables::ProofVariable;
-use crate::variables::TransactionOrReceiptIdVariable;
 use async_trait::async_trait;
-use near_light_client_protocol::prelude::CryptoHash;
-use near_light_client_protocol::Proof;
-use near_light_client_rpc::prelude::GetProof;
-use near_light_client_rpc::{LightClientRpc, NearRpcClient, Network};
+use near_light_client_protocol::{prelude::CryptoHash, Proof};
+use near_light_client_rpc::{prelude::GetProof, LightClientRpc, NearRpcClient, Network};
 use plonky2x::{frontend::hint::asynchronous::hint::AsyncHint, prelude::*};
 use serde::{Deserialize, Serialize};
+
+use crate::variables::{
+    normalise_account_id, BlockVariable, CryptoHashVariable, HeaderVariable, ProofVariable,
+    TransactionOrReceiptIdVariable,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FetchNextHeaderInputs(pub Network);

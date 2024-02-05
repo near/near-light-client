@@ -1,7 +1,9 @@
-use crate::prelude::*;
+use std::{env, path::PathBuf};
+
 use config::{Config as ConfigTrait, ConfigError, Environment, File};
 use rpc::Network;
-use std::{env, path::PathBuf};
+
+use crate::prelude::*;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {

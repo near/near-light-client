@@ -1,5 +1,6 @@
-use crate::client::{message::Shutdown, LightClient};
 use coerce::actor::{system::ActorSystem, IntoActor};
+
+use crate::client::{message::Shutdown, LightClient};
 
 mod client;
 mod config;

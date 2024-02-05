@@ -1,8 +1,9 @@
-use super::Header;
-use crate::prelude::*;
 use ::sled::IVec;
 use near_primitives::types::validator_stake::ValidatorStake;
 use tokio::sync::RwLock;
+
+use super::Header;
+use crate::prelude::*;
 
 pub struct Store<S: LightClientStore>(pub RwLock<S>);
 
@@ -99,10 +100,11 @@ pub fn head_key() -> CryptoHash {
 }
 
 pub mod sled {
-    use super::*;
     use ::sled::{open, transaction::TransactionError, Batch, Db, Transactional, Tree};
     use borsh::ser::BorshSerialize as BorshSerializeExt;
     use itertools::Itertools;
+
+    use super::*;
 
     pub struct Store {
         db: Db,

@@ -1,21 +1,20 @@
 use ethers::types::U256;
-use near_light_client_protocol::config::NUM_BLOCK_PRODUCER_SEATS;
-use near_light_client_protocol::prelude::{Header, Itertools};
 use near_light_client_protocol::{
-    prelude::AccountId, prelude::CryptoHash, BlockHeaderInnerLiteView, LightClientBlockView,
-    Signature, ValidatorStake,
-};
-use near_light_client_protocol::{
-    ED25519PublicKey, Proof, PublicKey, StakeInfo, Synced, ValidatorStakeView, ValidatorStakeViewV1,
+    config::NUM_BLOCK_PRODUCER_SEATS,
+    prelude::{AccountId, CryptoHash, Header, Itertools},
+    BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
+    StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
 };
 use near_light_client_rpc::prelude::GetProof;
-use plonky2x::frontend::curta::ec::point::CompressedEdwardsY;
-use plonky2x::frontend::curta::ec::point::CompressedEdwardsYVariable;
-use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariable;
-use plonky2x::frontend::ecc::curve25519::ed25519::eddsa::EDDSASignatureVariableValue;
-use plonky2x::frontend::hint::simple::hint::Hint;
-use plonky2x::frontend::vars::EvmVariable;
-use plonky2x::prelude::*;
+use plonky2x::{
+    frontend::{
+        curta::ec::point::{CompressedEdwardsY, CompressedEdwardsYVariable},
+        ecc::curve25519::ed25519::eddsa::{EDDSASignatureVariable, EDDSASignatureVariableValue},
+        hint::simple::hint::Hint,
+        vars::EvmVariable,
+    },
+    prelude::*,
+};
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +23,8 @@ use crate::merkle::MerklePathVariable;
 // TODO: remove any unused fields like account id etc?
 /// TODO: check if BPS seats changes for testnet/mainnet
 
-/// Type for omitting the size across the codebase for arrays that are the same size as BPS
+/// Type for omitting the size across the codebase for arrays that are the same
+/// size as BPS
 pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
