@@ -26,6 +26,8 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
         <<L as PlonkParameters<D>>::Config as plonky2::plonk::config::GenericConfig<D>>::Hasher:
             plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
+        // TODO: decide if we wanna just store the hash here, hint to go get it and then
+        // verify
         let trusted_head = b.evm_read::<HeaderVariable>();
 
         // This is a very interesting trick to be able to get the BPS for the next epoch
