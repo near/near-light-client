@@ -37,6 +37,9 @@
             llvmPackages_11.libclang
             protobuf
 
+            nodejs
+            solc
+
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })

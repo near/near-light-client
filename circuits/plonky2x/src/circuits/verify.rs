@@ -40,6 +40,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
         let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids.data);
 
+        // TODO: write some outputs here for each ID
         let output = b.mapreduce_dynamic::<_, _, _, Self, B, _, _>(
             (),
             proofs.data,
