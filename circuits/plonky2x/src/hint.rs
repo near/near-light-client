@@ -47,6 +47,42 @@ impl FetchNextHeaderInputs {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FetchHeaderInputs(pub Network);
+
+#[async_trait]
+impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchHeaderInputs {
+    async fn hint(
+        &self,
+        input_stream: &mut ValueStream<L, D>,
+        output_stream: &mut ValueStream<L, D>,
+    ) {
+        let client = NearRpcClient::new(self.0.clone());
+
+        let h = input_stream.read_value::<CryptoHashVariable>().0;
+
+        let header = client
+            .fetch_header(&CryptoHash(h))
+            .await
+            .expect("Failed to fetch header");
+
+        output_stream.write_value::<HeaderVariable>(header.into());
+    }
+}
+
+impl FetchHeaderInputs {
+    pub fn fetch<L: PlonkParameters<D>, const D: usize>(
+        self,
+        b: &mut CircuitBuilder<L, D>,
+        hash: &CryptoHashVariable,
+    ) -> HeaderVariable {
+        let mut input_stream = VariableStream::new();
+        input_stream.write::<CryptoHashVariable>(hash);
+
+        let output_stream = b.async_hint(input_stream, self);
+        output_stream.read::<HeaderVariable>(b)
+    }
+}
 // TODO: refactor into some client-like carrier for all hints that is serdeable
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FetchProofInputs<const B: usize>(pub Network);

@@ -277,6 +277,7 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
             self.assertx(e);
             assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
         }
+        // FIXME: remove this, return the new head
         SyncedVariable {
             new_head: next_block.header.to_owned(),
             next_bps_epoch: next_block.header.inner_lite.next_epoch_id,

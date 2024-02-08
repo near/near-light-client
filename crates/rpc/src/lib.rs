@@ -6,8 +6,9 @@ use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
-use near_primitives::views::{
-    validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1,
+use near_primitives::{
+    block_header::BlockHeader,
+    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1},
 };
 
 use crate::prelude::*;
@@ -108,6 +109,20 @@ impl NearRpcClient {
             (proofs.into_iter().collect::<Result<Vec<_>>>()?, vec![])
         };
         Ok((proofs, errors))
+    }
+    pub async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header> {
+        let req = methods::block::RpcBlockRequest {
+            block_reference: near_primitives::types::BlockReference::BlockId(
+                near_primitives::types::BlockId::Hash(*hash),
+            ),
+        };
+        self.client
+            .call(&req)
+            .await
+            .map_err(|e| anyhow!(e))
+            .map(|x| x.header)
+            .map(BlockHeader::from)
+            .map(Into::into)
     }
 }
 
