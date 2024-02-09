@@ -4902,7 +4902,6 @@ source = "git+https://github.com/mir-protocol/plonky2.git#b8a16b39c7f84491dfae9b
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#c3c5a10a5bd60838b7749d55c79a9816dd05c21b"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4928,6 +4927,7 @@ dependencies = [
  "num-bigint 0.4.4",
  "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=2d36559d)",
  "plonky2x-derive",
+ "pretty_assertions",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -4944,7 +4944,6 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/succinctx.git#c3c5a10a5bd60838b7749d55c79a9816dd05c21b"
 dependencies = [
  "proc-macro2",
  "quote",

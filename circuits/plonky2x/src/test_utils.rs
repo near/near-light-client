@@ -54,7 +54,6 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
             .unwrap();
         }
         PublicInput::Elements(elements) => {
-            println!("Writing input.elements.json");
             let req = ProofRequest::<DefaultParameters, 2>::Elements(
                 plonky2x::backend::function::ProofRequestBase {
                     release_id: "todo".to_string(),

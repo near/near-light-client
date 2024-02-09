@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     builder::Verify,
     hint::{FetchProofInputs, ProofInputVariable},
-    variables::{CryptoHashVariable, EncodeInner, HeaderVariable, TransactionOrReceiptIdVariable},
+    variables::{
+        byte_from_bool, CryptoHashVariable, EncodeInner, HeaderVariable,
+        TransactionOrReceiptIdVariable,
+    },
 };
 
 #[derive(CircuitVariable, Debug, Clone)]
@@ -34,10 +37,13 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher:
             AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
-        let trusted_head = b.read::<HeaderVariable>();
-        let ids = b.read::<ArrayVariable<TransactionOrReceiptIdVariable, N>>();
+        let trusted_head = b.evm_read::<HeaderVariable>();
+        let mut ids = vec![];
+        for _ in 0..N {
+            ids.push(b.evm_read::<TransactionOrReceiptIdVariable>());
+        }
 
-        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids.data);
+        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids);
 
         // TODO: write some outputs here for each ID
         let output = b.mapreduce_dynamic::<_, _, _, Self, B, _, _>(
@@ -66,7 +72,12 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             },
             |_, l, r, b| MergeProofHint::<N>.merge(b, &l, &r),
         );
-        b.write::<ProofMapReduceVariable<N>>(output);
+        for r in output.data {
+            b.evm_write::<CryptoHashVariable>(r.id);
+            let _true = b._true();
+            let passed = byte_from_bool(b, r.result);
+            b.evm_write::<ByteVariable>(passed);
+        }
     }
 
     fn register_generators<L: PlonkParameters<D>, const D: usize>(registry: &mut HintRegistry<L, D>)
@@ -90,6 +101,8 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             B,
             D,
         >>(dynamic_id);
+
+        // TODO: register_watch_generator!
     }
 }
 
@@ -215,11 +228,22 @@ mod beefy_tests {
             VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
-            input.write::<HeaderVariable>(header.into());
-            input.write::<ArrayVariable<TransactionOrReceiptIdVariable, AMT>>(txs.into());
+            input.evm_write::<HeaderVariable>(header.into());
+            for tx in txs {
+                input.evm_write::<TransactionOrReceiptIdVariable>(tx.into());
+            }
         };
         let assertions = |mut output: PO| {
-            println!("{:#?}", output.read::<ProofMapReduceVariable<AMT>>());
+            let mut results = vec![];
+            for _ in 0..AMT {
+                let id = output.evm_read::<CryptoHashVariable>();
+                let result = output.evm_read::<ByteVariable>();
+                results.push(ProofVerificationResultVariableValue::<GoldilocksField> {
+                    id,
+                    result: result != 0,
+                });
+            }
+            println!("{:#?}", results);
         };
         builder_suite(define, writer, assertions);
     }
