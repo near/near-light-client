@@ -1,7 +1,7 @@
 use near_light_client_protocol::prelude::Itertools;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use plonky2x::{
-    frontend::hint::simple::hint::Hint,
+    frontend::{hint::simple::hint::Hint, mapreduce::generator::MapReduceDynamicGenerator},
     prelude::plonky2::plonk::config::{AlgebraicHasher, GenericConfig},
 };
 use serde::{Deserialize, Serialize};
@@ -78,6 +78,18 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
         // We hash in verify
         registry.register_hint::<EncodeInner>();
+
+        let dynamic_id = MapReduceDynamicGenerator::<L, (), (), (), Self, 1, D>::id();
+
+        registry.register_simple::<MapReduceDynamicGenerator<
+            L,
+            (),
+            ArrayVariable<ProofInputVariable, N>,
+            ProofMapReduceVariable<N>,
+            Self,
+            B,
+            D,
+        >>(dynamic_id);
     }
 }
 

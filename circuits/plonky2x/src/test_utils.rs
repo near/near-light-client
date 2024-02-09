@@ -1,6 +1,8 @@
+use std::fs;
 pub use std::str::FromStr;
 
 pub use near_primitives::hash::CryptoHash;
+use plonky2x::backend::function::{BytesRequestData, ProofRequest};
 pub use plonky2x::{
     backend::circuit::{PublicInput, PublicOutput},
     prelude::*,
@@ -33,8 +35,44 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
     let mut inputs = circuit.input();
     writer(&mut inputs);
 
-    if let PublicInput::Bytes(bytes) = &mut inputs {
-        std::fs::write("input.bin", hex!(bytes)).unwrap();
+    match &inputs {
+        PublicInput::Bytes(bytes) => {
+            let req = ProofRequest::<DefaultParameters, 2>::Bytes(
+                plonky2x::backend::function::ProofRequestBase {
+                    release_id: "todo".to_string(),
+                    parent_id: None,
+                    files: None,
+                    data: BytesRequestData {
+                        input: bytes.clone(),
+                    },
+                },
+            );
+            fs::write(
+                "../../fixtures/input.bytes",
+                serde_json::to_string(&req).unwrap(),
+            )
+            .unwrap();
+        }
+        PublicInput::Elements(elements) => {
+            println!("Writing input.elements.json");
+            let req = ProofRequest::<DefaultParameters, 2>::Elements(
+                plonky2x::backend::function::ProofRequestBase {
+                    release_id: "todo".to_string(),
+                    parent_id: None,
+                    files: None,
+                    data: plonky2x::backend::function::ElementsRequestData {
+                        circuit_id: "todo".to_string(),
+                        input: elements.clone(),
+                    },
+                },
+            );
+            fs::write(
+                "../../fixtures/input.elements.json",
+                serde_json::to_string(&req).unwrap(),
+            )
+            .unwrap();
+        }
+        _ => {}
     }
 
     let (proof, output) = circuit.prove(&inputs);
