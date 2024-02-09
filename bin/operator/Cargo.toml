@@ -17,10 +17,12 @@ path              = "src/main.rs"
 required-features = [ "verify" ]
 
 [dependencies]
-cfg-if                       = "*"
+cfg-if                       = "1.0.0"
 near-light-clientx.workspace = true
 
 [features]
-default = [  ]
+default = [ "testnet" ]
+mainnet = [  ]
 sync    = [  ]
+testnet = [  ]
 verify  = [  ]

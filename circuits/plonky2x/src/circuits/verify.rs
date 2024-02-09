@@ -1,27 +1,27 @@
+use near_light_client_protocol::prelude::Itertools;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use plonky2x::{
-    frontend::{hint::simple::hint::Hint, mapreduce::generator::MapReduceDynamicGenerator},
+    frontend::hint::simple::hint::Hint,
     prelude::plonky2::plonk::config::{AlgebraicHasher, GenericConfig},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     builder::Verify,
-    hint::FetchProofInputs,
-    variables::{
-        BlockHeightVariable, EncodeInner, HeaderVariable, ProofVariable,
-        TransactionOrReceiptIdVariable,
-    },
+    hint::{FetchProofInputs, ProofInputVariable},
+    variables::{CryptoHashVariable, EncodeInner, HeaderVariable, TransactionOrReceiptIdVariable},
 };
+
+#[derive(CircuitVariable, Debug, Clone)]
+pub struct ProofVerificationResultVariable {
+    pub id: CryptoHashVariable,
+    pub result: BoolVariable,
+}
 
 // TODO: improve the way we can lookup the transaction, ideally map
 // TransactionOrReceiptId => Proof and map this way, now we are not limited by
 // the data transformation
-#[derive(CircuitVariable, Debug, Clone)]
-pub struct ProofMapReduceVariable<const B: usize> {
-    pub height_indices: ArrayVariable<BlockHeightVariable, B>,
-    pub results: ArrayVariable<BoolVariable, B>,
-}
+pub type ProofMapReduceVariable<const B: usize> = ArrayVariable<ProofVerificationResultVariable, B>;
 
 #[derive(Debug, Clone)]
 pub struct VerifyCircuit<const N: usize, const B: usize, const NETWORK: usize = 1>;
@@ -36,7 +36,6 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
     {
         let trusted_head = b.read::<HeaderVariable>();
         let ids = b.read::<ArrayVariable<TransactionOrReceiptIdVariable, N>>();
-        println!("len of ids: {}", ids.data.len());
 
         let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids.data);
 
@@ -45,29 +44,25 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             (),
             proofs.data,
             |_, proofs, b| {
-                let mut heights = vec![];
                 let mut results = vec![];
 
                 // TODO[Optimisation]: could parallelise these
-                for p in proofs.data {
-                    heights.push(p.block_header.inner_lite.height);
-                    results.push(b.verify(p));
+                for ProofInputVariable { id, proof } in proofs.data {
+                    let result = b.verify(proof);
+                    results.push(ProofVerificationResultVariable { id, result });
                 }
 
-                b.watch_slice(&heights, "map job -- heights");
-                b.watch_slice(&results, "map job -- results");
-
-                let zero = b.zero::<BlockHeightVariable>();
+                let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
                 let _false = b._false();
-                heights.resize(N, zero);
-                results.resize(N, _false);
+                results.resize(
+                    N,
+                    ProofVerificationResultVariable {
+                        id: zero,
+                        result: _false,
+                    },
+                );
 
-                let state = ProofMapReduceVariable::<N> {
-                    height_indices: heights.into(),
-                    results: results.into(),
-                };
-
-                state
+                results.into()
             },
             |_, l, r, b| MergeProofHint::<N>.merge(b, &l, &r),
         );
@@ -114,24 +109,21 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Merge
         let left = input_stream.read_value::<ProofMapReduceVariable<N>>();
         let right = input_stream.read_value::<ProofMapReduceVariable<N>>();
 
-        let (mut height_indices, mut results): (Vec<_>, Vec<_>) = left
-            .height_indices
-            .iter()
-            .chain(right.height_indices.iter())
-            .zip(left.results.iter().chain(right.results.iter()))
-            .filter_map(|(h, r)| if *h != 0 { Some((*h, *r)) } else { None })
-            .unzip();
+        let mut results = left
+            .into_iter()
+            .chain(right.into_iter())
+            .filter_map(|r| if r.id.0 != [0u8; 32] { Some(r) } else { None })
+            .collect_vec();
 
-        height_indices.resize(N, 0);
-        results.resize(N, false);
-
-        output_stream.write_value::<ProofMapReduceVariable<N>>(ProofMapReduceVariableValue::<
+        results.resize(
             N,
-            L::Field,
-        > {
-            height_indices,
-            results,
-        })
+            ProofVerificationResultVariableValue::<L::Field> {
+                id: [0u8; 32].into(),
+                result: false,
+            },
+        );
+
+        output_stream.write_value::<ProofMapReduceVariable<N>>(results.into());
     }
 }
 
@@ -157,21 +149,16 @@ mod beefy_tests {
     use std::str::FromStr;
 
     use ::test_utils::CryptoHash;
-    use near_light_client_protocol::{
-        prelude::{Header, Itertools},
-        BlockHeaderInnerLite, BlockHeaderInnerLiteView,
-    };
+    use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
     use serial_test::serial;
     use test_utils::fixture;
 
     use super::*;
     use crate::{
-        test_utils::{builder_suite, testnet_state, B, PI, PO},
+        test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
         variables::TransactionOrReceiptIdVariableValue,
     };
-
-    const NETWORK: usize = 1;
 
     #[test]
     #[serial]
@@ -205,27 +192,6 @@ mod beefy_tests {
                 "9cVuYLKYF26QevZ315RLb9ArU3gbcgPc4LDRJfZQyZHo",
                 "priceoracle.testnet",
             ),
-            // rx("3UzHjFP8hVR2P6JJHwWchhcXPUV3vuPCDhtdWK7JmTy9", "system"),
-            // tx(
-            //     "3V1qYGZe9NBc4EQjg5RzM5CrDiRgxqbQsYaRvMTyU4UR",
-            //     "hotwallet.dev-kaiching.testnet",
-            // ),
-            // rx(
-            //     "CjaBC9EJE2eYg1vAy6sjJWpzgAroMv7tbFkhyz5Nhk3h",
-            //     "wallet.dev-kaiching.testnet",
-            // ),
-            // tx(
-            //     "4VqSnHtFPGsgRJ7f4iz75bibCfbEiqYjnyEdentUyvbr",
-            //     "operator_manager.orderly.testnet",
-            // ),
-            // tx(
-            //     "FTLQF8KxwThbfriNk8jNHJsmNk9mteXwQ71Q6hc7JLbg",
-            //     "operator-manager.orderly-qa.testnet",
-            // ),
-            // tx(
-            //     "4VvKfzUzQVA6zNSSG1CZRbiTe4QRz5rwAzcZadKi1EST",
-            //     "operator-manager.orderly-dev.testnet",
-            // ),
         ]
         .into_iter()
         .map(Into::into)

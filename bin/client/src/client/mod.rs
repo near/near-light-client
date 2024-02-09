@@ -255,43 +255,43 @@ impl LightClient {
         Protocol::inclusion_proof_verify(p)
     }
 
-    // TODO: this and below are the same except from two lines
     pub async fn get_proofs(&self, req: BatchGetProof) -> Result<Vec<Proof>> {
         let req = req.0.into_iter().map(|p| p.0).collect();
         let head = self.store.head().await?;
-        let proofs = self
-            .client
-            .batch_fetch_proofs(&head.hash(), req, false)
-            .await?
-            .0;
+        let proofs = self.client.batch_fetch_proofs(&head.hash(), req).await;
+        let (oks, errs): (Vec<_>, Vec<_>) = proofs.into_values().partition_result();
+
+        if !errs.is_empty() {
+            return Err(anyhow::format_err!("Failed to fetch proofs: {:?}", errs));
+        }
 
         self.store
             .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
             .await?;
-        Ok(proofs
+        Ok(oks
             .into_iter()
             .map(|x| (head.inner_lite.block_merkle_root, x))
             .map(Into::into)
             .collect())
     }
 
-    pub async fn experimental_get_proofs(
-        &self,
-        req: BatchGetProof,
-    ) -> Result<(ExperimentalProof, Vec<anyhow::Error>)> {
+    pub async fn experimental_get_proofs(&self, req: BatchGetProof) -> Result<ExperimentalProof> {
         let req = req.0.into_iter().map(|p| p.0).collect();
 
         let head = self.store.head().await?;
-        let (proofs, errors) = self
-            .client
-            .batch_fetch_proofs(&head.hash(), req, true)
-            .await?;
-        let p = protocol::experimental::Proof::new(head.inner_lite.block_merkle_root, proofs);
-        self.store
-            .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
-            .await?;
+        let proofs = self.client.batch_fetch_proofs(&head.hash(), req).await;
 
-        Ok((p, errors))
+        let (oks, errs): (Vec<_>, Vec<_>) = proofs.into_values().partition_result();
+        if !errs.is_empty() {
+            return Err(anyhow::format_err!("Failed to fetch proofs: {:?}", errs));
+        } else {
+            let p = protocol::experimental::Proof::new(head.inner_lite.block_merkle_root, oks);
+            self.store
+                .insert(&[(head.inner_lite.block_merkle_root, Entity::UsedRoot)])
+                .await?;
+
+            Ok(p)
+        }
     }
 }
 

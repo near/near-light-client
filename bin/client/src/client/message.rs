@@ -35,7 +35,7 @@ impl Message for GetProof {
 pub struct BatchGetProof(pub Vec<GetProof>);
 
 impl Message for BatchGetProof {
-    type Result = Option<(ExperimentalProof, Vec<anyhow::Error>)>;
+    type Result = Option<ExperimentalProof>;
 }
 
 pub struct VerifyProof {

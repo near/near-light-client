@@ -127,10 +127,6 @@ mod proof {
             .and_then(|x| x.ok_or_else(|| anyhow::anyhow!("Failed to get batch proof")))
             .map_err(ErrorMapper)
             .map_err(IntoResponse::into_response)
-            .map(|(proofs, errors)| BatchProofWithErrors {
-                proofs,
-                errors: errors.into_iter().map(|e| e.to_string()).collect(),
-            })
             .map(axum::Json)
     }
 }

@@ -2,6 +2,7 @@
 /vendor
 /build/*
 circuits/plonky2x/build
+**input.bin
 
 .direnv
 
