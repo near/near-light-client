@@ -49,7 +49,6 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
         b.watch(&bps_hash, "calculate_bps_hash");
 
         let synced = b.sync(&head, &bps, &next_block);
-        b.watch(&synced.new_head, "new_head");
         let synced_hash = synced.new_head.hash(b);
         b.evm_write::<CryptoHashVariable>(synced_hash);
     }
@@ -60,6 +59,7 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
             plonky2::plonk::config::AlgebraicHasher<L::Field>,
     {
         registry.register_async_hint::<FetchNextHeaderInputs>();
+        registry.register_async_hint::<FetchHeaderInputs>();
         registry.register_hint::<EncodeInner>();
         registry.register_hint::<BuildEndorsement>();
         registry.register_hint::<HashBpsInputs>();
