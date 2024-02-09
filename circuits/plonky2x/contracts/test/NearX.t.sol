@@ -12,18 +12,17 @@ contract NearXTest is Test {
     }
 
     function testGetEncodePackedSync() public view {
-        uint64 height = 10000;
         // TODO:
-        bytes32 header = hex"A0123D5E4B8B8888A61F931EE2252D83568B97C223E0ECA9795B29B8BD8CBA2D";
-        bytes memory encodedInput = abi.encodePacked(height, header);
+        bytes32 header = hex"63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3";
+        bytes memory encodedInput = abi.encodePacked(header);
         console.logBytes(encodedInput);
     }
 
     function testGetEncodePackedVerify() public view {
         // TODO:
-        bytes32 header = hex"A0123D5E4B8B8888A61F931EE2252D83568B97C223E0ECA9795B29B8BD8CBA2D";
-        uint64 requestedHeight = 10004;
-        bytes memory encodedInput = abi.encodePacked(header, requestedHeight);
+        bytes32 header = hex"63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3";
+
+        bytes memory encodedInput = abi.encodePacked(header);
         console.logBytes(encodedInput);
     }
 }

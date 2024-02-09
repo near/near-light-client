@@ -23,9 +23,11 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
             plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
+        b.watch(&trusted_header_hash, "trusted_header_hash");
 
         let untrusted = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
         let untrusted_hash = untrusted.hash(b);
+        b.watch(&untrusted_hash, "untrusted_hash");
         b.assert_is_equal(trusted_header_hash, untrusted_hash);
         let head = untrusted;
 
@@ -82,9 +84,7 @@ mod beefy_tests {
     use serial_test::serial;
 
     use super::*;
-    use crate::test_utils::{builder_suite, testnet_state, B, PI, PO};
-
-    const NETWORK: usize = 1;
+    use crate::test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO};
 
     #[test]
     #[serial]
@@ -100,6 +100,7 @@ mod beefy_tests {
         };
         let assertions = |mut output: PO| {
             let hash = output.evm_read::<CryptoHashVariable>();
+            println!("hash: {:?}", hash);
         };
         builder_suite(define, writer, assertions);
     }

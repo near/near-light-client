@@ -1,10 +1,13 @@
-use std::fmt::{Display, Formatter};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+};
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
-    JsonRpcClient,
+    JsonRpcClient, MethodCallResult,
 };
 use near_primitives::{
     block_header::BlockHeader,
@@ -93,36 +96,32 @@ impl NearRpcClient {
         &self,
         last_verified_hash: &CryptoHash,
         reqs: Vec<GetProof>,
-        collect_errors: bool,
-    ) -> Result<(Vec<BasicProof>, Vec<anyhow::Error>)> {
+    ) -> HashMap<CryptoHash, Result<BasicProof, anyhow::Error>> {
         let mut futs = vec![];
         for req in reqs {
-            let proof = self.fetch_light_client_proof(req, *last_verified_hash);
-            futs.push(proof);
+            futs.push(Box::pin(async {
+                (
+                    match req {
+                        near_primitives::types::TransactionOrReceiptId::Transaction {
+                            transaction_hash,
+                            ..
+                        } => transaction_hash,
+                        near_primitives::types::TransactionOrReceiptId::Receipt {
+                            receipt_id,
+                            ..
+                        } => receipt_id,
+                    },
+                    self.fetch_light_client_proof(req, *last_verified_hash)
+                        .await,
+                )
+            }));
         }
-        let unpin_futs: Vec<_> = futs.into_iter().map(Box::pin).collect();
 
-        let proofs: Vec<Result<BasicProof>> = futures::future::join_all(unpin_futs).await;
-        let (proofs, errors): (Vec<_>, Vec<_>) = if collect_errors {
-            proofs.into_iter().partition_result()
-        } else {
-            (proofs.into_iter().collect::<Result<Vec<_>>>()?, vec![])
-        };
-        Ok((proofs, errors))
-    }
-    pub async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header> {
-        let req = methods::block::RpcBlockRequest {
-            block_reference: near_primitives::types::BlockReference::BlockId(
-                near_primitives::types::BlockId::Hash(*hash),
-            ),
-        };
-        self.client
-            .call(&req)
-            .await
-            .map_err(|e| anyhow!(e))
-            .map(|x| x.header)
-            .map(BlockHeader::from)
-            .map(Into::into)
+        let proofs: Vec<(CryptoHash, Result<BasicProof>)> = futures::future::join_all(futs).await;
+        proofs.into_iter().fold(HashMap::new(), |mut acc, (r, p)| {
+            acc.insert(r, p);
+            acc
+        })
     }
 }
 
@@ -138,10 +137,29 @@ pub trait LightClientRpc {
         latest_verified: CryptoHash,
     ) -> Result<RpcLightClientExecutionProofResponse>;
     async fn fetch_epoch_bps(&self, epoch_id: &CryptoHash) -> Result<Vec<ValidatorStakeView>>;
+    async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header>;
 }
 
 #[async_trait]
 impl LightClientRpc for NearRpcClient {
+    async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header> {
+        let req = methods::block::RpcBlockRequest {
+            block_reference: near_primitives::types::BlockReference::BlockId(
+                near_primitives::types::BlockId::Hash(*hash),
+            ),
+        };
+        self.client
+            .call(&req)
+            .or_else(|e| {
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
+                self.archive.call(&req)
+            })
+            .await
+            .map_err(|e| anyhow!(e))
+            .map(|x| x.header)
+            .map(BlockHeader::from)
+            .map(Into::into)
+    }
     async fn fetch_latest_header(
         &self,
         latest_verified: &CryptoHash,

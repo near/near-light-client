@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use near_light_client_protocol::{prelude::CryptoHash, Proof};
 use near_light_client_rpc::{prelude::GetProof, LightClientRpc, NearRpcClient, Network};
@@ -117,32 +119,39 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
         }
 
         let proofs = client
-            .batch_fetch_proofs(&CryptoHash(last_verified), reqs, false)
+            .batch_fetch_proofs(&CryptoHash(last_verified), reqs)
             .await
-            .expect("Failed to fetch proofs")
-            .0;
+            .into_iter()
+            .map(|(k, p)| (k, p.expect("Failed to fetch proof")))
+            .map(|(k, p)| {
+                (
+                    k,
+                    Proof::Basic {
+                        proof: Box::new(p),
+                        head_block_root: CryptoHash(block_merkle_root),
+                    },
+                )
+            })
+            .collect::<HashMap<CryptoHash, Proof>>();
+
         assert_eq!(proofs.len(), B, "Invalid number of proofs");
 
         log::info!("Fetched {} proofs", proofs.len());
 
-        for p in proofs.into_iter() {
-            output_stream.write_value::<ProofVariable>(
-                Proof::Basic {
-                    proof: Box::new(p),
-                    head_block_root: CryptoHash(block_merkle_root),
-                }
-                .into(),
-            );
+        for (k, p) in proofs.into_iter() {
+            output_stream.write_value::<CryptoHashVariable>(k.0.into());
+            output_stream.write_value::<ProofVariable>(p.into());
         }
     }
 }
+
 impl<const N: usize> FetchProofInputs<N> {
     pub fn fetch<L: PlonkParameters<D>, const D: usize>(
         self,
         b: &mut CircuitBuilder<L, D>,
         head: &HeaderVariable,
         reqs: &[TransactionOrReceiptIdVariable],
-    ) -> ArrayVariable<ProofVariable, N> {
+    ) -> ArrayVariable<ProofInputVariable, N> {
         let mut input_stream = VariableStream::new();
 
         input_stream.write::<CryptoHashVariable>(&head.inner_lite.block_merkle_root);
@@ -150,9 +159,21 @@ impl<const N: usize> FetchProofInputs<N> {
         input_stream.write_slice::<TransactionOrReceiptIdVariable>(reqs);
 
         let output_stream = b.async_hint(input_stream, self);
-        let proofs = output_stream.read_vec::<ProofVariable>(b, N);
-        proofs.into()
+        let mut inputs = vec![];
+        for _ in 0..N {
+            inputs.push(ProofInputVariable {
+                id: output_stream.read::<CryptoHashVariable>(b),
+                proof: output_stream.read::<ProofVariable>(b),
+            });
+        }
+        inputs.into()
     }
+}
+
+#[derive(CircuitVariable, Debug, Clone)]
+pub struct ProofInputVariable {
+    pub id: CryptoHashVariable,
+    pub proof: ProofVariable,
 }
 
 #[cfg(test)]
