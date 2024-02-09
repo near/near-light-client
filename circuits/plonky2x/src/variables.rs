@@ -409,7 +409,11 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
 }
 
 pub(crate) fn pad_account_id(account_id: &AccountId) -> [u8; AccountId::MAX_LEN] {
-    let mut account_id = account_id.as_str().as_bytes().to_vec();
+    let account_id = account_id.as_str().as_bytes().to_vec();
+    pad_account_bytes(account_id)
+}
+
+pub(crate) fn pad_account_bytes(mut account_id: Vec<u8>) -> [u8; AccountId::MAX_LEN] {
     account_id.resize(AccountId::MAX_LEN, ACCOUNT_ID_PADDING_BYTE);
     account_id.try_into().expect("invalid account bytes")
 }
@@ -658,12 +662,125 @@ impl<F: RichField> From<GetProof> for TransactionOrReceiptIdVariableValue<F> {
     }
 }
 
+pub fn byte_from_bool<L: PlonkParameters<D>, const D: usize>(
+    b: &mut CircuitBuilder<L, D>,
+    bool: BoolVariable,
+) -> ByteVariable {
+    let zero = b._false();
+    let mut bits = [zero; 8];
+    bits[7] = bool.into();
+
+    ByteVariable::from_be_bits(bits)
+}
+
+impl EvmVariable for TransactionOrReceiptIdVariable {
+    fn encode<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<L, D>,
+    ) -> Vec<ByteVariable> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&byte_from_bool(builder, self.is_transaction).encode(builder));
+        bytes.extend_from_slice(&self.id.encode(builder));
+        bytes.extend_from_slice(&self.account.encode(builder));
+        bytes
+    }
+
+    fn decode<L: PlonkParameters<D>, const D: usize>(
+        builder: &mut CircuitBuilder<L, D>,
+        bytes: &[ByteVariable],
+    ) -> Self {
+        let zero = builder.zero::<ByteVariable>();
+        let is_receipt = builder.is_equal(bytes[0], zero);
+        let is_transaction = builder.not(is_receipt);
+        Self {
+            is_transaction,
+            id: CryptoHashVariable::decode(builder, &bytes[1..33]),
+            account: AccountIdVariable::decode(builder, &bytes[33..33 + AccountId::MAX_LEN]),
+        }
+    }
+    fn encode_value<F: RichField>(value: Self::ValueType<F>) -> Vec<u8> {
+        let mut bytes = vec![value.is_transaction as u8];
+        bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.id));
+        bytes.extend_from_slice(&AccountIdVariable::encode_value::<F>(pad_account_bytes(
+            value.account.to_vec(),
+        )));
+        bytes
+    }
+    fn decode_value<F: RichField>(bytes: &[u8]) -> Self::ValueType<F> {
+        assert_eq!(bytes.len(), 1 + 32 + AccountId::MAX_LEN);
+
+        Self::ValueType {
+            is_transaction: bytes[0] != 0,
+            id: CryptoHashVariable::decode_value::<F>(&bytes[1..33]),
+            account: AccountIdVariable::decode_value::<F>(&bytes[33..33 + AccountId::MAX_LEN]),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use ::test_utils::CryptoHash;
+    use near_light_client_protocol::prelude::Itertools;
+    use near_primitives::types::TransactionOrReceiptId;
+    use serial_test::serial;
+    use test_utils::fixture;
+
     use super::*;
+    use crate::{
+        test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
+        variables::TransactionOrReceiptIdVariableValue,
+    };
 
     #[test]
-    fn tests() {
+    fn test_serialise_tx() {
+        fn tx(hash: &str, sender: &str) -> TransactionOrReceiptId {
+            TransactionOrReceiptId::Transaction {
+                transaction_hash: CryptoHash::from_str(hash).unwrap(),
+                sender_id: sender.parse().unwrap(),
+            }
+        }
+        fn rx(hash: &str, receiver: &str) -> TransactionOrReceiptId {
+            TransactionOrReceiptId::Receipt {
+                receipt_id: CryptoHash::from_str(hash).unwrap(),
+                receiver_id: receiver.parse().unwrap(),
+            }
+        }
+
+        // TODO: test way more of these, pull the last 64 transactions and prove them
+        let txs: Vec<TransactionOrReceiptIdVariableValue<GoldilocksField>> = vec![
+            tx(
+                "3z2zqitrXNYQs19z5tK5a4bZSxdx7baqzGFUyGAkW9Mz",
+                "zavodil.testnet",
+            ),
+            rx(
+                "9cVuYLKYF26QevZ315RLb9ArU3gbcgPc4LDRJfZQyZHo",
+                "priceoracle.testnet",
+            ),
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect_vec();
+
+        let define = |b: &mut B| {
+            let receipt = b.evm_read::<TransactionOrReceiptIdVariable>();
+            b.evm_write::<TransactionOrReceiptIdVariable>(receipt);
+            let tx = b.evm_read::<TransactionOrReceiptIdVariable>();
+            b.evm_write::<TransactionOrReceiptIdVariable>(tx);
+        };
+        let writer = |input: &mut PI| {
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[0].clone().into());
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[1].clone().into());
+        };
+        let assertions = |mut output: PO| {
+            println!("{:#?}", output.evm_read::<TransactionOrReceiptIdVariable>());
+            println!("{:#?}", output.evm_read::<TransactionOrReceiptIdVariable>());
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_encode_transaction() {
         todo!()
     }
 }
