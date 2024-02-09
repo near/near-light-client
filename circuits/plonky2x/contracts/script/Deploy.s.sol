@@ -16,7 +16,7 @@ contract DeployScript is Script {
         NearX lightClient = new NearX(gateway);
 
         bytes32 syncFunctionId = vm.envBytes32("SYNC_FUNCTION_ID");
-        lightClient.updateSyncId(verifyFunctionId);
+        lightClient.updateSyncId(syncFunctionId);
 
         bytes32 verifyFunctionId = vm.envBytes32("VERIFY_FUNCTION_ID");
         lightClient.updateVerifyId(verifyFunctionId);
