@@ -1105,7 +1105,6 @@ dependencies = [
 [[package]]
 name = "curta"
 version = "0.1.0"
-source = "git+https://github.com/dndll/starkyx.git#7f676e81dcf13393d9ca3bb825bf8e2a7c046cba"
 dependencies = [
  "anyhow",
  "bincode",
@@ -4180,7 +4179,6 @@ source = "git+https://github.com/mir-protocol/plonky2.git#b600142cd454b95eba403f
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
-source = "git+https://github.com/dndll/succinctx.git#9698a57ab5c6681eabc8dc105869581c4ce7d21b"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4222,7 +4220,6 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
-source = "git+https://github.com/dndll/succinctx.git#9698a57ab5c6681eabc8dc105869581c4ce7d21b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6865,3 +6862,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "curta"
+version = "0.1.0"
+source = "git+https://github.com/dndll/starkyx.git#7f676e81dcf13393d9ca3bb825bf8e2a7c046cba"

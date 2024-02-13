@@ -13,6 +13,8 @@ local.toml
 circuits/plonky2x/contracts/cache
 circuits/plonky2x/contracts/out
 circuits/plonky2x/contracts/lib
+wrapped/
+build/
 
 # Ignores development broadcast logs
 !/broadcast

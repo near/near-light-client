@@ -48,7 +48,7 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
                 },
             );
             fs::write(
-                "../../fixtures/input.bytes",
+                "../../fixtures/input.bytes.json",
                 serde_json::to_string(&req).unwrap(),
             )
             .unwrap();

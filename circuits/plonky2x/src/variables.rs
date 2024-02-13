@@ -1,6 +1,6 @@
 use ethers::types::U256;
 use near_light_client_protocol::{
-    config::NUM_BLOCK_PRODUCER_SEATS,
+    config::{ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS},
     prelude::{AccountId, CryptoHash, Header, Itertools},
     BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
     StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
@@ -394,7 +394,7 @@ pub struct ValidatorStakeVariable {
     pub stake: BalanceVariable,
 }
 
-const ACCOUNT_ID_PADDING_BYTE: u8 = b'#';
+const ACCOUNT_ID_PADDING_BYTE: u8 = ACCOUNT_DATA_SEPARATOR;
 impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     fn from(vs: ValidatorStake) -> Self {
         let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
@@ -747,7 +747,6 @@ mod tests {
             }
         }
 
-        // TODO: test way more of these, pull the last 64 transactions and prove them
         let txs: Vec<TransactionOrReceiptIdVariableValue<GoldilocksField>> = vec![
             tx(
                 "3z2zqitrXNYQs19z5tK5a4bZSxdx7baqzGFUyGAkW9Mz",
