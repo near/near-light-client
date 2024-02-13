@@ -45,8 +45,11 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
         let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids);
 
+        let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
+        let _false = b._false();
+
         // TODO: write some outputs here for each ID
-        let output = b.mapreduce_dynamic::<_, _, _, Self, B, _, _>(
+        let output = b.mapreduce_dynamic::<(), ProofInputVariable, ArrayVariable<ProofVerificationResultVariable, N>, Self, B, _, _>(
             (),
             proofs.data,
             |_, proofs, b| {
@@ -58,8 +61,6 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
                     results.push(ProofVerificationResultVariable { id, result });
                 }
 
-                let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
-                let _false = b._false();
                 results.resize(
                     N,
                     ProofVerificationResultVariable {
@@ -95,8 +96,8 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         registry.register_simple::<MapReduceDynamicGenerator<
             L,
             (),
-            ArrayVariable<ProofInputVariable, N>,
-            ProofMapReduceVariable<N>,
+            ProofInputVariable,
+            ArrayVariable<ProofVerificationResultVariable, N>,
             Self,
             B,
             D,
@@ -176,13 +177,14 @@ mod beefy_tests {
     use ::test_utils::CryptoHash;
     use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
+    use plonky2x::frontend::vars::EvmVariable;
     use serial_test::serial;
     use test_utils::fixture;
 
     use super::*;
     use crate::{
         test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
-        variables::TransactionOrReceiptIdVariableValue,
+        variables::{HeaderVariableValue, TransactionOrReceiptIdVariableValue},
     };
 
     #[test]
