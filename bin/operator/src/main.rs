@@ -11,6 +11,8 @@ cfg_if::cfg_if! {
     }
 }
 
+// TODO: make this use a nicer API for use by the prover.
+// TODO: perpetually sync, use queue etc
 fn main() {
     cfg_if::cfg_if! {
         if #[cfg(feature = "sync")] {
