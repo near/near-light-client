@@ -15,16 +15,13 @@ use crate::{
     },
 };
 
+pub type ProofMapReduceVariable<const B: usize> = ArrayVariable<ProofVerificationResultVariable, B>;
+
 #[derive(CircuitVariable, Debug, Clone)]
 pub struct ProofVerificationResultVariable {
     pub id: CryptoHashVariable,
     pub result: BoolVariable,
 }
-
-// TODO: improve the way we can lookup the transaction, ideally map
-// TransactionOrReceiptId => Proof and map this way, now we are not limited by
-// the data transformation
-pub type ProofMapReduceVariable<const B: usize> = ArrayVariable<ProofVerificationResultVariable, B>;
 
 #[derive(Debug, Clone)]
 pub struct VerifyCircuit<const N: usize, const B: usize, const NETWORK: usize = 1>;

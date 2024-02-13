@@ -52,9 +52,9 @@ test-utils                 = { path = "crates/test-utils" }
 curta = { git = "https://github.com/dndll/starkyx.git" }
 
 [patch."https://github.com/succinctlabs/starkyx.git"]
-#curta = { path = "./vendor/starkyx/curta" }
-curta = { git = "https://github.com/dndll/starkyx.git" }
+curta = { path = "./vendor/starkyx/curta" }
+#curta = { git = "https://github.com/dndll/starkyx.git" }
 
 [patch."https://github.com/succinctlabs/succinctx.git"]
-#plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
-plonky2x = { git = "https://github.com/dndll/succinctx.git" }
+plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
+#plonky2x = { git = "https://github.com/dndll/succinctx.git" }
