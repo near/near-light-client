@@ -35,43 +35,36 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
     let mut inputs = circuit.input();
     writer(&mut inputs);
 
-    match &inputs {
-        PublicInput::Bytes(bytes) => {
-            let req = ProofRequest::<DefaultParameters, 2>::Bytes(
-                plonky2x::backend::function::ProofRequestBase {
-                    release_id: "todo".to_string(),
-                    parent_id: None,
-                    files: None,
-                    data: BytesRequestData {
-                        input: bytes.clone(),
-                    },
+    let proof_req = match &inputs {
+        PublicInput::Bytes(bytes) => Some(ProofRequest::<DefaultParameters, 2>::Bytes(
+            plonky2x::backend::function::ProofRequestBase {
+                release_id: "todo".to_string(),
+                parent_id: None,
+                files: None,
+                data: BytesRequestData {
+                    input: bytes.clone(),
                 },
-            );
-            fs::write(
-                "../../fixtures/input.bytes.json",
-                serde_json::to_string(&req).unwrap(),
-            )
-            .unwrap();
-        }
-        PublicInput::Elements(elements) => {
-            let req = ProofRequest::<DefaultParameters, 2>::Elements(
-                plonky2x::backend::function::ProofRequestBase {
-                    release_id: "todo".to_string(),
-                    parent_id: None,
-                    files: None,
-                    data: plonky2x::backend::function::ElementsRequestData {
-                        circuit_id: "todo".to_string(),
-                        input: elements.clone(),
-                    },
+            },
+        )),
+        PublicInput::Elements(elements) => Some(ProofRequest::<DefaultParameters, 2>::Elements(
+            plonky2x::backend::function::ProofRequestBase {
+                release_id: "todo".to_string(),
+                parent_id: None,
+                files: None,
+                data: plonky2x::backend::function::ElementsRequestData {
+                    circuit_id: "todo".to_string(),
+                    input: elements.clone(),
                 },
-            );
-            fs::write(
-                "../../fixtures/input.elements.json",
-                serde_json::to_string(&req).unwrap(),
-            )
-            .unwrap();
-        }
-        _ => {}
+            },
+        )),
+        _ => None,
+    };
+    if let Some(req) = proof_req {
+        fs::write(
+            "../../build/input.json",
+            serde_json::to_string(&req).unwrap(),
+        )
+        .unwrap();
     }
 
     let (proof, output) = circuit.prove(&inputs);
