@@ -23,13 +23,7 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
             plonky2::plonk::config::AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
-        b.watch(&trusted_header_hash, "trusted_header_hash");
-
-        let untrusted = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
-        let untrusted_hash = untrusted.hash(b);
-        b.watch(&untrusted_hash, "untrusted_hash");
-        b.assert_is_equal(trusted_header_hash, untrusted_hash);
-        let head = untrusted;
+        let head = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
 
         // This is a very interesting trick to be able to get the BPS for the next epoch
         // without the need to store the BPS, we verify the hash of the BPS in the

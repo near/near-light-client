@@ -3,6 +3,7 @@ use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 
 use crate::{
+    hint::FetchHeaderInputs,
     merkle::{MerklePathVariable, NearMerkleTree},
     variables::{
         ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,

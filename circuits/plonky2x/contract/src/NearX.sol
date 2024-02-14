@@ -5,7 +5,7 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {ISuccinctGateway} from "./interfaces/ISuccinctGateway.sol";
-import {INearX, TransactionOrReceiptId, encodePackedIds, decodePackedIds} from "./interfaces/INearX.sol";
+import {INearX, TransactionOrReceiptId, ProofVerificationResult, encodePackedIds, decodePackedIds, decodePackedResults} from "./interfaces/INearX.sol";
 
 /// @notice The NearX contract is a light client for Near.
 contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
@@ -117,13 +117,13 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         emit VerifyRequested(latestHeader, ids);
     }
 
-    function handleVerify(bytes memory _output, bytes memory _context)
+    function handleVerify(bytes calldata _output, bytes memory _context)
         external
     {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
-        TransactionOrReceiptId[] memory ids = decodePackedIds(_output);
-        emit VerifyResult(ids);
+        ProofVerificationResult[] memory results = decodePackedResults(_output);
+        emit VerifyResult(results);
     }
 }

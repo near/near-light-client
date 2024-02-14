@@ -16,3 +16,6 @@
 [submodule "circuits/plonky2x/verifier/lib/foundry-devops"]
 	path = circuits/plonky2x/verifier/lib/foundry-devops
 	url = https://github.com/chainaccelorg/foundry-devops
+[submodule "circuits/plonky2x/contract/lib/solidity-bytes-utils"]
+	path = circuits/plonky2x/contract/lib/solidity-bytes-utils
+	url = https://github.com/GNSPS/solidity-bytes-utils

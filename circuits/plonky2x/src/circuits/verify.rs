@@ -3,12 +3,13 @@ pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use plonky2x::{
     frontend::{hint::simple::hint::Hint, mapreduce::generator::MapReduceDynamicGenerator},
     prelude::plonky2::plonk::config::{AlgebraicHasher, GenericConfig},
+    register_watch_generator,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     builder::Verify,
-    hint::{FetchProofInputs, ProofInputVariable},
+    hint::{FetchHeaderInputs, FetchProofInputs, ProofInputVariable},
     variables::{
         byte_from_bool, CryptoHashVariable, EncodeInner, HeaderVariable,
         TransactionOrReceiptIdVariable,
@@ -34,22 +35,29 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher:
             AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
-        let trusted_head = b.evm_read::<HeaderVariable>();
+        let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
+        let head = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
+
         let mut ids = vec![];
         for _ in 0..N {
             ids.push(b.evm_read::<TransactionOrReceiptIdVariable>());
         }
 
-        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &trusted_head, &ids);
+        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &head, &ids);
 
+        // Init a default result for N
         let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
         let _false = b._false();
+        let default = ProofVerificationResultVariable {
+            id: zero,
+            result: _false,
+        };
 
         // TODO: write some outputs here for each ID
-        let output = b.mapreduce_dynamic::<(), ProofInputVariable, ArrayVariable<ProofVerificationResultVariable, N>, Self, B, _, _>(
-            (),
+        let output = b.mapreduce_dynamic::<ProofVerificationResultVariable, ProofInputVariable, ArrayVariable<ProofVerificationResultVariable, N>, Self, B, _, _>(
+            default,
             proofs.data,
-            |_, proofs, b| {
+            |default, proofs, b| {
                 let mut results = vec![];
 
                 // TODO[Optimisation]: could parallelise these
@@ -60,19 +68,16 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
                 results.resize(
                     N,
-                    ProofVerificationResultVariable {
-                        id: zero,
-                        result: _false,
-                    },
+                    default,
                 );
 
                 results.into()
             },
             |_, l, r, b| MergeProofHint::<N>.merge(b, &l, &r),
         );
+        b.watch_slice(&output.data, "output");
         for r in output.data {
             b.evm_write::<CryptoHashVariable>(r.id);
-            let _true = b._true();
             let passed = byte_from_bool(b, r.result);
             b.evm_write::<ByteVariable>(passed);
         }
@@ -84,6 +89,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
     {
         registry.register_async_hint::<FetchProofInputs<N>>();
         registry.register_hint::<MergeProofHint<N>>();
+        registry.register_async_hint::<FetchHeaderInputs>();
 
         // We hash in verify
         registry.register_hint::<EncodeInner>();
@@ -92,7 +98,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
         registry.register_simple::<MapReduceDynamicGenerator<
             L,
-            (),
+            ProofVerificationResultVariable,
             ProofInputVariable,
             ArrayVariable<ProofVerificationResultVariable, N>,
             Self,
@@ -100,7 +106,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             D,
         >>(dynamic_id);
 
-        // TODO: register_watch_generator!
+        register_watch_generator!(registry, L, D, ProofVerificationResultVariable);
     }
 }
 
@@ -130,14 +136,23 @@ pub struct MergeProofHint<const N: usize>;
 impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for MergeProofHint<N> {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let left = input_stream.read_value::<ProofMapReduceVariable<N>>();
+        log::debug!("Left results: {:?}", left);
         let right = input_stream.read_value::<ProofMapReduceVariable<N>>();
+        log::debug!("Right results: {:?}", right);
 
         let mut results = left
             .into_iter()
             .chain(right.into_iter())
-            .filter_map(|r| if r.id.0 != [0u8; 32] { Some(r) } else { None })
+            .filter_map(|r| {
+                if r.id.0 != [0u8; 32] && r.id.0 != [255u8; 32] {
+                    Some(r)
+                } else {
+                    None
+                }
+            })
             .collect_vec();
 
+        log::debug!("Merged results: {:?}", results);
         results.resize(
             N,
             ProofVerificationResultVariableValue::<L::Field> {
@@ -171,12 +186,10 @@ impl<const N: usize> MergeProofHint<N> {
 mod beefy_tests {
     use std::str::FromStr;
 
-    use ::test_utils::CryptoHash;
     use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
-    use plonky2x::frontend::vars::EvmVariable;
     use serial_test::serial;
-    use test_utils::fixture;
+    use test_utils::{fixture, CryptoHash};
 
     use super::*;
     use crate::{
@@ -227,7 +240,7 @@ mod beefy_tests {
             VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
-            input.evm_write::<HeaderVariable>(header.into());
+            input.evm_write::<CryptoHashVariable>(header.hash().0.into());
             for tx in txs {
                 input.evm_write::<TransactionOrReceiptIdVariable>(tx.into());
             }
@@ -268,7 +281,7 @@ mod beefy_tests {
             VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
-            input.write::<HeaderVariable>(header.into());
+            input.evm_write::<CryptoHashVariable>(header.hash().0.into());
             input.write::<ArrayVariable<TransactionOrReceiptIdVariable, AMT>>(ids.into());
         };
         let assertions = |mut output: PO| {

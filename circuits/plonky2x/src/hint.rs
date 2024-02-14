@@ -73,16 +73,20 @@ impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchHeaderInput
 }
 
 impl FetchHeaderInputs {
+    /// Fetches a header based on its known hash and witnesses the result.
     pub fn fetch<L: PlonkParameters<D>, const D: usize>(
         self,
         b: &mut CircuitBuilder<L, D>,
-        hash: &CryptoHashVariable,
+        trusted_hash: &CryptoHashVariable,
     ) -> HeaderVariable {
         let mut input_stream = VariableStream::new();
-        input_stream.write::<CryptoHashVariable>(hash);
+        input_stream.write::<CryptoHashVariable>(trusted_hash);
 
         let output_stream = b.async_hint(input_stream, self);
-        output_stream.read::<HeaderVariable>(b)
+        let untrusted = output_stream.read::<HeaderVariable>(b);
+        let untrusted_hash = untrusted.hash(b);
+        b.assert_is_equal(*trusted_hash, untrusted_hash);
+        untrusted
     }
 }
 // TODO: refactor into some client-like carrier for all hints that is serdeable
@@ -136,7 +140,7 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
 
         assert_eq!(proofs.len(), B, "Invalid number of proofs");
 
-        log::info!("Fetched {} proofs", proofs.len());
+        log::debug!("Fetched {} proofs", proofs.len());
 
         for (k, p) in proofs.into_iter() {
             output_stream.write_value::<CryptoHashVariable>(k.0.into());
@@ -166,6 +170,11 @@ impl<const N: usize> FetchProofInputs<N> {
                 proof: output_stream.read::<ProofVariable>(b),
             });
         }
+        // Witness that each head block root in each proof is the same as the trusted
+        // head
+        inputs.iter().for_each(|x| {
+            b.assert_is_equal(x.proof.head_block_root, head.inner_lite.block_merkle_root)
+        });
         inputs.into()
     }
 }
