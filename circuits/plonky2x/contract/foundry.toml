@@ -1,7 +1,8 @@
 [profile.default]
 fs_permissions = [ { access = "read", path = "./broadcast" } ]
 libs           = [ "lib" ]
+optimizer      = true
+optimizer-runs = 1_000_000
 out            = "out"
 remappings     = [ "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts", "@openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts" ]
 src            = "src"
-# See more config options https://github.com/foundry-rs/foundry/tree/master/config
