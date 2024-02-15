@@ -283,7 +283,7 @@ impl LightClient {
 
         let (oks, errs): (Vec<_>, Vec<_>) = proofs.into_values().partition_result();
         if !errs.is_empty() {
-            return Err(anyhow::format_err!("Failed to fetch proofs: {:?}", errs));
+            Err(anyhow::format_err!("Failed to fetch proofs: {:?}", errs))
         } else {
             let p = protocol::experimental::Proof::new(head.inner_lite.block_merkle_root, oks);
             self.store
@@ -297,7 +297,6 @@ impl LightClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn t() {}

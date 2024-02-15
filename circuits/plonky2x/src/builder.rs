@@ -3,7 +3,6 @@ use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 
 use crate::{
-    hint::FetchHeaderInputs,
     merkle::{MerklePathVariable, NearMerkleTree},
     variables::{
         ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,
@@ -251,20 +250,20 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
         epoch_bps: &BpsArr<ValidatorStakeVariable>,
         next_block: &BlockVariable,
     ) -> SyncedVariable {
-        let a = self.ensure_not_already_verified(&head, &next_block.header.inner_lite.height);
+        let a = self.ensure_not_already_verified(head, &next_block.header.inner_lite.height);
         self.assertx(a);
 
-        let b = self.ensure_epoch_is_current_or_next(&head, &next_block.header.inner_lite.epoch_id);
+        let b = self.ensure_epoch_is_current_or_next(head, &next_block.header.inner_lite.epoch_id);
         self.assertx(b);
 
         let c = self.ensure_if_next_epoch_contains_next_bps(
-            &head,
+            head,
             &next_block.header.inner_lite.epoch_id,
             &next_block.next_bps,
         );
         self.assertx(c);
 
-        let approval = self.reconstruct_approval_message(&next_block);
+        let approval = self.reconstruct_approval_message(next_block);
         let stake = self.validate_signatures(&next_block.approvals_after_next, epoch_bps, approval);
         let d = self.ensure_stake_is_sufficient(&stake);
         self.assertx(d);
@@ -299,12 +298,11 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
             input_stream.write(&next_block_hash);
             input_stream.write(&next_block.header.inner_lite.height);
             let output_stream = self.hint(input_stream, BuildEndorsement);
-            let msg = output_stream.read::<ApprovalMessage>(self);
-            msg
+            output_stream.read::<ApprovalMessage>(self)
         } else {
             let mut bytes = vec![ByteVariable::zero(self)];
             bytes.extend_from_slice(&next_block_hash.as_bytes());
-            let blocks_to_advance = self.constant::<U64Variable>(2u64.into());
+            let blocks_to_advance = self.constant::<U64Variable>(2u64);
             let height = self.add(blocks_to_advance, next_block.header.inner_lite.height);
             bytes.extend_from_slice(&to_le_bytes::<_, _, D, 8>(self, &height).0);
             let bytes: [ByteVariable; 41] = bytes.try_into().unwrap();
@@ -459,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_ensure_next_bps() {
-        let (header, bps, nbps_hash) = testnet_state();
+        let (header, bps, _) = testnet_state();
         let bps_hash = CryptoHash::hash_borsh(bps.clone());
 
         let define = |builder: &mut B| {
@@ -559,7 +557,6 @@ mod tests {
 #[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
-    use near_light_client_protocol::prelude::BasicProof;
     use serial_test::serial;
 
     use crate::{
@@ -638,7 +635,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
-    fn beefy_test_sync_across_epoch_boundaries() {
+    fn beefy_builder_test_sync_across_epoch_boundaries() {
         let (head, next_bps, next_block) = test_state();
 
         let define = |builder: &mut B| {
@@ -657,16 +654,14 @@ mod beefy_tests {
             let header = output.read::<SyncedVariable>();
             println!("header: {:?}", header);
         };
-        // TODO: next two
         builder_suite(define, writer, assertions);
     }
 
-    // TODO: probably not needed
     #[test]
     #[serial]
-    fn beefy_test_bounded_signatures() {
+    fn beefy_builder_test_bounded_signatures() {
         let (_, bps, next_block) = test_state();
-        const BPS_AMT: usize = 5;
+        const BPS_AMT: usize = 15;
 
         let define = |builder: &mut B| {
             let bps = builder.read::<BpsArr<ValidatorStakeVariable, BPS_AMT>>();

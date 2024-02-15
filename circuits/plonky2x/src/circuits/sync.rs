@@ -60,18 +60,6 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
     }
 }
 
-#[derive(CircuitVariable, Debug, Clone)]
-pub struct ProofMapReduceVariable<const B: usize> {
-    pub height_indices: ArrayVariable<BlockHeightVariable, B>,
-    pub results: ArrayVariable<BoolVariable, B>,
-}
-
-#[derive(CircuitVariable, Debug, Clone)]
-pub struct ProofMapReduceCtx {
-    pub zero: BlockHeightVariable,
-    pub result: BoolVariable,
-}
-
 #[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {

@@ -10,10 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     builder::Verify,
     hint::{FetchHeaderInputs, FetchProofInputs, ProofInputVariable},
-    variables::{
-        byte_from_bool, CryptoHashVariable, EncodeInner, HeaderVariable,
-        TransactionOrReceiptIdVariable,
-    },
+    variables::{byte_from_bool, CryptoHashVariable, EncodeInner, TransactionOrReceiptIdVariable},
 };
 
 pub type ProofMapReduceVariable<const B: usize> = ArrayVariable<ProofVerificationResultVariable, B>;
@@ -137,12 +134,13 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Merge
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let left = input_stream.read_value::<ProofMapReduceVariable<N>>();
         log::debug!("Left results: {:?}", left);
+
         let right = input_stream.read_value::<ProofMapReduceVariable<N>>();
         log::debug!("Right results: {:?}", right);
 
         let mut results = left
             .into_iter()
-            .chain(right.into_iter())
+            .chain(right)
             .filter_map(|r| {
                 if r.id.0 != [0u8; 32] && r.id.0 != [255u8; 32] {
                     Some(r)
@@ -153,6 +151,7 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Merge
             .collect_vec();
 
         log::debug!("Merged results: {:?}", results);
+
         results.resize(
             N,
             ProofVerificationResultVariableValue::<L::Field> {
@@ -161,7 +160,7 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> Hint<L, D> for Merge
             },
         );
 
-        output_stream.write_value::<ProofMapReduceVariable<N>>(results.into());
+        output_stream.write_value::<ProofMapReduceVariable<N>>(results);
     }
 }
 
@@ -269,23 +268,34 @@ mod beefy_tests {
         const AMT: usize = 128;
         const BATCH: usize = 4;
 
-        let ids = fixture::<Vec<TransactionOrReceiptId>>("ids.json")
+        let txs = fixture::<Vec<TransactionOrReceiptId>>("ids.json")
             .into_iter()
             .take(AMT)
             .map(Into::<TransactionOrReceiptIdVariableValue<GoldilocksField>>::into)
             .collect_vec();
 
-        assert_eq!(ids.len(), AMT);
+        assert_eq!(txs.len(), AMT);
 
         let define = |b: &mut B| {
             VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.hash().0.into());
-            input.write::<ArrayVariable<TransactionOrReceiptIdVariable, AMT>>(ids.into());
+            for tx in txs {
+                input.evm_write::<TransactionOrReceiptIdVariable>(tx.into());
+            }
         };
         let assertions = |mut output: PO| {
-            println!("{:#?}", output.read::<ProofMapReduceVariable<AMT>>());
+            let mut results = vec![];
+            for _ in 0..AMT {
+                let id = output.evm_read::<CryptoHashVariable>();
+                let result = output.evm_read::<ByteVariable>();
+                results.push(ProofVerificationResultVariableValue::<GoldilocksField> {
+                    id,
+                    result: result != 0,
+                });
+            }
+            println!("{:#?}", results);
         };
         builder_suite(define, writer, assertions);
     }

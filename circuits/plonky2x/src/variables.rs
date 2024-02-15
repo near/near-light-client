@@ -64,8 +64,7 @@ impl HeaderVariable {
     ) -> CryptoHashVariable {
         let inner_lite = self.inner_lite.hash(b);
         let lite_rest = b.curta_sha256_pair(inner_lite, self.inner_rest_hash);
-        let hash = b.curta_sha256_pair(lite_rest, self.prev_block_hash);
-        hash
+        b.curta_sha256_pair(lite_rest, self.prev_block_hash)
     }
 }
 impl EvmVariable for HeaderVariable {
@@ -138,17 +137,17 @@ pub struct HeaderInnerVariable {
 impl<F: RichField> From<BlockHeaderInnerLiteView> for HeaderInnerVariableValue<F> {
     fn from(header: BlockHeaderInnerLiteView) -> Self {
         Self {
-            height: header.height.into(),
+            height: header.height,
             epoch_id: header.epoch_id.0.into(),
             next_epoch_id: header.next_epoch_id.0.into(),
             prev_state_root: header.prev_state_root.0.into(),
             outcome_root: header.outcome_root.0.into(),
+            // Maybe don't need this anymore
             timestamp: if header.timestamp > 0 {
                 header.timestamp
             } else {
                 header.timestamp_nanosec
-            }
-            .into(),
+            },
             next_bp_hash: header.next_bp_hash.0.into(),
             block_merkle_root: header.block_merkle_root.0.into(),
         }
@@ -172,9 +171,9 @@ impl HeaderInnerVariable {
         input_stream.write(&self.block_merkle_root);
 
         let output_bytes = b.hint(input_stream, EncodeInner);
-        let bytes = output_bytes.read::<BytesVariable<INNER_ENCODED_LEN>>(b);
-        bytes
+        output_bytes.read::<BytesVariable<INNER_ENCODED_LEN>>(b)
     }
+
     pub(crate) fn hash<L: PlonkParameters<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<L, D>,
@@ -318,10 +317,11 @@ pub struct BlockVariable {
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
+        // TODO[Optimisation]: Constrain these in-circuit
         let next_bps_hash = block
             .next_bps
             .as_ref()
-            .map(|bps| CryptoHash::hash_borsh(bps))
+            .map(CryptoHash::hash_borsh)
             .unwrap_or_default()
             .0
             .into();
@@ -346,26 +346,20 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
     for BpsApprovalsValue<AMT, F>
 {
     fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
-        let mut is_active = vec![false; AMT];
-        let mut signatures = vec![Default::default(); AMT];
-
-        approvals
+        let (signatures, is_active) = approvals
             .into_iter()
             .take(AMT)
-            .enumerate()
-            .for_each(|(i, s)| {
-                is_active[i] = s.is_some();
+            .map(|s| {
+                let is_active = s.is_some();
                 let s: SignatureVariableValue<F> = s.into();
-                signatures[i] = s;
-            });
+
+                (s.signature, is_active)
+            })
+            .unzip();
 
         Self {
-            is_active: is_active.into(),
-            signatures: signatures
-                .into_iter()
-                .map(|x| x.signature)
-                .collect_vec()
-                .into(),
+            is_active,
+            signatures,
         }
     }
 }
@@ -398,12 +392,12 @@ const ACCOUNT_ID_PADDING_BYTE: u8 = ACCOUNT_DATA_SEPARATOR;
 impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     fn from(vs: ValidatorStake) -> Self {
         let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
-        let stake = vs.stake();
+        let stake = vs.stake().into();
         let account_id = pad_account_id(&vs.take_account_id());
         Self {
-            account_id: account_id.try_into().unwrap(), // SAFETY: already checked this above
-            public_key: public_key.into(),
-            stake: stake.into(),
+            account_id,
+            public_key,
+            stake,
         }
     }
 }
@@ -429,34 +423,32 @@ pub(crate) fn normalise_account_id<F: RichField>(
     account_str.parse().expect("invalid account id")
 }
 
-impl<F: RichField> Into<ValidatorStakeView> for ValidatorStakeVariableValue<F> {
-    fn into(self) -> ValidatorStakeView {
-        let account_id = normalise_account_id::<F>(&self.account_id);
-        let public_key = PublicKey::ED25519(ED25519PublicKey(self.public_key.0.into()));
+impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
+    fn from(val: ValidatorStakeVariableValue<F>) -> Self {
+        let account_id = normalise_account_id::<F>(&val.account_id);
+        let public_key = PublicKey::ED25519(ED25519PublicKey(val.public_key.0));
         ValidatorStakeView::V1(ValidatorStakeViewV1 {
             account_id,
             public_key,
-            stake: self.stake.as_u128(),
+            stake: val.stake.as_u128(),
         })
     }
 }
 
 impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
     fn default() -> Self {
-        let bytes: [u8; AccountId::MAX_LEN] = [0u8; AccountId::MAX_LEN];
-        let pk = CompressedEdwardsY::default();
-        let stake = 0_u128;
+        let account_id: [u8; AccountId::MAX_LEN] = [0u8; AccountId::MAX_LEN];
+        let public_key = CompressedEdwardsY::default();
 
         Self {
-            account_id: bytes.into(),
-            public_key: pk.into(),
-            stake: stake.into(),
+            account_id,
+            public_key,
+            stake: u128::default().into(),
         }
     }
 }
 
 pub type PublicKeyVariable = CompressedEdwardsYVariable;
-pub type PublicKeyVariableValue = CompressedEdwardsY;
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct SignatureVariable {
@@ -558,7 +550,7 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
         let next_block_height = input_stream.read_value::<U64Variable>();
 
         bytes.push(0u8);
-        bytes.extend_from_slice(&next_block_hash.as_bytes());
+        bytes.extend_from_slice(next_block_hash.as_bytes());
         bytes.extend_from_slice(&(next_block_height + 2).to_le_bytes());
 
         output_stream.write_value::<ApprovalMessage>(bytes.try_into().unwrap());
@@ -624,7 +616,7 @@ impl HashBpsInputs {
         bps: &BpsArr<ValidatorStakeVariable>,
     ) -> CryptoHashVariable {
         let mut input_stream = VariableStream::new();
-        input_stream.write::<BpsArr<ValidatorStakeVariable>>(&bps);
+        input_stream.write::<BpsArr<ValidatorStakeVariable>>(bps);
 
         let output_stream = b.hint(input_stream, self);
         output_stream.read::<CryptoHashVariable>(b)
@@ -646,17 +638,17 @@ impl<F: RichField> From<GetProof> for TransactionOrReceiptIdVariableValue<F> {
                 transaction_hash,
                 sender_id,
             } => Self {
-                is_transaction: true.into(),
+                is_transaction: true,
                 id: transaction_hash.0.into(),
-                account: pad_account_id(&sender_id).into(),
+                account: pad_account_id(&sender_id),
             },
             GetProof::Receipt {
                 receipt_id,
                 receiver_id,
             } => Self {
-                is_transaction: false.into(),
+                is_transaction: false,
                 id: receipt_id.0.into(),
-                account: pad_account_id(&receiver_id).into(),
+                account: pad_account_id(&receiver_id),
             },
         }
     }
@@ -668,7 +660,7 @@ pub fn byte_from_bool<L: PlonkParameters<D>, const D: usize>(
 ) -> ByteVariable {
     let zero = b._false();
     let mut bits = [zero; 8];
-    bits[7] = bool.into();
+    bits[7] = bool;
 
     ByteVariable::from_be_bits(bits)
 }
@@ -723,12 +715,10 @@ mod tests {
     use ::test_utils::CryptoHash;
     use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
-    use serial_test::serial;
-    use test_utils::fixture;
 
     use super::*;
     use crate::{
-        test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
+        test_utils::{builder_suite, B, PI, PO},
         variables::TransactionOrReceiptIdVariableValue,
     };
 
@@ -776,10 +766,5 @@ mod tests {
             println!("{:#?}", output.evm_read::<TransactionOrReceiptIdVariable>());
         };
         builder_suite(define, writer, assertions);
-    }
-
-    #[test]
-    fn test_encode_transaction() {
-        todo!()
     }
 }
