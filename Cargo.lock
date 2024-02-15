@@ -3216,19 +3216,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "near-light-client-succinct-operator"
-version = "0.2.0"
-dependencies = [
- "cfg-if",
- "near-light-clientx",
-]
-
-[[package]]
 name = "near-light-clientx"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "borsh",
+ "cfg-if",
  "ethers",
  "hex",
  "log",

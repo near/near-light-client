@@ -60,7 +60,6 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
     }
 }
 
-#[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
     use serial_test::serial;
@@ -70,6 +69,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_test_sync_e2e() {
         let (header, _, _) = testnet_state();
         let header = header.hash().0;
