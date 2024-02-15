@@ -554,7 +554,6 @@ mod tests {
 /// - A LOT of RAM if running in release
 ///
 /// TODO: CI for only beefy tests
-#[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
     use serial_test::serial;
@@ -567,6 +566,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_builder_test_next_bps() {
         let (header, bps, _) = testnet_state();
         let bps_hash = CryptoHash::hash_borsh(bps.clone());
@@ -609,6 +609,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_builder_test_proof_blackbox() {
         let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
@@ -635,6 +636,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_builder_test_sync_across_epoch_boundaries() {
         let (head, next_bps, next_block) = test_state();
 
@@ -659,6 +661,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_builder_test_bounded_signatures() {
         let (_, bps, next_block) = test_state();
         const BPS_AMT: usize = 15;

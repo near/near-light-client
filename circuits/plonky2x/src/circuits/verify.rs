@@ -180,7 +180,6 @@ impl<const N: usize> MergeProofHint<N> {
     }
 }
 
-#[cfg(feature = "beefy-tests")]
 #[cfg(test)]
 mod beefy_tests {
     use std::str::FromStr;
@@ -198,6 +197,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_test_verify_e2e() {
         let (header, _, _) = testnet_state();
 
@@ -262,6 +262,7 @@ mod beefy_tests {
     // TODO: ignore flag as this test will likely be overkill
     #[test]
     #[serial]
+    #[ignore]
     fn beefy_test_data_driven_verify_e2e() {
         let (header, _, _) = testnet_state();
 
