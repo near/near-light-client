@@ -74,6 +74,7 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
     circuit.verify(&proof, &inputs, &output);
 }
 
+#[allow(dead_code)]
 pub fn mock_builder_suite<F, WriteInputs, Assertions>(
     define: F,
     writer: WriteInputs,

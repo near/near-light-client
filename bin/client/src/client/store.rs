@@ -101,7 +101,6 @@ pub fn head_key() -> CryptoHash {
 
 pub mod sled {
     use ::sled::{open, transaction::TransactionError, Batch, Db, Transactional, Tree};
-    use borsh::ser::BorshSerialize as BorshSerializeExt;
     use itertools::Itertools;
 
     use super::*;
@@ -263,7 +262,7 @@ pub mod sled {
         let ref_count = old_ref
             .map(|ov| ov.to_vec())
             .and_then(|ov| u32::try_from_slice(&ov).ok())
-            .unwrap_or_else(|| 0);
+            .unwrap_or(0);
         log::debug!("Incrementing ref count for {:?}, {}", key, ref_count);
         borsh::to_vec(&(ref_count + 1)).ok()
     }

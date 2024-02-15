@@ -7,11 +7,11 @@ use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
-    JsonRpcClient, MethodCallResult,
+    JsonRpcClient,
 };
 use near_primitives::{
     block_header::BlockHeader,
-    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1},
+    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 
 use crate::prelude::*;
@@ -273,8 +273,7 @@ mod tests {
 
         let receipts = chunks
             .iter()
-            .map(|c| c.receipts.clone())
-            .flatten()
+            .flat_map(|c| c.receipts.clone())
             .map(|r| TransactionOrReceiptId::Receipt {
                 receipt_id: r.receipt_id,
                 receiver_id: r.receiver_id,
@@ -282,15 +281,14 @@ mod tests {
             .collect_vec();
         let txs = chunks
             .iter()
-            .map(|c| c.transactions.clone())
-            .flatten()
+            .flat_map(|c| c.transactions.clone())
             .map(|t| TransactionOrReceiptId::Transaction {
                 transaction_hash: t.hash,
                 sender_id: t.signer_id,
             })
             .collect_vec();
 
-        vec![receipts, txs].concat()
+        [receipts, txs].concat()
     }
 
     #[tokio::test]

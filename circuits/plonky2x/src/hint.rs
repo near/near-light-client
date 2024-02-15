@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_fetch_header() {
-        let (header, bps, nb) = test_state();
+        let (header, _, nb) = test_state();
 
         let define = |b: &mut B| {
             let header = b.read::<HeaderVariable>();

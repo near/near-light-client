@@ -1,8 +1,5 @@
-use derive_more::{AsRef, Into};
-use near_light_client_protocol::{
-    prelude::{BasicProof, Header, Itertools},
-    LightClientBlockView, Protocol, StakeInfo, ValidatorStake,
-};
+use derive_more::Into;
+use near_light_client_protocol::{prelude::Header, LightClientBlockView, ValidatorStake};
 pub use near_primitives::hash::CryptoHash;
 pub use pretty_assertions::assert_eq as pas_eq;
 pub use serde::de::DeserializeOwned;
@@ -67,7 +64,7 @@ pub fn mainnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
         .collect();
     let next = main_next();
 
-    (head.into(), bps, next.body)
+    (head, bps, next.body)
 }
 
 pub fn testnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
@@ -82,7 +79,7 @@ pub fn testnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
         .collect();
     let next = test_next();
 
-    (head.into(), bps, next.body)
+    (head, bps, next.body)
 }
 
 pub fn test_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
