@@ -34,3 +34,4 @@ jobs:
             ghcr.io/near/near-light-client/light-client:${{ github.sha }}
             ghcr.io/near/near-light-client/light-client:latest
 
+# TODO: releasing to succinct on tag
