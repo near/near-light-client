@@ -13,14 +13,12 @@ contract NearXTest is Test {
     }
 
     function testGetEncodePackedSync() public view {
-        // TODO:
         bytes32 header = hex"63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3";
         bytes memory encodedInput = abi.encodePacked(header);
         console.logBytes(encodedInput);
     }
 
     function testGetEncodePackedVerify() public {
-        // TODO:
         bytes32 header = hex"63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3";
         bytes memory txIsAccount = hex"01";
         bytes32 txId = hex"2c53bcfe871da28decc45c3437f5864568d91af6d990dbc2662f11ce44c18d79";

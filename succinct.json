@@ -5,7 +5,7 @@
             "framework": "plonky2x",
             "baseDir": ".",
             "buildCommand": "make build-sync-circuit",
-            "proveCommand": "RUST_LOG=debug ./build/sync prove input.json",
+            "proveCommand": "make prove-sync-circuit",
             "requiredArtifacts": [
                 "sync"
             ]
@@ -15,7 +15,7 @@
             "framework": "plonky2x",
             "baseDir": ".",
             "buildCommand": "make build-verify-circuit",
-            "proveCommand": "RUST_LOG=debug ./build/verify prove input.json",
+            "proveCommand": "make prove-verify-circuit",
             "requiredArtifacts": [
                 "verify"
             ]

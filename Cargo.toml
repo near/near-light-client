@@ -1,10 +1,10 @@
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "0.2.0"
+version = "0.3.0"
 
 [workspace]
-members  = [ "bin/*", "crates/*", "circuits/*" ]
+members  = [ "bin/*", "crates/*", "nearx" ]
 resolver = "2"
 
 [workspace.dependencies]
@@ -17,7 +17,7 @@ itertools         = "0.12"
 log               = "0.4"
 pretty_assertions = "1.4"
 pretty_env_logger = "0.5"
-sled              = "0.34" # TODO: maybe heavy
+sled              = "0.34" # TODO: maybe heavy, use heed instead
 thiserror         = "1.0"
 
 # Async
@@ -34,7 +34,6 @@ protobuf   = "=3.2.0"
 serde      = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 
-# TODO: upgrade
 # Near specific
 near-crypto             = "0.20"
 near-jsonrpc-client     = "0.8"

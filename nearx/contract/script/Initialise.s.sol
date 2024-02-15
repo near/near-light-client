@@ -6,6 +6,7 @@ import {NearX} from "../src/NearX.sol";
 import {Script} from "forge-std/Script.sol";
 import {DevOpsTools} from "lib/foundry-devops/src/DevOpsTools.sol";
 
+// TODO: scripts need to support multiple envs
 contract Initialise is Script {
     function setUp() public {}
 
@@ -17,6 +18,7 @@ contract Initialise is Script {
         vm.startBroadcast();
         NearX lightClient = NearX(payable(proxyAddress));
 
+        // Succinct's goerli gateway
         address initialGateway = 0x6e4f1e9eA315EBFd69d18C2DB974EEf6105FB803;
         lightClient.updateGateway(initialGateway);
 
