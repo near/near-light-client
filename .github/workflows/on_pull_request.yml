@@ -21,6 +21,7 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
   test-rust:
     name: "Test Rust"
     runs-on:
@@ -33,7 +34,7 @@ jobs:
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
       - name: "Run tests"
-        run: cargo nextest run --workspace --locked --no-default-features
+        run: cargo nextest run --workspace --locked --no-fail-fast
 
   test-beefy-proofs:
     name: "Test Beefy Proofs"
@@ -47,4 +48,18 @@ jobs:
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
       - name: "Run tests"
-        run: cargo nextest run --workspace --locked --no-default-features
+        run: cargo nextest run --workspace --locked --no-fail-fast 
+
+  test-solidity-contracts:
+    name: "Test Solidity Contracts"
+    runs-on:
+      group: beefygroup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: "Install forge"
+        run: cargo install --git https://github.com/foundry-rs/foundry --bins --locked anvil cast chisel forge
+      - name: "Run tests"
+        run: cd nearx/contract && forge test -vv
