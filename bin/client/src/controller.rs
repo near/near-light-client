@@ -1,4 +1,7 @@
+use std::{net::SocketAddr, str::FromStr};
+
 use axum::{
+    body,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -26,16 +29,15 @@ pub(crate) fn init(config: &Config, ctx: LocalActorRef<LightClient>) -> JoinHand
         .with_state(ctx.clone());
 
     let host = config.host.clone();
-    tokio::spawn(async {
-        let listener = tokio::net::TcpListener::bind(host).await.map_err(|e| {
-            log::error!("Failed to start server: {:?}", e);
-            anyhow::anyhow!(e)
-        })?;
-        println!("listening on {}", listener.local_addr().unwrap());
-        axum::serve(listener, controller).await.map_err(|e| {
-            log::error!("Failed to start server: {:?}", e);
-            anyhow::anyhow!(e)
-        })
+    tokio::spawn(async move {
+        let addr = SocketAddr::from_str(&host).map_err(|e| anyhow::anyhow!(e))?;
+        axum::Server::bind(&addr)
+            .serve(controller.into_make_service())
+            .await
+            .map_err(|e| {
+                log::error!("Failed to start server: {:?}", e);
+                anyhow::anyhow!(e)
+            })
     })
 }
 
@@ -137,7 +139,7 @@ where
     T: ToString,
 {
     fn into_response(self) -> Response {
-        let mut r = Response::new(self.0.to_string().into());
+        let mut r = Response::new(body::boxed(self.0.to_string()));
         *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         r
     }

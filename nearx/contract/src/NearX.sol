@@ -19,7 +19,7 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
     }
 
     function initialize() public initializer {
-        __Ownable_init(msg.sender); //sets owner to msg.sender
+        __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
     }
 

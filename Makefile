@@ -2,7 +2,7 @@
 -include .env
 
 TAG_PREFIX?=near
-IMAGE_TAG?=0.0.1
+IMAGE_TAG?=0.0.3
 
 docker:
 	DOCKER_BUILDKIT=1 docker build --progress=plain -t $(TAG_PREFIX)/light-client:$(IMAGE_TAG) .
@@ -16,23 +16,29 @@ test:
 beefy-test:
 	RUST_LOG=debug cargo test --workspace --ignored --release
 
-BUILDCIRCUIT := cargo build --release --bin
-MVCIRCUIT := mv -f target/release
+BUILDCIRCUIT := cargo build --release --bin near-light-clientx --features
+MVCIRCUIT := mv -f target/release/near-light-clientx
 
 build-sync-circuit:
-	$(BUILDCIRCUIT) sync --features=sync
-	$(MVCIRCUIT)/sync build/
+	$(BUILDCIRCUIT) sync
+	$(MVCIRCUIT) build/sync
 	RUST_LOG=debug ./build/sync build
 .PHONY: build-sync-circuit
 
+prove-sync-circuit:
+	RUST_LOG=debug ./build/sync prove input.json
+
 # TODO: build various parameters of NUM:BATCH, e.g 1024x64 2x1, 128x4, etc
 build-verify-circuit:
-	$(BUILDCIRCUIT) verify --features=verify
-	$(MVCIRCUIT)/verify build/
+	$(BUILDCIRCUIT) verify
+	$(MVCIRCUIT) build/verify
 	RUST_LOG=debug ./build/verify build
 .PHONY: build-verify-circuit
 
+prove-verify-circuit:
+	RUST_LOG=debug ./build/verify prove input.json
 
+# TODO: these should be configurable and need updating
 SYNC_FUNCTION_ID=0x350c2939eb7ff2185612710a2b641b4b46faab68e1e2c57b6f15e0af0674f5e9
 VERIFY_FUNCTION_ID=0x39fb2562b80725bb7538dd7d850126964e565a1a837d2d7f2a018e185b08fc0e
 ETH_RPC=https://rpc.goerli.eth.gateway.fm
@@ -72,13 +78,4 @@ verify:
 		--broadcast \
 		--verify \
 		--verifier etherscan
-
-
-# verify-contract:	
-# 	cd circuits/plonky2x/contracts/ && forge verify-contract \
-# 			--chain=5 \
-# 			--watch \
-# 			0x438634f4dF74CdD6963c750c30E3e9bf9F029838 \
-# 			src/NearX.sol:NearX
-# TODO: upgrade
 

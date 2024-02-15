@@ -1,10 +1,9 @@
 [package]
-edition  = "2021"
-name     = "near-light-clientx"
-resolver = "2"
-version  = "0.1.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description       = "A ZK light client for NEAR"
+edition.workspace = true
+name              = "near-light-clientx"
+resolver          = "2"
+version.workspace = true
 
 [dependencies]
 async-trait.workspace = true
@@ -15,7 +14,8 @@ hex.workspace         = true
 log.workspace         = true
 pretty_assertions     = "1.4.0"
 serde.workspace       = true
-# Circuits
+
+# Circuit related things
 plonky2  = { git = "https://github.com/mir-protocol/plonky2.git" }
 plonky2x = { git = "https://github.com/succinctlabs/succinctx.git" }
 
@@ -32,8 +32,9 @@ test-utils.workspace        = true
 tokio.workspace             = true
 
 [features]
-default     = [ "testnet" ]
+default = [ "testnet" ]
 
+# FIXME: these features are not great - will be replaced by a full fledged operator
 # Network features
 mainnet = [  ]
 testnet = [  ]
