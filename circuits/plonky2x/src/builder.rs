@@ -570,7 +570,7 @@ mod beefy_tests {
 
     #[test]
     #[serial]
-    fn beefy_test_next_bps() {
+    fn beefy_builder_test_next_bps() {
         let (header, bps, _) = testnet_state();
         let bps_hash = CryptoHash::hash_borsh(bps.clone());
 
@@ -612,73 +612,12 @@ mod beefy_tests {
 
     #[test]
     #[serial]
-    fn beefy_test_proof() {
+    fn beefy_builder_test_proof_blackbox() {
         let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
-        let p: BasicProof = fixture("old.json");
-        let outcome_hash = CryptoHash::hash_borsh(p.outcome_proof.to_hashes());
-
-        const OUTCOME_PROOF_AMT: usize = 2;
-        const OUTCOME_ROOT_PROOF_AMT: usize = 2;
-        const BLOCK_PROOF_AMT: usize = 26;
-
-        let define = |builder: &mut B| {
-            let proof = builder.read::<ProofVariable>();
-            let expected_outcome_root = builder.read::<CryptoHashVariable>();
-            let expected_block_root = builder.read::<CryptoHashVariable>();
-
-            // TODO: to_hashes
-            let outcome_hash = builder.constant::<CryptoHashVariable>(outcome_hash.0.into());
-            let root_matches = builder.verify_outcome(
-                &expected_outcome_root,
-                &proof.outcome_proof,
-                &outcome_hash,
-                &proof.outcome_root_proof,
-            );
-            builder.write::<BoolVariable>(root_matches);
-
-            // TODO: to_hashes
-            let block_hash =
-                builder.constant::<CryptoHashVariable>(p.block_header_lite.hash().0.into());
-            let root_matches =
-                builder.verify_block(&expected_block_root, &proof.block_proof, &block_hash);
-            builder.write::<BoolVariable>(root_matches);
-
-            let proof_verified = builder.verify(proof);
-            builder.write::<BoolVariable>(proof_verified);
-        };
-        let writer = |input: &mut PI| {
-            input.write::<ProofVariable>(
-                near_light_client_protocol::Proof::Basic {
-                    head_block_root: block_root,
-                    proof: Box::new(fixture("old.json")),
-                }
-                .into(),
-            );
-            input.write::<CryptoHashVariable>(p.block_header_lite.inner_lite.outcome_root.0.into());
-            input.write::<CryptoHashVariable>(block_root.0.clone().into());
-        };
-        let assertions = |mut output: PO| {
-            assert!(output.read::<BoolVariable>(), "outcome root matches");
-            assert!(output.read::<BoolVariable>(), "block root matches");
-            assert!(output.read::<BoolVariable>(), "proof verified");
-        };
-        builder_suite(define, writer, assertions);
-    }
-
-    #[test]
-    #[serial]
-    fn beefy_test_proof_blackbox() {
-        let block_root =
-            CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
-
-        const OUTCOME_PROOF_AMT: usize = 2;
-        const OUTCOME_ROOT_PROOF_AMT: usize = 2;
-        const BLOCK_PROOF_AMT: usize = 26;
 
         let define = |builder: &mut B| {
             let registered_proof = builder.read::<ProofVariable>();
-
             let proof_verified = builder.verify(registered_proof);
             builder.write::<BoolVariable>(proof_verified);
         };
