@@ -1,3 +1,4 @@
+# See workflow runs at https://github.com/nextest-rs/reuse-build-partition-example/actions/workflows/ci.yml.
 name: "Check PR is ready for merge"
 
 concurrency:
@@ -8,6 +9,12 @@ on:
   pull_request:
     branches:
       - master
+    # schedule:
+    #   # Run this every day at 01:00 UTC.
+    #   - cron: 0 1 * * *
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   lint:
@@ -25,12 +32,36 @@ jobs:
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features          
+          args: --all-features
+
+  build-test-artifacts:
+    name: Build test artifacts
+    runs-on: ubuntu-20.04-16core
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          # By default actions/checkout checks out a merge commit. Check out the PR head instead.
+          # https://github.com/actions/checkout#checkout-pull-request-head-commit-instead-of-merge-commit
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          cache-workspaces: |-
+            .
+      - name: "Install cargo-nextest"
+        run: cargo install cargo-nextest
+      - name: Build and archive tests
+        run: cargo nextest archive -r --workspace --archive-file nextest-archive.tar.zst --locked
+      - name: Upload archive to workflow
+        uses: actions/upload-artifact@v3
+        with:
+          name: nextest-archive
+          path: nextest-archive.tar.zst
 
   test-rust:
     name: "Test Rust"
     runs-on:
-      group: ubuntu-22.04-32core
+      group: ubuntu-22.04-8core
+    needs: build-test-artifacts
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -40,24 +71,44 @@ jobs:
             .
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
-      - name: "Run tests"
-        run: cargo nextest run --workspace --locked --no-fail-fast
-
-  test-beefy-proofs:
-    name: "Test Beefy Proofs"
-    runs-on:
-      group: ubuntu-22.04-32core
+      - name: "Run normal tests"
+        run: |
+          cargo nextest run \
+            --archive-file nextest-archive.tar.zst \
+            --no-fail-fast
+  
+  run-tests-partitioned:
+    name: "Run Beefy tests partitioned"
+    needs: build-test-artifacts
+    strategy:
+      matrix:
+        os: [ubuntu-22.04-32core, ubuntu-20.04-32core]
+        include:
+          - os: ubuntu-22.04-32core 
+            share: 1
+          - os: ubuntu-20.04-32core
+            share: 2
+    runs-on: ${{ matrix.os }} 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
         with:
           cache-workspaces: |-
             .
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
-      - name: "Run beefy tests"
-        run: cargo nextest run --workspace --locked --run-ignored ignored-only --no-fail-fast 
+      - name: Download archive
+        uses: actions/download-artifact@v3
+        with:
+          name: nextest-archive
+      - name: Run tests
+        run: |
+          cargo nextest run \
+            --run-ignored ignored-only \
+            --archive-file nextest-archive.tar.zst \
+            --partition count:${{ matrix.share }}/2
 
   test-solidity-contracts:
     name: "Test Solidity Contracts"
@@ -66,6 +117,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
         with:
           cache-workspaces: |-
@@ -79,4 +133,5 @@ jobs:
       - name: "Forge install"
         run: cd nearx/contract && forge install
       - name: "Run tests"
-        run: cd nearx/contract && forge test -vv
+        run: cd nearx/contract && forge test -vv            
+ 
