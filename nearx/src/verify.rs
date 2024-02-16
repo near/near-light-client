@@ -260,9 +260,10 @@ mod beefy_tests {
     }
 
     // TODO: ignore flag as this test will likely be overkill
-    #[test]
-    #[serial]
-    #[ignore]
+    // #[test]
+    // #[serial]
+    // #[ignore]
+    #[allow(dead_code)] // Justification: huge test, takes 36 minutes. keep for local testing
     fn beefy_test_data_driven_verify_e2e() {
         let (header, _, _) = testnet_state();
 
