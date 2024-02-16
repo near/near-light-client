@@ -1,21 +1,21 @@
-[submodule "circuits/plonky2x/contracts/forge/lib/forge-std"]
-	path = circuits/plonky2x/contracts/forge/lib/forge-std
-	url = https://github.com/foundry-rs/forge-std
 [submodule "vendor/starkyx"]
 	path = vendor/starkyx
 	url = git@github.com:succinctlabs/starkyx.git
 [submodule "vendor/succinctx"]
 	path = vendor/succinctx
 	url = git@github.com:succinctlabs/succinctx.git
-[submodule "circuits/plonky2x/verifier/lib/openzeppelin-contracts-upgradeable"]
-	path = circuits/plonky2x/verifier/lib/openzeppelin-contracts-upgradeable
-	url = https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable
-[submodule "circuits/plonky2x/verifier/lib/openzeppelin-contracts"]
-	path = circuits/plonky2x/verifier/lib/openzeppelin-contracts
+[submodule "nearx/contract/lib/openzeppelin-contracts"]
+	path = nearx/contract/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-[submodule "circuits/plonky2x/verifier/lib/foundry-devops"]
-	path = circuits/plonky2x/verifier/lib/foundry-devops
+[submodule "nearx/contract/lib/openzeppelin-contracts-upgradeable"]
+	path = nearx/contract/lib/openzeppelin-contracts-upgradeable
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable
+[submodule "nearx/contract/lib/foundry-devops"]
+	path = nearx/contract/lib/foundry-devops
 	url = https://github.com/chainaccelorg/foundry-devops
-[submodule "circuits/plonky2x/contract/lib/solidity-bytes-utils"]
-	path = circuits/plonky2x/contract/lib/solidity-bytes-utils
+[submodule "nearx/contract/lib/solidity-bytes-utils"]
+	path = nearx/contract/lib/solidity-bytes-utils
 	url = https://github.com/GNSPS/solidity-bytes-utils
+[submodule "nearx/contract/lib/forge-std"]
+	path = nearx/contract/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
