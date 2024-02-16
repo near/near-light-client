@@ -113,7 +113,7 @@ impl Handler<BatchGetProof> for LightClient {
 
 impl LightClient {
     pub fn new(config: &Config) -> Result<Self> {
-        let client = rpc::NearRpcClient::new(config.network.clone());
+        let client = rpc::NearRpcClient::new(config.network);
 
         // TODO: store selector in config
         let store = store::sled::init(config)?;
