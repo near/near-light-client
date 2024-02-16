@@ -336,6 +336,7 @@ pub(crate) mod tests {
 
     pub const BLOCK_MERKLE_ROOT: &str = "WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L";
 
+    #[allow(dead_code)]
     fn write_proof(path: &str, proof: &Proof) {
         std::fs::write(
             path.to_string().replace(".json", ".hex"),
