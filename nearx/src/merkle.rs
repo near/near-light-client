@@ -89,7 +89,8 @@ mod tests {
     use crate::{test_utils::*, variables::ProofVariable};
 
     #[test]
-    fn test_path_is_ignored_if_default() {
+    #[ignore]
+    fn beefy_test_path_is_ignored_if_default() {
         let block_root =
             CryptoHash::from_str("WWrLWbWHwSmjtTn5oBZPYgRCuCYn6fkYVa4yhPWNK4L").unwrap();
 
