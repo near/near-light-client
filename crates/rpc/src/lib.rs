@@ -232,6 +232,7 @@ mod tests {
 
     use super::*;
 
+    #[allow(dead_code)]
     async fn fetch_chunk(c: &NearRpcClient, chunk_id: &CryptoHash) -> Result<ChunkView> {
         println!("fetching chunk: {:?}", chunk_id);
         let req = methods::chunk::RpcChunkRequest {
@@ -249,6 +250,7 @@ mod tests {
             .map_err(|e| anyhow::format_err!("{:?}", e))
     }
 
+    #[allow(dead_code)]
     async fn fetch_block(c: &NearRpcClient, block_reference: BlockReference) -> Result<BlockView> {
         println!("fetching block: {:?}", block_reference);
         let req = methods::block::RpcBlockRequest { block_reference };
@@ -262,6 +264,7 @@ mod tests {
             .map_err(|e| anyhow::format_err!("{:?}", e))
     }
 
+    #[allow(dead_code)]
     async fn fetch_ids(client: &NearRpcClient, block: &BlockView) -> Vec<TransactionOrReceiptId> {
         let futs = block
             .chunks
@@ -291,8 +294,9 @@ mod tests {
         [receipts, txs].concat()
     }
 
-    // this is committed in the repo, only needed for gathering data
     // #[tokio::test]
+    // this is committed in the repo, only needed for gathering data
+    #[allow(dead_code)]
     async fn test_get_ids() {
         let client = NearRpcClient::new(Network::Testnet);
 
