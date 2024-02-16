@@ -57,7 +57,7 @@ jobs:
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
       - name: "Run tests"
-        run: cargo nextest run --workspace --locked --no-fail-fast 
+        run: cargo nextest run --workspace --locked --ignored --no-fail-fast 
 
   test-solidity-contracts:
     name: "Test Solidity Contracts"
@@ -72,5 +72,7 @@ jobs:
             .
       - name: "Install forge"
         run: cargo install --git https://github.com/foundry-rs/foundry --bins --locked anvil cast chisel forge
+      - name: "Forge install"
+        run: cd nearx/contract && forge install
       - name: "Run tests"
         run: cd nearx/contract && forge test -vv
