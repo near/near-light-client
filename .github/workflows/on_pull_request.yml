@@ -70,8 +70,12 @@ jobs:
         with:
           cache-workspaces: |-
             .
-      - name: "Install forge"
-        run: cargo install --git https://github.com/foundry-rs/foundry --bins --locked anvil cast chisel forge
+      - name: "Install Foundry"
+        uses: taiki-e/cache-cargo-install-action@v1
+        with:
+          git: https://github.com/foundry-rs/foundry
+          tool: forge
+          rev: 6ee3e88d2a48c7df48c85986e67f73cd2e6403d8
       - name: "Forge install"
         run: cd nearx/contract && forge install
       - name: "Run tests"
