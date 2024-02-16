@@ -291,7 +291,8 @@ mod tests {
         [receipts, txs].concat()
     }
 
-    #[tokio::test]
+    // this is committed in the repo, only needed for gathering data
+    // #[tokio::test]
     async fn test_get_ids() {
         let client = NearRpcClient::new(Network::Testnet);
 

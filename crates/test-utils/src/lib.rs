@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use derive_more::Into;
 use near_light_client_protocol::{prelude::Header, LightClientBlockView, ValidatorStake};
 pub use near_primitives::hash::CryptoHash;
@@ -11,9 +13,23 @@ pub struct LightClientFixture<T> {
     pub body: T,
 }
 
-pub fn fixture<T: DeserializeOwned>(file: &str) -> T {
-    serde_json::from_reader(std::fs::File::open(format!("../../fixtures/{}", file)).unwrap())
+pub fn workspace_dir() -> PathBuf {
+    let output = std::process::Command::new(env!("CARGO"))
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
         .unwrap()
+        .stdout;
+    let cargo_path = Path::new(std::str::from_utf8(&output).unwrap().trim());
+    cargo_path.parent().unwrap().to_path_buf()
+}
+
+pub fn fixture<T: DeserializeOwned>(file: &str) -> T {
+    serde_json::from_reader(
+        std::fs::File::open(format!("{}/fixtures/{}", workspace_dir().display(), file)).unwrap(),
+    )
+    .unwrap()
 }
 
 pub fn lc<T: DeserializeOwned>(file: &str) -> LightClientFixture<T> {
@@ -91,5 +107,15 @@ pub fn to_header(bv: LightClientBlockView) -> Header {
         prev_block_hash: bv.prev_block_hash,
         inner_rest_hash: bv.inner_rest_hash,
         inner_lite: bv.inner_lite,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_workspace_dir() {
+        println!("{:?}", workspace_dir());
     }
 }
