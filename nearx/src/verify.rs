@@ -192,7 +192,7 @@ mod beefy_tests {
     use super::*;
     use crate::{
         test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
-        variables::{HeaderVariableValue, TransactionOrReceiptIdVariableValue},
+        variables::TransactionOrReceiptIdVariableValue,
     };
 
     #[test]

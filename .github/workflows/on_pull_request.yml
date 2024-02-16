@@ -21,8 +21,11 @@ jobs:
         with:
           cache-workspaces: |-
             .
-      - name: Rustfmt Check
-        uses: actions-rust-lang/rustfmt@v1
+      - uses: actions-rust-lang/rustfmt@v1
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features          
 
   test-rust:
     name: "Test Rust"

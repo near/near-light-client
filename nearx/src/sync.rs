@@ -3,9 +3,7 @@ pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use crate::{
     builder::Sync,
     hint::{FetchHeaderInputs, FetchNextHeaderInputs},
-    variables::{
-        BlockHeightVariable, BuildEndorsement, CryptoHashVariable, EncodeInner, HashBpsInputs,
-    },
+    variables::{BuildEndorsement, CryptoHashVariable, EncodeInner, HashBpsInputs},
 };
 
 // TODO: lazy sync

@@ -2,6 +2,7 @@
 use near_light_clientx::plonky2x::backend::function::Plonky2xFunction;
 
 // Testnet, FIXME: this is error prone, use something else
+#[allow(dead_code)]
 const NETWORK: usize = 1;
 
 // TODO: make this use a nicer API for use by the prover.
