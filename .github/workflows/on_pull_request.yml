@@ -71,6 +71,10 @@ jobs:
             .
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
+      - name: Download archive
+        uses: actions/download-artifact@v3
+        with:
+          name: nextest-archive          
       - name: "Run normal tests"
         run: |
           cargo nextest run \
