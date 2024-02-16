@@ -320,25 +320,5 @@ mod tests {
         }
 
         std::fs::write("ids.json", serde_json::to_string(&ids).unwrap()).unwrap();
-
-        // .and_then(|b| async {
-        //     Ok(b.chunks
-        //         .iter()
-        //         .map(|c| fetch_chunk(&client, &c.chunk_hash))
-        //         .map(Box::pin)
-        //         .collect_vec())
-        // })
-        // .await;
-        // For each in 0..10
-        //
-        // get parent block
-        // get all chunks by chunk hash
-        // get all receipts
-        // get all txs
-    }
-
-    #[test]
-    fn test_rpc() {
-        todo!()
     }
 }

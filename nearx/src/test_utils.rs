@@ -60,11 +60,7 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
         _ => None,
     };
     if let Some(req) = proof_req {
-        fs::write(
-            "../../build/input.json",
-            serde_json::to_string(&req).unwrap(),
-        )
-        .unwrap();
+        fs::write("../build/input.json", serde_json::to_string(&req).unwrap()).unwrap();
     }
 
     let (proof, output) = circuit.prove(&inputs);

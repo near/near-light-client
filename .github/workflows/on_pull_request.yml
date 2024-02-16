@@ -25,7 +25,7 @@ jobs:
   test-rust:
     name: "Test Rust"
     runs-on:
-      group: ubuntu-22.04-16core
+      group: ubuntu-22.04-32core
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -39,7 +39,7 @@ jobs:
   test-beefy-proofs:
     name: "Test Beefy Proofs"
     runs-on:
-      group: beefygroup
+      group: ubuntu-22.04-32core
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -53,7 +53,7 @@ jobs:
   test-solidity-contracts:
     name: "Test Solidity Contracts"
     runs-on:
-      group: beefygroup
+      group: ubuntu-22.04-16core
     steps:
       - name: Checkout
         uses: actions/checkout@v3
