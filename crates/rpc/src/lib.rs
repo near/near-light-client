@@ -18,7 +18,7 @@ use crate::prelude::*;
 
 pub mod prelude;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum Network {
     Mainnet,
     #[default]

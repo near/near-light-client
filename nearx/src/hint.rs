@@ -37,14 +37,14 @@ impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchNextHeaderI
 
 impl FetchNextHeaderInputs {
     pub fn fetch<L: PlonkParameters<D>, const D: usize>(
-        self,
+        &self,
         b: &mut CircuitBuilder<L, D>,
         hash: &CryptoHashVariable,
     ) -> Option<BlockVariable> {
         let mut input_stream = VariableStream::new();
         input_stream.write::<CryptoHashVariable>(hash);
 
-        let output_stream = b.async_hint(input_stream, self);
+        let output_stream = b.async_hint(input_stream, self.clone());
         Some(output_stream.read::<BlockVariable>(b))
     }
 }
@@ -75,14 +75,14 @@ impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchHeaderInput
 impl FetchHeaderInputs {
     /// Fetches a header based on its known hash and witnesses the result.
     pub fn fetch<L: PlonkParameters<D>, const D: usize>(
-        self,
+        &self,
         b: &mut CircuitBuilder<L, D>,
         trusted_hash: &CryptoHashVariable,
     ) -> HeaderVariable {
         let mut input_stream = VariableStream::new();
         input_stream.write::<CryptoHashVariable>(trusted_hash);
 
-        let output_stream = b.async_hint(input_stream, self);
+        let output_stream = b.async_hint(input_stream, self.clone());
         let untrusted = output_stream.read::<HeaderVariable>(b);
         let untrusted_hash = untrusted.hash(b);
         b.assert_is_equal(*trusted_hash, untrusted_hash);
@@ -151,7 +151,7 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
 
 impl<const N: usize> FetchProofInputs<N> {
     pub fn fetch<L: PlonkParameters<D>, const D: usize>(
-        self,
+        &self,
         b: &mut CircuitBuilder<L, D>,
         head: &HeaderVariable,
         reqs: &[TransactionOrReceiptIdVariable],
@@ -162,7 +162,7 @@ impl<const N: usize> FetchProofInputs<N> {
         input_stream.write::<CryptoHashVariable>(&head.hash(b));
         input_stream.write_slice::<TransactionOrReceiptIdVariable>(reqs);
 
-        let output_stream = b.async_hint(input_stream, self);
+        let output_stream = b.async_hint(input_stream, self.clone());
         let mut inputs = vec![];
         for _ in 0..N {
             inputs.push(ProofInputVariable {
