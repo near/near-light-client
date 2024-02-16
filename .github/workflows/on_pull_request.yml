@@ -56,8 +56,8 @@ jobs:
             .
       - name: "Install cargo-nextest"
         run: cargo install cargo-nextest
-      - name: "Run tests"
-        run: cargo nextest run --workspace --locked --ignored --no-fail-fast 
+      - name: "Run beefy tests"
+        run: cargo nextest run --workspace --locked --run-ignored ignored-only --no-fail-fast 
 
   test-solidity-contracts:
     name: "Test Solidity Contracts"
