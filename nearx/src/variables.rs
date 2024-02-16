@@ -326,13 +326,23 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
             .0
             .into();
 
-        Self {
+        let variable = Self {
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
             header: block.clone().into(),
             next_bps: bps_to_variable(block.next_bps),
             approvals_after_next: block.approvals_after_next.into(),
             next_bps_hash,
-        }
+        };
+        assert_eq!(variable.next_bps.len(), NUM_BLOCK_PRODUCER_SEATS);
+        assert_eq!(
+            variable.approvals_after_next.is_active.len(),
+            NUM_BLOCK_PRODUCER_SEATS
+        );
+        assert_eq!(
+            variable.approvals_after_next.signatures.len(),
+            NUM_BLOCK_PRODUCER_SEATS
+        );
+        variable
     }
 }
 
@@ -345,7 +355,8 @@ pub struct BpsApprovals<const AMT: usize> {
 impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
     for BpsApprovalsValue<AMT, F>
 {
-    fn from(approvals: Vec<Option<Box<Signature>>>) -> Self {
+    fn from(mut approvals: Vec<Option<Box<Signature>>>) -> Self {
+        approvals.resize(AMT, None);
         let (signatures, is_active) = approvals
             .into_iter()
             .take(AMT)
