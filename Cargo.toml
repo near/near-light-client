@@ -1,7 +1,7 @@
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "0.2.0"
+version = "0.3.0"
 
 [workspace]
 members  = [ "bin/*", "crates/*", "circuits/*" ]
@@ -17,7 +17,7 @@ itertools         = "0.12"
 log               = "0.4"
 pretty_assertions = "1.4"
 pretty_env_logger = "0.5"
-sled              = "0.34" # TODO: maybe heavy
+sled              = "0.34" # TODO: maybe heavy, use heed instead
 thiserror         = "1.0"
 
 # Async
@@ -47,11 +47,18 @@ near-light-client-rpc      = { path = "crates/rpc" }
 near-light-clientx         = { path = "circuits/plonky2x" }
 test-utils                 = { path = "crates/test-utils" }
 
-#curta = { git = "https://github.com/succinctlabs/starkyx.git" }
+# Repo patches
 [patch."https://github.com/succinctlabs/starkyx.git"]
 starkyx = { git = "https://github.com/dndll/starkyx.git" }
-#starkyx = { path = "./vendor/starkyx/starkyx" }
 
 [patch."https://github.com/succinctlabs/succinctx.git"]
-#plonky2x = { path = "./vendor/succinctx/plonky2x/core" }
-plonky2x = { git = "https://github.com/dndll/succinctx.git" }
+plonky2x        = { git = "https://github.com/dndll/succinctx.git" }
+succinct-client = { git = "https://github.com/dndll/succinctx.git" }
+
+# # Vendor
+# [patch."https://github.com/succinctlabs/starkyx.git"]
+# starkyx = { path = "./vendor/starkyx/starkyx" }
+#
+# [patch."https://github.com/succinctlabs/succinctx.git"]
+# plonky2x        = { path = "./vendor/succinctx/plonky2x/core" }
+# succinct-client = { path = "../vendor/succinctx/client" }

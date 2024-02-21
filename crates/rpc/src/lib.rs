@@ -7,18 +7,18 @@ use async_trait::async_trait;
 use futures::TryFutureExt;
 use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
-    JsonRpcClient, MethodCallResult,
+    JsonRpcClient,
 };
 use near_primitives::{
     block_header::BlockHeader,
-    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView, ValidatorStakeViewV1},
+    views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 
 use crate::prelude::*;
 
 pub mod prelude;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum Network {
     Mainnet,
     #[default]
@@ -232,6 +232,7 @@ mod tests {
 
     use super::*;
 
+    #[allow(dead_code)]
     async fn fetch_chunk(c: &NearRpcClient, chunk_id: &CryptoHash) -> Result<ChunkView> {
         println!("fetching chunk: {:?}", chunk_id);
         let req = methods::chunk::RpcChunkRequest {
@@ -249,6 +250,7 @@ mod tests {
             .map_err(|e| anyhow::format_err!("{:?}", e))
     }
 
+    #[allow(dead_code)]
     async fn fetch_block(c: &NearRpcClient, block_reference: BlockReference) -> Result<BlockView> {
         println!("fetching block: {:?}", block_reference);
         let req = methods::block::RpcBlockRequest { block_reference };
@@ -262,6 +264,7 @@ mod tests {
             .map_err(|e| anyhow::format_err!("{:?}", e))
     }
 
+    #[allow(dead_code)]
     async fn fetch_ids(client: &NearRpcClient, block: &BlockView) -> Vec<TransactionOrReceiptId> {
         let futs = block
             .chunks
@@ -273,8 +276,7 @@ mod tests {
 
         let receipts = chunks
             .iter()
-            .map(|c| c.receipts.clone())
-            .flatten()
+            .flat_map(|c| c.receipts.clone())
             .map(|r| TransactionOrReceiptId::Receipt {
                 receipt_id: r.receipt_id,
                 receiver_id: r.receiver_id,
@@ -282,18 +284,19 @@ mod tests {
             .collect_vec();
         let txs = chunks
             .iter()
-            .map(|c| c.transactions.clone())
-            .flatten()
+            .flat_map(|c| c.transactions.clone())
             .map(|t| TransactionOrReceiptId::Transaction {
                 transaction_hash: t.hash,
                 sender_id: t.signer_id,
             })
             .collect_vec();
 
-        vec![receipts, txs].concat()
+        [receipts, txs].concat()
     }
 
-    #[tokio::test]
+    // #[tokio::test]
+    // this is committed in the repo, only needed for gathering data
+    #[allow(dead_code)]
     async fn test_get_ids() {
         let client = NearRpcClient::new(Network::Testnet);
 
@@ -322,25 +325,5 @@ mod tests {
         }
 
         std::fs::write("ids.json", serde_json::to_string(&ids).unwrap()).unwrap();
-
-        // .and_then(|b| async {
-        //     Ok(b.chunks
-        //         .iter()
-        //         .map(|c| fetch_chunk(&client, &c.chunk_hash))
-        //         .map(Box::pin)
-        //         .collect_vec())
-        // })
-        // .await;
-        // For each in 0..10
-        //
-        // get parent block
-        // get all chunks by chunk hash
-        // get all receipts
-        // get all txs
-    }
-
-    #[test]
-    fn test_rpc() {
-        todo!()
     }
 }

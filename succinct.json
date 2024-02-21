@@ -11,11 +11,18 @@
             ]
         },
         {
+            "name": "sync2",
+            "framework": "plonky2x",
+            "baseDir": ".",
+            "buildCommand": "scripts/build-circuit.sh sync",
+            "proveCommand": "RUST_LOG=debug ./build/sync prove input.json"
+        },
+        {
             "name": "verify",
             "framework": "plonky2x",
             "baseDir": ".",
-            "buildCommand": "make build-verify-circuit",
-            "proveCommand": "RUST_LOG=debug ./build/verify prove input.json",
+            "buildCommand": "scripts/build-circuit.sh verify",
+            "proveCommand": "scripts/prove-circuit.sh verify",
             "requiredArtifacts": [
                 "verify"
             ]

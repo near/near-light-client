@@ -1,3 +1,4 @@
+use config::NUM_BLOCK_PRODUCER_SEATS;
 use error::Error;
 pub use merkle_util::*;
 pub use near_crypto::{ED25519PublicKey, PublicKey, Signature};
@@ -157,15 +158,15 @@ impl Protocol {
     ) -> bool {
         let outcome_root = compute_root_from_path(outcome_proof, *outcome_hash);
         #[cfg(test)]
-        println!("outcome_root: {:?}", hex::encode(&outcome_root));
+        println!("outcome_root: {:?}", hex::encode(outcome_root));
 
         let leaf = CryptoHash::hash_borsh(outcome_root);
         #[cfg(test)]
-        println!("leaf: {:?}", hex::encode(&leaf));
+        println!("leaf: {:?}", hex::encode(leaf));
 
         let outcome_root = compute_root_from_path(outcome_root_proof, leaf);
         #[cfg(test)]
-        println!("outcome_root: {:?}", hex::encode(&outcome_root));
+        println!("outcome_root: {:?}", hex::encode(outcome_root));
         log::debug!("outcome_root: {:?}", outcome_root);
 
         &outcome_root == expected_outcome_root
@@ -253,6 +254,7 @@ impl Protocol {
         signatures
             .iter()
             .zip(epoch_bps.iter())
+            .take(NUM_BLOCK_PRODUCER_SEATS)
             .fold((0, 0), |(total_stake, approved_stake), (sig, vs)| {
                 let pk = vs.public_key();
                 let stake = vs.stake();
@@ -468,7 +470,7 @@ mod tests {
             &approval_message.unwrap(),
         );
 
-        assert_eq!((total, approved), (512915271547861520119028536348929, 0));
+        assert_eq!((total, approved), (440511369730158962073902098744970, 0));
     }
 
     #[test]
@@ -486,8 +488,8 @@ mod tests {
         assert_eq!(
             (total, approved),
             (
-                512915271547861520119028536348929,
-                345140782903867823005444871054881
+                440511369730158962073902098744970,
+                296239000750863364078617965755968
             )
         );
 
@@ -551,13 +553,5 @@ mod tests {
             &p.block_header_lite.inner_lite.outcome_root,
         );
         assert!(root_matches);
-    }
-
-    // FIXME: Missed a part of LC spec regarding BPS handover, only the MAX_SEATS
-    // need to be taken TODO: change epoch_bps to only store MAX_SEATS and then
-    // for next
-    #[test]
-    fn test_enough_stake_in_next_epoch_not_this() {
-        todo!();
     }
 }
