@@ -17,8 +17,8 @@ path              = "src/main.rs"
 required-features = [ "verify" ]
 
 [dependencies]
-cfg-if                       = "1.0.0"
-near-light-clientx.workspace = true
+cfg-if             = "1.0.0"
+near-light-clientx = { path = "../../circuits/plonky2x", package = "near-light-clientxold" }
 
 [features]
 default = [ "testnet" ]

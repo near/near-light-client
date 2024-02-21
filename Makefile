@@ -11,6 +11,7 @@ BUILDCIRCUIT := cargo build --release --bin
 MVCIRCUIT := mv -f target/release
 
 build-sync-circuit:
+	rm -rf build/sync
 	$(BUILDCIRCUIT) sync --features=sync
 	$(MVCIRCUIT)/sync build/
 	RUST_LOG=debug ./build/sync build

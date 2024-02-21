@@ -1,0 +1,45 @@
+[package]
+description       = "A ZK light client for NEAR"
+edition.workspace = true
+name              = "near-light-clientx"
+resolver          = "2"
+version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+borsh.workspace       = true
+cfg-if                = "1.0.0"
+ethers                = "2.0.11"
+hex.workspace         = true
+log.workspace         = true
+pretty_assertions     = "1.4.0"
+serde.workspace       = true
+
+# Circuit related things
+plonky2         = { git = "https://github.com/mir-protocol/plonky2.git" }
+plonky2x        = { git = "https://github.com/succinctlabs/succinctx.git" }
+succinct-client = { git = "https://github.com/succinctlabs/succinctx.git" }
+
+near-light-client-protocol.workspace = true
+near-light-client-rpc.workspace      = true
+
+[dev-dependencies]
+borsh.workspace             = true
+near-primitives.workspace   = true
+pretty_env_logger.workspace = true
+serde_json.workspace        = true
+serial_test                 = "3"
+test-utils.workspace        = true
+tokio.workspace             = true
+
+[features]
+default = [ "testnet" ]
+
+# FIXME: these features are not great - will be replaced by a full fledged operator
+# Network features
+mainnet = [  ]
+testnet = [  ]
+
+# Circuit features
+sync   = [  ]
+verify = [  ]
