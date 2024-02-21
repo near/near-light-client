@@ -1,5 +1,5 @@
 .EXPORT_ALL_VARIABLES:
-include .env
+-include .env
 
 TAG_PREFIX?=near
 IMAGE_TAG?=0.0.1

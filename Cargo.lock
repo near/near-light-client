@@ -1103,25 +1103,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "curta"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "curve25519-dalek",
- "env_logger 0.9.3",
- "hex",
- "itertools 0.10.5",
- "log",
- "num",
- "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=d2598bd)",
- "plonky2_maybe_rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand 0.8.5",
- "serde",
- "subtle-encoding",
-]
-
-[[package]]
 name = "curve25519-dalek"
 version = "4.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4179,6 +4160,7 @@ source = "git+https://github.com/mir-protocol/plonky2.git#b600142cd454b95eba403f
 [[package]]
 name = "plonky2x"
 version = "0.1.0"
+source = "git+https://github.com/dndll/succinctx.git#4e539f2ea4a42cedcd0b056346ef8009cc24f619"
 dependencies = [
  "anyhow",
  "array-macro",
@@ -4187,7 +4169,6 @@ dependencies = [
  "base64 0.13.1",
  "bincode",
  "clap",
- "curta",
  "curve25519-dalek",
  "digest 0.10.7",
  "dotenv",
@@ -4212,6 +4193,7 @@ dependencies = [
  "serde_with",
  "sha2",
  "sha256",
+ "starkyx",
  "tokio",
  "tracing",
  "uuid 1.7.0",
@@ -4220,6 +4202,7 @@ dependencies = [
 [[package]]
 name = "plonky2x-derive"
 version = "0.1.0"
+source = "git+https://github.com/dndll/succinctx.git#4e539f2ea4a42cedcd0b056346ef8009cc24f619"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5466,6 +5449,26 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "starkyx"
+version = "0.1.0"
+source = "git+https://github.com/dndll/starkyx.git#80604accb5f6a287e31f945e4e923c3d0e1a7832"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "curve25519-dalek",
+ "env_logger 0.9.3",
+ "hex",
+ "itertools 0.10.5",
+ "log",
+ "num",
+ "plonky2 0.1.4 (git+https://github.com/mir-protocol/plonky2.git?rev=d2598bd)",
+ "plonky2_maybe_rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.8.5",
+ "serde",
+ "subtle-encoding",
 ]
 
 [[package]]
@@ -6862,8 +6865,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "curta"
-version = "0.1.0"
-source = "git+https://github.com/dndll/starkyx.git#7f676e81dcf13393d9ca3bb825bf8e2a7c046cba"
