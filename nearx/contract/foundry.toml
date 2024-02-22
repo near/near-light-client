@@ -1,8 +1,12 @@
 [profile.default]
 fs_permissions = [ { access = "read", path = "./broadcast" } ]
-libs           = [ "lib" ]
-optimizer      = true
-optimizer-runs = 1_000_000
-out            = "out"
-remappings     = [ "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts", "@openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts" ]
-src            = "src"
+libs = [ "lib" ]
+optimizer = false # This was breaking verification for some reason
+optimizer-runs = 100_000
+out = "out"
+remappings = [
+  "forge-std=lib/forge-std/src",
+  "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts",
+  "@openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts",
+]
+src = "src"

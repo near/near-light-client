@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -9,11 +9,7 @@ import {INearX, TransactionOrReceiptId, ProofVerificationResult, encodePackedIds
 
 /// @notice The NearX contract is a light client for Near.
 contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
-    uint32 public constant DEFAULT_GAS_LIMIT = 1000000;
-
-    /// @notice The address of the gateway contract.
-    address public gateway;
-
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -28,6 +24,11 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         override
         onlyOwner
     {}
+
+    uint32 public constant DEFAULT_GAS_LIMIT = 1000000;
+
+    /// @notice The address of the gateway contract.
+    address public gateway;
 
     /// @notice Sync function id.
     bytes32 public syncFunctionId;
@@ -87,6 +88,7 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
+        // TODO: this does mean we trust the gateway, potentially we add a check here
 
         bytes32 targetHeader = abi.decode(_output, (bytes32));
 
