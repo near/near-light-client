@@ -1,0 +1,28 @@
+meta {
+  name: Get Transaction
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "tx",
+    "params": [
+      "{{id}}",
+      "{{account}}"
+    ]
+  }
+}
+
+vars:pre-request {
+  id: 5RVk6BWsHVTSzUqfwdzSuZ8LYr9uQUbzRNqu3qvnn3nr
+  account: throwawaykey.testnet
+}

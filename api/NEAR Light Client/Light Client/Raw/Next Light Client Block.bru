@@ -1,0 +1,26 @@
+meta {
+  name: Next Light Client Block
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "next_light_client_block",
+    "params": {
+      "last_block_hash": "{{id}}"
+    }
+  }
+}
+
+vars:pre-request {
+  id: 6taaeb6h2uJcuUvvmwXpYgagYvyHsFanWhm2ziGGHCff
+}

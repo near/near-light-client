@@ -1,0 +1,24 @@
+meta {
+  name: Proof (Transaction)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{lightClientBaseUrl}}/proof
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "type": "transaction",
+    "transaction_hash": "{{id}}",
+    "sender_id": "{{account}}"
+  }
+}
+
+vars:pre-request {
+  id: FN871oebubEEvfoBN4G8qojWLk76eidQq1PThEENYz1g
+  account: cdk.topgunbakugo.testnet
+}

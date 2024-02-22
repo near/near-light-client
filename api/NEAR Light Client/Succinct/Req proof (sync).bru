@@ -1,0 +1,36 @@
+meta {
+  name: Req proof (sync)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{succintBaseUrl}}/proof/new
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{succintAuthToken}}
+}
+
+body:json {
+  {
+    "type": "req_bytes",
+    "releaseId": "{{release_id}}",
+    "parentId": null,
+    "files": null,
+    "data": {
+      "input": "0x{{trusted_header_hash}}"
+    }
+  }
+}
+
+vars:pre-request {
+  release_id: 1cde66c3-46df-4aab-8409-4cbb97abee1c
+  trusted_header_hash: 63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3
+}
+
+vars:post-response {
+  proof_id: res.body.proof_id
+}

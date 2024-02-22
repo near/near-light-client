@@ -1,0 +1,26 @@
+meta {
+  name: Get Chunk
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "chunk",
+    "params": {
+      "chunk_id": "{{id}}"
+    }
+  }
+}
+
+vars:pre-request {
+  id: 9tefhCk5v2nCQtuuBcPGPnec29rs8DR2V6jDZdcr3kW2
+}

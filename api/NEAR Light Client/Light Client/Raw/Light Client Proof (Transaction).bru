@@ -1,0 +1,31 @@
+meta {
+  name: Light Client Proof (Transaction)
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "EXPERIMENTAL_light_client_proof",
+    "params": {
+      "type": "receipt",
+      "receipt_id": "{{id}}",
+      "receiver_id": "{{account}}",
+      "light_client_head": "{{head}}"
+    }
+  }
+}
+
+vars:pre-request {
+  id: JBd3Qshy25seDyeVnVZGCbd6Y1HTtM2BeApzJp8P9HSn
+  account: woebegone-hair.testnet
+  head: HZn8qvXp21xc9ztwXWhKJLUB67yrx1LfUzzLtRbE1Wdu
+}
