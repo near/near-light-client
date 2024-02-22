@@ -602,6 +602,7 @@ pub struct HashBpsInputs;
 impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
         let bps = input_stream.read_value::<BpsArr<ValidatorStakeVariable>>();
+        // TODO: if we use a bitmask we wont need default checks
         let default_validator =
             ValidatorStakeVariableValue::<<L as PlonkParameters<D>>::Field>::default();
 
@@ -635,6 +636,14 @@ impl HashBpsInputs {
 }
 
 // TODO: EVM these, maybe macro?
+// TODO: try to optimise the size here, since this directly affects calldata on
+// Eth, limiting queue size.
+// What if we take it in the circuit, but pad/normalise in solidity at the last
+// ACCOUNT_DATA_SEPARATOR, allowing less than MAX_LEN requests at the calldata
+// side.
+// Also, for DA, if we only did receipts then we can preconfigure the receiver
+// to a configurable contract, this would emit 64 bytes from calldata, roughly
+// 2/3 of the request size.
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct TransactionOrReceiptIdVariable {
     pub is_transaction: BoolVariable,
