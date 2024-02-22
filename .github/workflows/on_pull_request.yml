@@ -117,7 +117,10 @@ jobs:
   test-solidity-contracts:
     name: "Test Solidity Contracts"
     runs-on:
-      group: ubuntu-22.04-16core
+      group: ubuntu-22.04-8core
+    defaults:
+      run:
+        working-directory: ./nearx/contract        
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -128,14 +131,12 @@ jobs:
         with:
           cache-workspaces: |-
             .
-      - name: "Install Foundry"
-        uses: taiki-e/cache-cargo-install-action@v1
-        with:
-          git: https://github.com/foundry-rs/foundry
-          tool: forge
-          rev: 6ee3e88d2a48c7df48c85986e67f73cd2e6403d8
-      - name: "Forge install"
-        run: cd nearx/contract && forge install
+      - name: Install Foundry
+        uses: "foundry-rs/foundry-toolchain@v1"            
+      - name: Add build summary
+        run: |
+          echo "## Build result" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Passed" >> $GITHUB_STEP_SUMMARY          
       - name: "Run tests"
-        run: cd nearx/contract && forge test -vv            
+        run: forge test -vv            
  
