@@ -48,7 +48,9 @@ jobs:
           cache-workspaces: |-
             .
       - name: "Install cargo-nextest"
-        run: cargo install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest        
       - name: Build and archive tests
         run: cargo nextest archive -r --workspace --archive-file nextest-archive.tar.zst --locked
       - name: Upload archive to workflow
@@ -70,7 +72,9 @@ jobs:
           cache-workspaces: |-
             .
       - name: "Install cargo-nextest"
-        run: cargo install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest        
       - name: Download archive
         uses: actions/download-artifact@v3
         with:
@@ -102,7 +106,9 @@ jobs:
           cache-workspaces: |-
             .
       - name: "Install cargo-nextest"
-        run: cargo install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest        
       - name: Download archive
         uses: actions/download-artifact@v3
         with:
