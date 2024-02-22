@@ -4,7 +4,7 @@
             "name": "sync",
             "framework": "plonky2x",
             "baseDir": ".",
-            "buildCommand": "make build-sync-circuit",
+            "buildCommand": "scripts/build-circuit.sh sync",
             "proveCommand": "RUST_LOG=debug ./build/sync prove input.json",
             "requiredArtifacts": [
                 "sync"
@@ -14,7 +14,7 @@
             "name": "verify",
             "framework": "plonky2x",
             "baseDir": ".",
-            "buildCommand": "make build-verify-circuit",
+            "buildCommand": "scripts/build-circuit.sh verify",
             "proveCommand": "RUST_LOG=debug ./build/verify prove input.json",
             "requiredArtifacts": [
                 "verify"
