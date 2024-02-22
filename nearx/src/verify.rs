@@ -45,6 +45,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         // Init a default result for N
         let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
         let _false = b._false();
+        // TODO: Introduce some active bitmask here to avoid the need for defaulting
         let default = ProofVerificationResultVariable {
             id: zero,
             result: _false,
@@ -59,6 +60,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
 
                 // TODO[Optimisation]: could parallelise these
                 for ProofInputVariable { id, proof } in proofs.data {
+                    // TODO: default identifiers should be ignored here:
                     let result = b.verify(proof);
                     results.push(ProofVerificationResultVariable { id, result });
                 }

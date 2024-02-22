@@ -24,6 +24,8 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
         let fetch_header = FetchHeaderInputs(network);
         let fetch_next_header = FetchNextHeaderInputs(network);
 
+        // TODO: we do need to be defensive to ensure that this is actually the trusted
+        // header hash, do not allow anybody to provide this input.
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
 
         // This is a very interesting trick to be able to get the BPS for the next epoch
