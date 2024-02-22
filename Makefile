@@ -16,27 +16,6 @@ test:
 beefy-test:
 	RUST_LOG=debug cargo test --workspace --ignored --release
 
-BUILDCIRCUIT := cargo build --release --bin near-light-clientx --features
-MVCIRCUIT := mv -f target/release/near-light-clientx
-
-build-sync-circuit:
-	$(BUILDCIRCUIT) sync
-	$(MVCIRCUIT) build/sync
-	RUST_LOG=debug ./build/sync build
-.PHONY: build-sync-circuit
-
-prove-sync-circuit:
-	RUST_LOG=debug ./build/sync prove input.json
-
-# TODO: build various parameters of NUM:BATCH, e.g 1024x64 2x1, 128x4, etc
-build-verify-circuit:
-	$(BUILDCIRCUIT) verify
-	$(MVCIRCUIT) build/verify
-	RUST_LOG=debug ./build/verify build
-.PHONY: build-verify-circuit
-
-prove-verify-circuit:
-	RUST_LOG=debug ./build/verify prove input.json
 
 # TODO: these should be configurable and need updating
 SYNC_FUNCTION_ID=0x350c2939eb7ff2185612710a2b641b4b46faab68e1e2c57b6f15e0af0674f5e9
