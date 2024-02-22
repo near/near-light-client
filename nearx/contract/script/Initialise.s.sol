@@ -19,7 +19,7 @@ contract Initialise is Script {
         NearX lightClient = NearX(payable(proxyAddress));
 
         // Succinct's goerli gateway
-        address initialGateway = 0x6e4f1e9eA315EBFd69d18C2DB974EEf6105FB803;
+        address initialGateway = vm.envAddress("GATEWAY_ID");
         lightClient.updateGateway(initialGateway);
 
         bytes32 syncFunctionId = vm.envBytes32("SYNC_FUNCTION_ID");

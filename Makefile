@@ -16,45 +16,28 @@ test:
 beefy-test:
 	RUST_LOG=debug cargo test --workspace --ignored --release
 
-
 # TODO: these should be configurable and need updating
-SYNC_FUNCTION_ID=0x350c2939eb7ff2185612710a2b641b4b46faab68e1e2c57b6f15e0af0674f5e9
-VERIFY_FUNCTION_ID=0x39fb2562b80725bb7538dd7d850126964e565a1a837d2d7f2a018e185b08fc0e
-ETH_RPC=https://rpc.goerli.eth.gateway.fm
+SYNC_FUNCTION_ID=0x38a03ba7ecace39a1c7315d798cc9689418eceba384e154c01d6e2897bf000a9
+VERIFY_FUNCTION_ID=0x76918ea14fc7b8d8e4919c970be635e1d0ed57576771cdc1f6fa581bce7fd418
+GATEWAY_ID=0x6c7a05e0ae641c6559fd76ac56641778b6ecd776
 NEAR_CHECKPOINT_HEADER_HASH=0x63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3
+ETH_RPC=https://rpc.goerli.eth.gateway.fm
 CHAIN_ID=5
-CD_CONTRACTS=cd ./circuits/plonky2x/contract
+
+FORGE=cd ./nearx/contract && forge
+FORGEREST= --rpc-url $(ETH_RPC) --private-key $$ETH_PRIVATE_KEY --broadcast --verify --verifier etherscan -vv
 
 build-contracts:
-	$(CD_CONTRACTS) && forge build
+	$(FORGE) build
 
 deploy: build-contracts
-	$(CD_CONTRACTS) && forge script Deploy \
-		--rpc-url $(ETH_RPC) \
-		--private-key $$ETH_PRIVATE_KEY \
-		--broadcast \
-		--verify \
-		--verifier etherscan
+	$(FORGE) script Deploy $(FORGEREST)
 
 initialise: 
-	$(CD_CONTRACTS) && forge script Initialise \
-		--rpc-url $(ETH_RPC) \
-		--private-key $$ETH_PRIVATE_KEY \
-		--broadcast \
-		--verify \
-		--verifier etherscan
-upgrade:
-	$(CD_CONTRACTS) && forge script Upgrade \
-		--rpc-url $(ETH_RPC) \
-		--private-key $$ETH_PRIVATE_KEY \
-		--broadcast \
-		--verify \
-		--verifier etherscan
-verify:
-	$(CD_CONTRACTS) && forge script Verify \
-		--rpc-url $(ETH_RPC) \
-		--private-key $$ETH_PRIVATE_KEY \
-		--broadcast \
-		--verify \
-		--verifier etherscan
+	$(FORGE) script Initialise $(FORGEREST)
 
+upgrade:
+	$(FORGE) script Upgrade $(FORGEREST)
+
+verify:
+	$(FORGE) script Verify $(FORGEREST)

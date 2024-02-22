@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {DevOpsTools} from "lib/foundry-devops/src/DevOpsTools.sol";
 import {NearX, TransactionOrReceiptId} from "../src/NearX.sol";
 
+// TODO: refactor for 128, taking the input fixture
 contract Verify is Script {
     function run() external {
         address proxyAddress = DevOpsTools.get_most_recent_deployment(
