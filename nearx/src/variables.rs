@@ -1,4 +1,5 @@
 use ethers::types::U256;
+use log::{debug, trace};
 use near_light_client_protocol::{
     config::{ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS},
     prelude::{AccountId, CryptoHash, Header, Itertools},
@@ -77,7 +78,7 @@ impl EvmVariable for HeaderVariable {
         bytes.extend_from_slice(&self.inner_rest_hash.encode(builder));
         bytes.extend_from_slice(&self.inner_lite.encode(builder));
         assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
-        log::debug!("encoded header {:?}", bytes.len());
+        debug!("encoded header {:?}", bytes.len());
         bytes
     }
 
@@ -106,7 +107,7 @@ impl EvmVariable for HeaderVariable {
         ));
         bytes.extend_from_slice(&HeaderInnerVariable::encode_value::<F>(value.inner_lite));
         assert!(bytes.len() == 64 + INNER_ENCODED_LEN);
-        log::debug!("encoded header value {:?}", bytes.len());
+        debug!("encoded header value {:?}", bytes.len());
         bytes
     }
 
@@ -196,7 +197,7 @@ impl EvmVariable for HeaderInnerVariable {
         bytes.extend_from_slice(&self.timestamp.encode(builder));
         bytes.extend_from_slice(&self.next_bp_hash.encode(builder));
         bytes.extend_from_slice(&self.block_merkle_root.encode(builder));
-        log::debug!("encoded inner: {:?}", bytes.len());
+        debug!("encoded inner: {:?}", bytes.len());
         assert_eq!(bytes.len(), INNER_ENCODED_LEN);
         bytes
     }
@@ -240,7 +241,7 @@ impl EvmVariable for HeaderInnerVariable {
         bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(
             value.block_merkle_root,
         ));
-        log::debug!("encoded inner value: {:?}", bytes.len());
+        debug!("encoded inner value: {:?}", bytes.len());
         assert_eq!(bytes.len(), INNER_ENCODED_LEN);
         bytes
     }
@@ -430,7 +431,7 @@ pub(crate) fn normalise_account_id<F: RichField>(
         .split(|x| *x == ACCOUNT_ID_PADDING_BYTE)
         .collect_vec()[0];
     let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
-    log::trace!("account id: {}", account_str);
+    trace!("account id: {}", account_str);
     account_str.parse().expect("invalid account id")
 }
 
@@ -611,9 +612,9 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
             .filter(|x| x.account_id != default_validator.account_id)
             .map(Into::<ValidatorStakeView>::into)
             .collect_vec();
-        log::debug!("Bps to hash: {:#?}", bps);
+        trace!("Bps to hash: {:#?}", bps);
         let hash = CryptoHash::hash_borsh(bps);
-        log::debug!("Hash: {:#?}", hash);
+        debug!("Hash: {:#?}", hash);
 
         // TODO: figure out how to hash this in circuit
         // It's non trivial because the account id is padded to the max len

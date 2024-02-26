@@ -25,8 +25,7 @@ pub fn builder_suite<F, WriteInputs, Assertions>(
     WriteInputs: FnOnce(&mut PI),
     Assertions: FnOnce(PO),
 {
-    pretty_env_logger::try_init().unwrap_or_default();
-
+    logger();
     let mut builder = B::new();
     define(&mut builder);
 
