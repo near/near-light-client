@@ -329,7 +329,7 @@ pub fn verify_proof(proof: Proof) -> bool {
 pub(crate) mod tests {
     use std::str::FromStr;
 
-    use test_utils::fixture;
+    use test_utils::{fixture, logger};
 
     use super::*;
     use crate::merkle_util::{compute_root_from_path, compute_root_from_path_and_item};
@@ -491,7 +491,7 @@ pub(crate) mod tests {
 
     #[test]
     fn batch_proofs() {
-        let _ = pretty_env_logger::try_init();
+        logger();
         let p = fixture("batch.json");
         assert!(verify_proof(p));
     }

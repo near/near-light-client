@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use log::debug;
 use near_light_client_protocol::{prelude::CryptoHash, Proof};
 use near_light_client_rpc::{prelude::GetProof, LightClientRpc, NearRpcClient, Network};
 use plonky2x::{frontend::hint::asynchronous::hint::AsyncHint, prelude::*};
@@ -137,10 +138,9 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
                 )
             })
             .collect::<HashMap<CryptoHash, Proof>>();
+        debug!("Fetched {} proofs", proofs.len());
 
         assert_eq!(proofs.len(), B, "Invalid number of proofs");
-
-        log::debug!("Fetched {} proofs", proofs.len());
 
         for (k, p) in proofs.into_iter() {
             output_stream.write_value::<CryptoHashVariable>(k.0.into());
