@@ -73,7 +73,7 @@ mod beefy_tests {
     #[test]
     #[serial]
     #[ignore]
-    fn beefy_test_sync_e2e() {
+    fn sync_e2e() {
         let (header, _, _) = testnet_state();
         let header = header.hash().0;
 
