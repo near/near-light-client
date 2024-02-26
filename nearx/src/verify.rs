@@ -32,8 +32,14 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher:
             AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
+        // TODO: this is trusted, we should join the result of this to assert that the
+        // light client did know about this header OR ensure in the circuit we knew
+        // about this information, the contract should emit an event for the height so
+        // it's easily queryable
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
         let head = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
+        // TODO: check that the head.block_height was once known to the verifier if not
+        // the checkpoint header
 
         let mut ids = vec![];
         for _ in 0..N {
@@ -75,6 +81,8 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             |_, l, r, b| MergeProofHint::<N>.merge(b, &l, &r),
         );
         b.watch_slice(&output.data, "output");
+
+        // TODO: write the trusted_header_hash here for verification onchain
         for r in output.data {
             b.evm_write::<CryptoHashVariable>(r.id);
             let passed = byte_from_bool(b, r.result);
@@ -200,7 +208,7 @@ mod beefy_tests {
     #[test]
     #[serial]
     #[ignore]
-    fn beefy_test_verify_e2e() {
+    fn verify_e2e_2x1() {
         let (header, _, _) = testnet_state();
 
         // TODO: test many configs of these
@@ -266,7 +274,7 @@ mod beefy_tests {
     // #[serial]
     // #[ignore]
     #[allow(dead_code)] // Justification: huge test, takes 36 minutes. keep for local testing
-    fn beefy_test_data_driven_verify_e2e() {
+    fn verify_e2e_128x4() {
         let (header, _, _) = testnet_state();
 
         const AMT: usize = 128;
