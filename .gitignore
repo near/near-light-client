@@ -22,8 +22,5 @@ nearx/contract/lib
 **broadcast/**/dry-run/
 nearx/contract/broadcast
 
-# Docs
-docs/
-
 # Dotenv file
 .env
