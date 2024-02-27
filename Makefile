@@ -16,9 +16,11 @@ test:
 beefy-test:
 	RUST_LOG=debug cargo test --workspace --ignored --release
 
-# TODO: these should be configurable and need updating
-SYNC_FUNCTION_ID=0x38a03ba7ecace39a1c7315d798cc9689418eceba384e154c01d6e2897bf000a9
-VERIFY_FUNCTION_ID=0x76918ea14fc7b8d8e4919c970be635e1d0ed57576771cdc1f6fa581bce7fd418
+# Verifiers from v.0.0.3-rc.1 https://alpha.succinct.xyz/near/near-light-client/deployments
+SYNC_FUNCTION_ID=0xcf00114b5be928c0b55f7deb6ab988d9ab9f8a54d96443ed37d90bc8c636f89c
+VERIFY_FUNCTION_ID=0x62dc66a6609f5884933c20c85b6792c5702e828d3a7f315deddbe6454dd70b3c
+
+# Succinct gateway containing latest verifierss
 GATEWAY_ID=0x6c7a05e0ae641c6559fd76ac56641778b6ecd776
 NEAR_CHECKPOINT_HEADER_HASH=0x63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3
 ETH_RPC=https://rpc.goerli.eth.gateway.fm
@@ -39,5 +41,8 @@ initialise:
 upgrade:
 	$(FORGE) script Upgrade $(FORGEREST)
 
-verify:
-	$(FORGE) script Verify $(FORGEREST)
+request-sync:
+	$(FORGE) script RequestSync $(FORGEREST)
+
+request-verify:
+	$(FORGE) script RequestVerify $(FORGEREST)
