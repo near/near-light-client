@@ -125,7 +125,14 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
-        ProofVerificationResult[] memory results = decodePackedResults(_output);
-        emit VerifyResult(results);
+        emit VerifyResult(_output);
+    }
+
+    function decodeResults(bytes memory _output)
+        external
+        view
+        returns (ProofVerificationResult[] memory)
+    {
+        return decodePackedResults(_output);
     }
 }
