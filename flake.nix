@@ -39,6 +39,7 @@
 
             nodejs
             solc
+            slither-analyzer
 
           ];
           buildInputs = with pkgs; [
