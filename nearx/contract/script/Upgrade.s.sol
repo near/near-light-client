@@ -10,22 +10,11 @@ contract Upgrade is Script {
     function run() external returns (address) {
         address mostRecentlyDeployedProxy = DevOpsTools
             .get_most_recent_deployment("ERC1967Proxy", block.chainid);
-        vm.startBroadcast();
 
+        vm.startBroadcast();
         NearX newAddress = new NearX();
 
-        vm.stopBroadcast();
-        address proxy = upgrade(mostRecentlyDeployedProxy, address(newAddress));
-        return proxy;
-    }
-
-    function upgrade(address proxyAddress, address newAddress)
-        public
-        returns (address)
-    {
-        vm.startBroadcast();
-
-        NearX proxy = NearX(payable(proxyAddress));
+        NearX proxy = NearX(payable(mostRecentlyDeployedProxy));
         proxy.upgradeToAndCall(address(newAddress), "");
 
         vm.stopBroadcast();
