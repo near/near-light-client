@@ -10,7 +10,7 @@ import {INearX, TransactionOrReceiptId, ProofVerificationResult, encodePackedIds
 /// @notice The NearX contract is a light client for Near.
 contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor() payable {
         _disableInitializers();
     }
 
@@ -84,7 +84,7 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         emit SyncRequested(latestHeader);
     }
 
-    function handleSync(bytes memory _output, bytes memory _context) external {
+    function handleSync(bytes calldata _output, bytes calldata) external {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
@@ -92,12 +92,13 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
         bytes32 targetHeader = abi.decode(_output, (bytes32));
 
+        // TODO: store block height of last N packed
         latestHeader = targetHeader;
 
         emit HeadUpdate(targetHeader);
     }
 
-    function requestVerify(TransactionOrReceiptId[] memory ids)
+    function requestVerify(TransactionOrReceiptId[] calldata ids)
         external
         payable
     {
@@ -119,18 +120,16 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         emit VerifyRequested(latestHeader, ids);
     }
 
-    function handleVerify(bytes calldata _output, bytes memory _context)
-        external
-    {
+    function handleVerify(bytes calldata _output, bytes calldata) external {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
         emit VerifyResult(_output);
     }
 
-    function decodeResults(bytes memory _output)
+    function decodeResults(bytes calldata _output)
         external
-        view
+        pure
         returns (ProofVerificationResult[] memory)
     {
         return decodePackedResults(_output);
