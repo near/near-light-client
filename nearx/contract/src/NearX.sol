@@ -6,9 +6,12 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable@4.9.5/proxy/uti
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable@4.9.5/proxy/utils/UUPSUpgradeable.sol";
 import {ISuccinctGateway} from "./interfaces/ISuccinctGateway.sol";
 import {INearX, TransactionOrReceiptId, ProofVerificationResult, encodePackedIds, decodePackedIds, decodePackedResults} from "./interfaces/INearX.sol";
+import {DoubleEndedQueue} from "@openzeppelin/contracts@4.9.5/utils/structs/DoubleEndedQueue.sol";
 
 /// @notice The NearX contract is a light client for Near.
 contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
+    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() payable {
         _disableInitializers();
@@ -38,6 +41,8 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /// @notice The latest header that has been committed.
     bytes32 public latestHeader;
+
+    DoubleEndedQueue.Bytes32Deque public lastKnownHeaders;
 
     function updateGateway(address _gateway) external onlyOwner {
         gateway = _gateway;
@@ -88,12 +93,18 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
-        // TODO: this does mean we trust the gateway, potentially we add a check here and also store heights
 
         bytes32 targetHeader = abi.decode(_output, (bytes32));
 
-        // TODO: store block height of last N packed
         latestHeader = targetHeader;
+
+        // TODO: check if we can pop back
+        uint256 length = DoubleEndedQueue.length(lastKnownHeaders);
+        if (length > 0 && length < 64) {
+            DoubleEndedQueue.popBack(lastKnownHeaders);
+        }
+
+        DoubleEndedQueue.pushFront(lastKnownHeaders, targetHeader);
 
         emit HeadUpdate(targetHeader);
     }
@@ -124,7 +135,25 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
-        emit VerifyResult(_output);
+
+        bytes32 trustedHeader = abi.decode(_output[:32], (bytes32));
+        bytes memory results = _output[32:];
+
+        uint256 length = DoubleEndedQueue.length(lastKnownHeaders);
+        require(length < 255);
+        bytes32 header;
+        uint8 i = 0;
+        for (i; i < length; i++) {
+            header = DoubleEndedQueue.at(lastKnownHeaders, i);
+            if (header == trustedHeader) {
+                break;
+            }
+            if (i == length - 1) {
+                revert("Trusted header not found");
+            }
+        }
+
+        emit VerifyResult(trustedHeader, results);
     }
 
     function decodeResults(bytes calldata _output)

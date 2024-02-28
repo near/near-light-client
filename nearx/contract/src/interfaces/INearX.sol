@@ -33,7 +33,7 @@ interface INearX {
     error FunctionIdsNotInitialised();
 
     /// @notice The result of the verification request
-    event VerifyResult(bytes results);
+    event VerifyResult(bytes32 trustedHeader, bytes results);
 }
 
 uint256 constant MAX_LEN = 64;

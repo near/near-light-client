@@ -82,6 +82,11 @@ contract NearXTest is Test {
             abi.encode(true)
         );
         vm.prank(address(lightClient.gateway()));
+        lightClient.handleSync(
+            hex"63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3",
+            ""
+        );
+        vm.prank(address(lightClient.gateway()));
         lightClient.handleVerify(data, "");
     }
 }
