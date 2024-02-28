@@ -32,10 +32,6 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher:
             AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
-        // TODO: this is trusted, we should join the result of this to assert that the
-        // light client did know about this header OR ensure in the circuit we knew
-        // about this information, the contract should emit an event for the height so
-        // it's easily queryable
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
         let head = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
         // TODO: check that the head.block_height was once known to the verifier if not
@@ -82,7 +78,9 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         );
         b.watch_slice(&output.data, "output");
 
-        // TODO: write the trusted_header_hash here for verification onchain
+        // Write the output for verification on chain
+        b.evm_write(trusted_header_hash);
+
         for r in output.data {
             b.evm_write::<CryptoHashVariable>(r.id);
             let passed = byte_from_bool(b, r.result);
@@ -255,6 +253,9 @@ mod beefy_tests {
             }
         };
         let assertions = |mut output: PO| {
+            let trusted_header_hash = output.evm_read::<CryptoHashVariable>();
+            assert_eq!(trusted_header_hash, header.hash().0.into());
+
             let mut results = vec![];
             for _ in 0..AMT {
                 let id = output.evm_read::<CryptoHashVariable>();
@@ -298,6 +299,9 @@ mod beefy_tests {
             }
         };
         let assertions = |mut output: PO| {
+            let trusted_header_hash = output.evm_read::<CryptoHashVariable>();
+            assert_eq!(trusted_header_hash, header.hash().0.into());
+
             let mut results = vec![];
             for _ in 0..AMT {
                 let id = output.evm_read::<CryptoHashVariable>();

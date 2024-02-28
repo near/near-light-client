@@ -1,12 +1,22 @@
 [profile.default]
 fs_permissions = [ { access = "read", path = "./broadcast" } ]
-libs = [ "lib" ]
-optimizer = false # This was breaking verification for some reason
-optimizer-runs = 100_000
-out = "out"
+gas_reports    = [ "*" ]
+libs           = [ "lib" ]
+optimizer      = true # This was breaking verification for some reason
+optimizer-runs = 1000 # TODO: change when we properly release this
+out            = "out"
+solc_version   = "0.8.19"
+src            = "src"
+
 remappings = [
   "forge-std=lib/forge-std/src",
   "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts",
   "@openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts",
+  "@openzeppelin/contracts@4.9.5=lib/openzeppelin-contracts/contracts",
+  "@openzeppelin/contracts-upgradeable@4.9.5=lib/openzeppelin-contracts-upgradeable/contracts",
 ]
-src = "src"
+
+[profile.optimizer-details]
+constant_optimizer = true
+cse                = true
+deduplicate        = true
