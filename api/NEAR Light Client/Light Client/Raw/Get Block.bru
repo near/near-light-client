@@ -1,0 +1,26 @@
+meta {
+  name: Get Block
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "block",
+    "params": {
+      "block_id": "{{id}}"
+    }
+  }
+}
+
+vars:pre-request {
+  id: 6taaeb6h2uJcuUvvmwXpYgagYvyHsFanWhm2ziGGHCff
+}

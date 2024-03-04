@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use derive_more::Into;
+use log::LevelFilter;
 use near_light_client_protocol::{prelude::Header, LightClientBlockView, ValidatorStake};
 pub use near_primitives::hash::CryptoHash;
 pub use pretty_assertions::assert_eq as pas_eq;
@@ -68,8 +69,17 @@ pub fn view_to_lite_view(h: LightClientBlockView) -> Header {
     }
 }
 
+pub fn logger() {
+    let _ = pretty_env_logger::formatted_builder()
+        .parse_default_env()
+        .filter_module("hyper", LevelFilter::Off)
+        .filter_module("reqwest", LevelFilter::Off)
+        .filter_module("near_jsonrpc_client", LevelFilter::Off)
+        .try_init();
+}
+
 pub fn mainnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
-    pretty_env_logger::try_init().ok();
+    logger();
     let first = main_first().body;
     let head = view_to_lite_view(first.clone());
     let bps = first
@@ -84,7 +94,7 @@ pub fn mainnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
 }
 
 pub fn testnet_state() -> (Header, Vec<ValidatorStake>, LightClientBlockView) {
-    pretty_env_logger::try_init().ok();
+    logger();
     let first = test_first().body;
     let head = view_to_lite_view(first.clone());
     let bps = first

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity >=0.8.0;
 
 import "./Bytes.sol";
 
@@ -33,7 +33,7 @@ interface INearX {
     error FunctionIdsNotInitialised();
 
     /// @notice The result of the verification request
-    event VerifyResult(ProofVerificationResult[] results);
+    event VerifyResult(bytes results);
 }
 
 uint256 constant MAX_LEN = 64;

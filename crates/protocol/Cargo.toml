@@ -4,6 +4,7 @@ license.workspace = true
 name              = "near-light-client-protocol"
 version.workspace = true
 
+# Ideally, we should depend on as minimal dependencies as possible
 [dependencies]
 anyhow.workspace                  = true
 borsh.workspace                   = true

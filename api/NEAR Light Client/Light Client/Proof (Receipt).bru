@@ -1,0 +1,24 @@
+meta {
+  name: Proof (Receipt)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{lightClientBaseUrl}}/proof
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "type": "receipt",
+    "receipt_id": "{{id}}",
+    "receiver_id": "{{account}}"
+  }
+}
+
+vars:pre-request {
+  id: 5mymxqbYRZTtSYTAVZpvuvXqR1J3VGXE4NrA1WWMr4oX
+  account: cdk.topgunbakugo.testnet
+}
