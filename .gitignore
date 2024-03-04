@@ -24,3 +24,5 @@ nearx/contract/broadcast
 
 # Dotenv file
 .env
+
+http-cacache/

@@ -5,12 +5,13 @@ use std::{
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
-use near_jsonrpc_client::{
+pub use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
-use near_primitives::{
+pub use near_primitives::{
     block_header::BlockHeader,
+    types::TransactionOrReceiptId,
     views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 

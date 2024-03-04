@@ -41,6 +41,9 @@
             solc
             slither-analyzer
 
+            vscode-extensions.vadimcn.vscode-lldb.adapter
+            rust-analyzer
+
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })

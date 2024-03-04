@@ -1,5 +1,13 @@
 catchup       = true
 host          = "0.0.0.0:3030"
 network       = "Testnet"
-starting_head = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU"
+starting_head = "EfFrYtjeTtpqmFkD3xdB2UJHtfr4dhxQkp6fFHtg6Yav"
 state_path    = "state.db"
+
+[succinct]
+contract_address = "0x73876e41ca149853160Ed5BFeC22e3C7bABEA67a"
+eth_rpc_url      = "https://gateway.tenderly.co/public/sepolia"
+version          = "v0.0.4-rc.1"
+
+#contract_address = "0xa5AA56257a89E972cdf3a2D47032646750B5d9Ba"
+# eth_rpc_url      = "https://ethereum-holesky-rpc.publicnode.com"
