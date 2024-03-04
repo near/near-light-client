@@ -12,10 +12,11 @@ contract Upgrade is Script {
             .get_most_recent_deployment("ERC1967Proxy", block.chainid);
 
         vm.startBroadcast();
-        NearX newAddress = new NearX();
 
         NearX proxy = NearX(payable(mostRecentlyDeployedProxy));
-        proxy.upgradeToAndCall(address(newAddress), "");
+
+        NearX newAddress = new NearX();
+        proxy.upgradeTo(address(newAddress));
 
         vm.stopBroadcast();
         return address(proxy);

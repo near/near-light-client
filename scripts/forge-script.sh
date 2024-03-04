@@ -31,7 +31,6 @@ function script() {
   (
     cd ./nearx/contract && \
       forge script $1 \
-      -vv \
       --rpc-url $ETH_RPC \
       --private-key $ETH_PRIVATE_KEY \
       $TAIL
@@ -57,7 +56,7 @@ function init() {
   S_INFO=$(extractInfo Sync)
   V_INFO=$(extractInfo Verify)
 
-  export GATEWAY_ID=$(echo $S_INFO | jq -r .gateway)
+  export GATEWAY_ID=${GATEWAY_ID:-$(echo $S_INFO | jq -r .gateway)}
   export SYNC_FUNCTION_ID=$(echo $S_INFO | jq -r .function_id)
   export VERIFY_FUNCTION_ID=$(echo $V_INFO | jq -r .function_id)
 
