@@ -1,7 +1,7 @@
 use ethers::types::U256;
 use log::{debug, trace};
 use near_light_client_protocol::{
-    config::{ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS},
+    config::{pad_account_bytes, pad_account_id, ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS},
     prelude::{AccountId, CryptoHash, Header, Itertools},
     BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
     StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use crate::merkle::MerklePathVariable;
 
 // TODO: remove any unused fields like account id etc?
-/// TODO: check if BPS seats changes for testnet/mainnet
 
 /// Type for omitting the size across the codebase for arrays that are the same
 /// size as BPS
@@ -412,16 +411,6 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
             stake,
         }
     }
-}
-
-pub(crate) fn pad_account_id(account_id: &AccountId) -> [u8; AccountId::MAX_LEN] {
-    let account_id = account_id.as_str().as_bytes().to_vec();
-    pad_account_bytes(account_id)
-}
-
-pub(crate) fn pad_account_bytes(mut account_id: Vec<u8>) -> [u8; AccountId::MAX_LEN] {
-    account_id.resize(AccountId::MAX_LEN, ACCOUNT_ID_PADDING_BYTE);
-    account_id.try_into().expect("invalid account bytes")
 }
 
 pub(crate) fn normalise_account_id<F: RichField>(
