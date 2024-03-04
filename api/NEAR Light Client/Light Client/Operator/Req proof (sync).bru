@@ -1,0 +1,21 @@
+meta {
+  name: Req proof (sync)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{lightClientBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "sync",
+    "params": {
+    }
+  }
+}

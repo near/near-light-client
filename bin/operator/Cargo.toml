@@ -1,0 +1,44 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name              = "nearx-operator"
+version.workspace = true
+
+[lib]
+
+[dependencies]
+actix                       = { version = "*", features = ["macros"] }
+anyhow.workspace            = true
+cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
+config.workspace            = true
+ethers                      = { version = "2.0" }
+flume                       = "*"
+futures.workspace           = true
+hashbrown                   = "*"
+hex.workspace               = true
+jsonrpsee                   = { version = "0.22.1", features = [ "server", "macros" ] }
+jsonrpsee-core              = "0.22.1"
+log.workspace               = true
+pretty_env_logger.workspace = true
+priority-queue              = "*"
+reqwest-middleware          = "*"
+reqwest-retry               = "*"
+reqwest.workspace           = true
+serde.workspace             = true
+serde_json.workspace        = true
+thiserror.workspace         = true
+tokio.workspace             = true
+uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] }
+
+near-light-client-protocol.workspace = true
+near-light-client-rpc.workspace      = true
+
+http-cache-reqwest = "0.13.0"
+plonky2x           = { git = "https://github.com/succinctlabs/succinctx.git" }
+succinct-client    = { git = "https://github.com/succinctlabs/succinctx.git" }
+
+[dev-dependencies]
+hex.workspace                = true
+near-light-clientx.workspace = true
+test-utils.workspace         = true
+wiremock                     = "0.6.0"

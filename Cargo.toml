@@ -43,7 +43,7 @@ near-primitives-core    = "0.20"
 
 near-light-client-protocol = { path = "crates/protocol" }
 near-light-client-rpc      = { path = "crates/rpc" }
-near-light-clientx         = { path = "circuits/plonky2x" }
+near-light-clientx         = { path = "nearx" }
 test-utils                 = { path = "crates/test-utils" }
 
 [patch."https://github.com/succinctlabs/starkyx.git"]

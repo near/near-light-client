@@ -7,9 +7,6 @@
 [submodule "nearx/contract/lib/openzeppelin-contracts"]
 	path = nearx/contract/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-[submodule "nearx/contract/lib/openzeppelin-contracts-upgradeable"]
-	path = nearx/contract/lib/openzeppelin-contracts-upgradeable
-	url = https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable
 [submodule "nearx/contract/lib/foundry-devops"]
 	path = nearx/contract/lib/foundry-devops
 	url = https://github.com/chainaccelorg/foundry-devops
@@ -19,3 +16,9 @@
 [submodule "nearx/contract/lib/forge-std"]
 	path = nearx/contract/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "nearx/contract/lib/openzeppelin-foundry-upgrades"]
+	path = nearx/contract/lib/openzeppelin-foundry-upgrades
+	url = https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
+[submodule "nearx/contract/lib/openzeppelin-contracts-upgradeable"]
+	path = nearx/contract/lib/openzeppelin-contracts-upgradeable
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable
