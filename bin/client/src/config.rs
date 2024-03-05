@@ -48,3 +48,13 @@ impl Config {
         r
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new() {
+        Config::new().unwrap();
+    }
+}
