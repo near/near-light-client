@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use coerce::actor::LocalActorRef;
-use flume::Sender;
 use jsonrpsee::{
     proc_macros::rpc,
     server::Server,
@@ -69,14 +68,14 @@ pub trait ProveRpc {
 #[async_trait]
 impl ProveRpcServer for RpcServerImpl {
     async fn sync(&self) -> Result<ProofId> {
-        let pid = self.succinct_client.sync().await.map_err(|e| {
+        let pid = self.succinct_client.sync(true).await.map_err(|e| {
             log::error!("{:?}", e);
             ErrorCode::ServerError(500)
         })?;
         Ok(pid)
     }
     async fn verify(&self, ids: Vec<GetProof>) -> Result<ProofId> {
-        let pid = self.succinct_client.verify(ids).await.map_err(|e| {
+        let pid = self.succinct_client.verify(ids, true).await.map_err(|e| {
             log::error!("{:?}", e);
             ErrorCode::ServerError(500)
         })?;

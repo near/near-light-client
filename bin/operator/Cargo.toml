@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace            = true
+cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
 coerce.workspace            = true
 config.workspace            = true
 ethers                      = { version = "2.0" }
@@ -29,7 +30,10 @@ uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] 
 
 near-light-client-protocol.workspace = true
 near-light-client-rpc.workspace      = true
-plonky2x                             = { git = "https://github.com/succinctlabs/succinctx.git" }
+
+plonky2x        = { git = "https://github.com/succinctlabs/succinctx.git" }
+succinct-client = { git = "https://github.com/succinctlabs/succinctx.git" }
+http-cache-reqwest = "0.13.0"
 
 [dev-dependencies]
 hex.workspace                = true

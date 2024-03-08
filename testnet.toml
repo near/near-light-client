@@ -5,8 +5,8 @@ starting_head = "Fjn8T3phCCSCXSdjtQ4DqHGV86yeS2MQ92qcufCEpwbf"
 state_path    = "state.db"
 
 [succinct]
-contract_address  = "0x73876e41ca149853160Ed5BFeC22e3C7bABEA67a"
-eth_rpc_url       = "https://gateway.tenderly.co/public/sepolia"
-sync_release_id   = "203993ce-12d4-485c-9fa3-087c90ed3b34"
-verify_release_id = "c35d498e-f283-4b14-a42f-3a35807d3a70"
-version           = "v0.0.4-rc.1"
+#contract_address = "0x73876e41ca149853160Ed5BFeC22e3C7bABEA67a"
+#eth_rpc_url      = "https://gateway.tenderly.co/public/sepolia"
+contract_address = "0xa5AA56257a89E972cdf3a2D47032646750B5d9Ba"
+eth_rpc_url      = "https://ethereum-holesky-rpc.publicnode.com"
+version          = "v0.0.4-rc.1"

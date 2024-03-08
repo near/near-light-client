@@ -32,11 +32,11 @@ impl Config {
         log::debug!("Config path {default_path}");
 
         let s = ConfigTrait::builder()
-            .add_source(File::with_name(&default_path).required(false))
+            .add_source(File::with_name(&default_path).required(true))
             .add_source(File::with_name(&run_mode).required(false))
             // This file shouldn't be checked in to git
             .add_source(File::with_name("local").required(false))
-            .add_source(Environment::with_prefix("NEAR_LIGHT_CLIENT"))
+            .add_source(Environment::with_prefix("NEAR_LIGHT_CLIENT").try_parsing(true))
             .build()?;
 
         let r = s.try_deserialize();
@@ -52,6 +52,7 @@ impl Config {
             .add_source(File::with_name("../../testnet").required(false))
             // This file shouldn't be checked in to git
             .add_source(File::with_name("../../local").required(false))
+            .add_source(Environment::with_prefix("NEAR_LIGHT_CLIENT").try_parsing(true))
             .build()
             .unwrap();
 

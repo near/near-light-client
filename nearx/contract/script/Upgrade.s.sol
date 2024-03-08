@@ -16,7 +16,7 @@ contract Upgrade is Script {
         NearX proxy = NearX(payable(mostRecentlyDeployedProxy));
 
         NearX newAddress = new NearX();
-        proxy.upgradeTo(address(newAddress));
+        //proxy.upgradeTo(address(newAddress));
 
         vm.stopBroadcast();
         return address(proxy);

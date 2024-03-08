@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
-use anyhow::ensure;
-use ethers::prelude::*;
+use anyhow::{anyhow, ensure};
+use cached::proc_macro::cached;
+use ethers::{abi::AbiEncode, prelude::*};
+use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use near_light_client_rpc::{
     prelude::{CryptoHash, Itertools},
     TransactionOrReceiptId as TransactionOrReceiptIdPrimitive,
@@ -14,36 +16,40 @@ use plonky2x::{
     },
     utils::hex,
 };
-use reqwest::header::{self, HeaderMap};
+use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::Deserialize;
+use succinct_client::{request::SuccinctClient, utils::get_gateway_address};
+use uuid::Uuid;
 
 use self::types::{Deployment, ProofResponse};
 use crate::{config, rpc::VERIFY_ID_AMT, succinct::types::ProofRequestResponse};
 
 pub mod types;
 
-// TODO: actually need to make request through this otherwise can't get proofs
-// relayed
 abigen!(
     NearX,
     "../../nearx/contract/abi.json",
     derives(serde::Deserialize, serde::Serialize),
 );
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Config {
     pub api_key: String,
     #[serde(default = "default_rpc")]
     pub rpc_url: String,
     pub eth_rpc_url: String,
-    // TODO: ensure hex
+    // TODO: ensure hex serialisation
     pub contract_address: Address,
     pub version: String,
     #[serde(default = "default_organisation")]
     pub organisation_id: String,
     #[serde(default = "default_project")]
     pub project_id: String,
+    #[serde(default = "default_max_retries")]
+    pub client_max_retries: u32,
+    #[serde(default = "default_timeout")]
+    pub client_timeout: u64,
 }
 
 fn default_rpc() -> String {
@@ -57,105 +63,175 @@ fn default_organisation() -> String {
 fn default_project() -> String {
     "near-light-client".into()
 }
+fn default_max_retries() -> u32 {
+    3
+}
 
-#[derive(Clone, Debug)]
+fn default_timeout() -> u64 {
+    30
+}
+
+#[derive(Clone)]
 pub struct Client {
     config: Config,
     inner: reqwest_middleware::ClientWithMiddleware,
     contract: NearX<Provider<Http>>,
+    succinct_client: SuccinctClient,
+    checkpoint_hash: CryptoHash,
+    releases: Vec<Deployment>,
 }
 
 impl Client {
-    pub fn new(config: &config::Config) -> Self {
+    pub async fn new(config: &config::Config) -> anyhow::Result<Self> {
         log::info!("starting succinct client");
 
-        let provider = Provider::<Http>::try_from(&config.succinct.eth_rpc_url)
-            .expect("could not connect to eth client");
-        let contract = NearX::new(config.succinct.contract_address.0, provider.into());
+        let (contract, chain_id) = Self::init_contract_client(&config.succinct).await?;
 
+        let inner = Self::init_inner_client(&config.succinct).await?;
+
+        let succinct_client = SuccinctClient::new(
+            config.succinct.rpc_url.clone(),
+            config.succinct.api_key.clone(),
+            false,
+            false,
+        );
+
+        let releases = Self::fetch_releases(&config.succinct, &chain_id, &inner).await?;
+
+        Ok(Self {
+            inner,
+            contract,
+            config: config.succinct.clone(),
+            succinct_client,
+            checkpoint_hash: config.checkpoint_head,
+            releases,
+        })
+    }
+
+    async fn init_contract_client(config: &Config) -> anyhow::Result<(NearX<Provider<Http>>, u32)> {
+        let provider = Provider::<Http>::try_from(&config.eth_rpc_url)?;
+        let contract = NearX::new(config.contract_address.0, provider.into());
+        let chain_id = contract.client().get_chainid().await.map(|s| s.as_u32())?;
+        log::debug!("chain id: {}", chain_id);
+
+        Ok((contract, chain_id))
+    }
+
+    async fn init_inner_client(
+        config: &Config,
+    ) -> anyhow::Result<reqwest_middleware::ClientWithMiddleware> {
         let mut headers = HeaderMap::new();
-        let mut auth =
-            header::HeaderValue::from_str(&format!("Bearer {}", config.succinct.api_key))
-                .expect("invalid auth header");
+        let mut auth = HeaderValue::from_str(&format!("Bearer {}", config.api_key))?;
         auth.set_sensitive(true);
         headers.insert(header::AUTHORIZATION, auth);
 
         let inner = reqwest::ClientBuilder::default()
-            .timeout(std::time::Duration::from_secs(30)) // Long timeout to avoid spamming api
+            .timeout(std::time::Duration::from_secs(config.client_timeout)) // Long timeout to avoid spamming api
             .default_headers(headers)
-            .build()
-            .unwrap();
+            .build()?;
 
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(2);
-        let inner = reqwest_middleware::ClientBuilder::new(inner)
+        let retry_policy =
+            ExponentialBackoff::builder().build_with_max_retries(config.client_max_retries);
+        let client = reqwest_middleware::ClientBuilder::new(inner)
+            .with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACacheManager::default(),
+                options: HttpCacheOptions::default(),
+            }))
             .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
-
-        Self {
-            inner,
-            contract,
-            config: config.succinct.clone(),
-        }
+        Ok(client)
     }
 
-    pub async fn send(&self, release_id: &str, data: BytesRequestData) -> anyhow::Result<ProofId> {
+    async fn fetch_releases(
+        config: &Config,
+        chain_id: &u32,
+        client: &reqwest_middleware::ClientWithMiddleware,
+    ) -> anyhow::Result<Vec<Deployment>> {
+        Ok(Self::fetch_deployments(&client, &config)
+            .await?
+            .into_iter()
+            .filter(|d| d.release_info.release.name.contains(&config.version))
+            .filter(|d| d.chain_id == *chain_id)
+            .filter_map(|mut d| {
+                if d.gateway == Default::default() {
+                    get_gateway_address(*chain_id)
+                        .and_then(|a| a.parse().ok())
+                        .map(|a| {
+                            d.gateway = a;
+                            d
+                        })
+                } else {
+                    Some(d)
+                }
+            })
+            .collect_vec())
+    }
+
+    pub async fn request_proof(
+        &self,
+        release_id: &str,
+        data: BytesRequestData,
+    ) -> anyhow::Result<ProofId> {
         let request = self.build_proof_request_bytes(release_id, data);
-        let res = self
+        Ok(self
             .inner
             .post(format!("{}/proof/new", self.config.rpc_url))
             .json(&request)
             .send()
             .await?
-            .error_for_status()?;
-        let r: ProofRequestResponse = res.json().await?;
-        Ok(r.proof_id)
+            .error_for_status()?
+            .json::<ProofRequestResponse>()
+            .await?
+            .proof_id)
     }
 
     pub async fn get(&self, proof_id: &ProofId) -> anyhow::Result<ProofResponse> {
         log::debug!("getting proof {}", proof_id.0);
-        let res = self
+        Ok(self
             .inner
             .get(format!("{}/proof/{}", self.config.rpc_url, proof_id.0))
             .send()
             .await?
-            .error_for_status()?;
-        let r: ProofResponse = res.json().await?;
-        Ok(r)
+            .error_for_status()?
+            .json()
+            .await?)
     }
 
-    // TODO: cache this for a long time
-    pub async fn fetch_deployments(&self) -> anyhow::Result<Vec<Deployment>> {
+    pub async fn fetch_deployments(
+        client: &reqwest_middleware::ClientWithMiddleware,
+        config: &Config,
+    ) -> anyhow::Result<Vec<Deployment>> {
         log::debug!("getting deployments");
-        let res = self
-            .inner
+        Ok(client
             .get(format!(
                 "{}/deployments/{}/{}",
-                self.config.rpc_url, self.config.organisation_id, self.config.project_id
+                config.rpc_url, config.organisation_id, config.project_id
             ))
             .send()
             .await?
-            .error_for_status()?;
-        Ok(res.json().await?)
+            .error_for_status()?
+            .json()
+            .await?)
     }
 
-    // TODO: cache this for a long time
-    pub async fn fetch_release_details(&self) -> anyhow::Result<(Deployment, Deployment)> {
-        log::debug!("getting release details");
-        let deployments = self.fetch_deployments().await?;
-        let releases = deployments
-            .into_iter()
-            .filter(|d| d.release_info.release.name.contains(&self.config.version))
-            .collect_vec();
-
+    pub async fn extract_release_details(&self) -> anyhow::Result<(Deployment, Deployment)> {
         let find = |entrypoint: &str| -> Deployment {
-            releases
+            self.releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)
-                .expect("could not find release for entrypoint {entrypoint}")
+                .expect(&format!(
+                    "could not find release for entrypoint {entrypoint}"
+                ))
                 .to_owned()
         };
 
-        Ok((find("sync"), find("verify")))
+        let sync = find("sync");
+        log::debug!("sync release: {:?}", sync);
+        let verify = find("verify");
+        log::debug!("verify release: {:?}", verify);
+
+        Ok((sync, verify))
     }
 
     pub fn build_proof_request_bytes(
@@ -206,38 +282,72 @@ impl Client {
         }
     }
 
-    pub async fn sync(&self) -> anyhow::Result<ProofId> {
-        log::trace!("syncing");
-        let (release, _) = self.fetch_release_details().await?;
+    pub async fn sync(&self, relay: bool) -> anyhow::Result<ProofId> {
+        let (release, _) = self.extract_release_details().await?;
         let req = self.build_sync_request(self.fetch_trusted_header_hash().await?);
-        let proof_id = self.send(&release.release_info.release.id, req).await?;
-        Ok(proof_id)
+
+        let id = if relay {
+            self.succinct_client
+                .submit_request(
+                    release.chain_id,
+                    self.config.contract_address.0.into(),
+                    SyncFunctionIdCall {}.encode().into(),
+                    self.fetch_sync_function_id().await?.into(),
+                    req.input.into(),
+                )
+                .await
+                .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?
+        } else {
+            self.request_proof(&release.release_info.release.id, req)
+                .await?
+        };
+        Ok(id)
     }
 
     pub async fn verify(
         &self,
         ids: Vec<TransactionOrReceiptIdPrimitive>,
+        relay: bool,
     ) -> anyhow::Result<ProofId> {
         log::trace!("verifying {} ids", ids.len());
         ensure!(
             ids.len() == VERIFY_ID_AMT,
             "wrong number of transactions for verify"
         );
-        let (_, release) = self.fetch_release_details().await?;
-
+        let (_, release) = self.extract_release_details().await?;
         let req = self.build_verify_request(self.fetch_trusted_header_hash().await?, ids);
-        let proof_id = self.send(&release.release_info.release.id, req).await?;
-        Ok(proof_id)
+
+        let id = if relay {
+            self.succinct_client
+                .submit_request(
+                    release.chain_id,
+                    self.config.contract_address.0.into(),
+                    VerifyFunctionIdCall {}.encode().into(),
+                    self.fetch_verify_function_id().await?.into(),
+                    req.input.into(),
+                )
+                .await
+                .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?
+        } else {
+            self.request_proof(&release.release_info.release.id, req)
+                .await?
+        };
+        Ok(id)
     }
 
-    // TODO: amortize these
     pub async fn fetch_trusted_header_hash(&self) -> anyhow::Result<CryptoHash> {
-        Ok(self.contract.latest_header().await.map(CryptoHash)?)
+        let mut h = self.contract.latest_header().await.map(CryptoHash)?;
+        log::debug!("fetched trusted header hash {:?}", h);
+        if h == CryptoHash::default() {
+            log::info!("no trusted header found, using checkpoint hash");
+            h = self.checkpoint_hash;
+        }
+        Ok(h)
     }
-    pub async fn _fetch_sync_function_id(&self) -> anyhow::Result<[u8; 32]> {
+    pub async fn fetch_sync_function_id(&self) -> anyhow::Result<[u8; 32]> {
         Ok(self.contract.sync_function_id().await?)
     }
-    pub async fn _fetch_verify_function_id(&self) -> anyhow::Result<[u8; 32]> {
+    pub async fn fetch_verify_function_id(&self) -> anyhow::Result<[u8; 32]> {
         Ok(self.contract.verify_function_id().await?)
     }
 }
@@ -269,12 +379,12 @@ mod tests {
     use super::*;
     use crate::{config::Config, rpc::VERIFY_ID_AMT};
 
-    #[test]
-    fn test_can_build_sync() {
+    #[tokio::test]
+    async fn test_can_build_sync() {
         let (header, _, _) = testnet_state();
         let hash = header.hash();
 
-        let client: Client = Client::new(&Config::test_config());
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
         let sync_release_id = "1cde66c3-46df-4aab-8409-4cbb97abee1c".to_string();
 
         let req = client.build_sync_request(hash);
@@ -294,12 +404,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_can_build_verify() {
+    #[tokio::test]
+    async fn test_sync() {
+        pretty_env_logger::try_init();
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+        let s = client.sync(false).await.unwrap();
+        println!("synced with {:?}", s);
+    }
+
+    #[tokio::test]
+    async fn test_sync_relay() {
+        pretty_env_logger::try_init();
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+        let s = client.sync(true).await.unwrap();
+        println!("synced with {:?}", s);
+    }
+
+    #[tokio::test]
+    async fn test_can_build_verify() {
         let (header, _, _) = testnet_state();
         let hash = header.hash();
 
-        let client: Client = Client::new(&Config::test_config());
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
         let verify_release_id = "c35d498e-f283-4b14-a42f-3a35807d3a70".to_string();
 
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
@@ -324,5 +450,37 @@ mod tests {
         } else {
             panic!("wrong request type");
         }
+    }
+
+    #[tokio::test]
+    async fn test_verify() {
+        pretty_env_logger::try_init();
+        let (header, _, _) = testnet_state();
+
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+
+        let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
+            .into_iter()
+            .take(VERIFY_ID_AMT)
+            .collect_vec();
+
+        let s = client.verify(txs, false).await.unwrap();
+        println!("verify with {:?}", s);
+    }
+
+    #[tokio::test]
+    async fn test_verify_relay() {
+        pretty_env_logger::try_init();
+        let (header, _, _) = testnet_state();
+
+        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+
+        let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
+            .into_iter()
+            .take(VERIFY_ID_AMT)
+            .collect_vec();
+
+        let s = client.verify(txs, true).await.unwrap();
+        println!("verify with {:?}", s);
     }
 }

@@ -10,7 +10,6 @@ mod queue;
 mod rpc;
 mod succinct;
 
-// TODO:
 // batch id in relay
 //
 #[tokio::main]
@@ -26,7 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     let system = ActorSystem::builder()
         .system_name("near-light-client-operator")
         .build();
-    let client = Arc::new(succinct::Client::new(&config));
+    let client = Arc::new(succinct::Client::new(&config).await?);
 
     let queue_actor = QueueManager::new(Default::default(), client.clone())
         .into_actor(Some("queue"), &system)

@@ -6,9 +6,9 @@ then
 fi
 
 export VERSION="${VERSION:-v0.0.3}"
-export ETH_RPC="${ETH_RPC:-https://rpc.sepolia.eth.gateway.fm}"
-export NEAR_CHECKPOINT_HEADER_HASH="${NEAR_CHECKPOINT_HEADER_HASH:=0x63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3}"
-export CHAIN_ID=${CHAIN_ID:=11155111}
+export ETH_RPC_URL="${ETH_RPC_URL:-https://rpc.sepolia.eth.gateway.fm}"
+export NEAR_CHECKPOINT_HEADER_HASH="${NEAR_CHECKPOINT_HEADER_HASH:-0x63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3}"
+export CHAIN_ID=${CHAIN_ID:-11155111}
 
 if [ -z "$ETH_PRIVATE_KEY" ]; then
   echo "You need to set ETH_PRIVATE_KEY"
@@ -31,7 +31,9 @@ function script() {
   (
     cd ./nearx/contract && \
       forge script $1 \
-      --rpc-url $ETH_RPC \
+      --ffi \
+      --sender $ETH_PUBLIC_KEY \
+      --rpc-url $ETH_RPC_URL \
       --private-key $ETH_PRIVATE_KEY \
       $TAIL
   )

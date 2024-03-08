@@ -20,6 +20,7 @@ use crate::{
     },
 };
 
+// TODO: weights management
 type PriorityWeight = u32;
 
 #[derive(Debug, Clone)]
@@ -125,7 +126,6 @@ pub mod message {
 }
 
 /// An in memory queue as a placeholder until we decide on the flow
-#[derive(Debug)]
 pub struct QueueManager {
     registry: HashMap<usize, RegistryInfo>,
     // TODO: decide if need parkinglot
@@ -246,7 +246,6 @@ impl QueueManager {
         >,
     ) {
         log::trace!("checking queue");
-        // TODO:
         let mut queue = queue.write().await;
         if queue.len() >= VERIFY_ID_AMT {
             let mut txs = vec![];
@@ -254,7 +253,7 @@ impl QueueManager {
                 let (req, _) = queue.pop().unwrap();
                 txs.push(req.0);
             }
-            let id = succinct.verify(txs).await.unwrap();
+            let id = succinct.verify(txs, true).await.unwrap();
             // TODO: selfjobs.push(Job::CheckProof(id), 1);
         }
     }
@@ -288,8 +287,8 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
-    fn manager() -> QueueManager {
-        let succinct_client = Client::new(&Config::test_config());
+    async fn manager() -> QueueManager {
+        let succinct_client = Client::new(&Config::test_config()).await.unwrap();
         QueueManager::new(Default::default(), Arc::new(succinct_client))
     }
 
@@ -298,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn e2e_test_verify() {
         logger();
-        let mut m = manager();
+        let mut m = manager().await;
 
         let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
         let fixtures = fixture.iter().take(VERIFY_ID_AMT);
@@ -316,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_proof() {
         logger();
-        let m = manager();
+        let m = manager().await;
 
         let r = m
             .check_proof(
@@ -329,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn test_weights() {
         logger();
-        let mut m = manager();
+        let mut m = manager().await;
 
         let high_priority_id = 1;
         let registry = vec![(
