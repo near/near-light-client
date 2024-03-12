@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread::JoinHandle, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, ensure};
 use coerce::actor::{
@@ -221,7 +221,7 @@ impl QueueManager {
         tokio::pin!(sleep);
 
         loop {
-            if let Ok(proof) = self.succinct_client.get(&msg.0).await {
+            if let Ok(proof) = self.succinct_client.get_proof(&msg.0).await {
                 log::info!("Got proof {:?}", proof);
                 match proof.status {
                     ProofStatus::Success => {

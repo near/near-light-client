@@ -8,11 +8,7 @@ use jsonrpsee::{
     PendingSubscriptionSink, SubscriptionMessage,
 };
 use jsonrpsee_core::{async_trait, SubscriptionResult};
-use near_light_client_protocol::{
-    config::ACCOUNT_DATA_SEPARATOR,
-    prelude::{AccountId, BorshDeserialize, CryptoHash},
-};
-use near_light_client_rpc::{prelude::GetProof, TransactionOrReceiptId};
+use near_light_client_rpc::prelude::GetProof;
 use plonky2x::backend::prover::ProofId;
 use tokio::task::JoinHandle;
 
@@ -112,7 +108,7 @@ impl ProveRpcServer for RpcServerImpl {
                 }
                 let mut successful = vec![];
                 for (i, id) in proofs.clone().iter().enumerate() {
-                    let res = self.succinct_client.get(&id).await;
+                    let res = self.succinct_client.get_proof(&id).await;
                     if let Ok(res) = res {
                         let msg = SubscriptionMessage::from_json(&res).unwrap();
                         sink.send(msg).await.unwrap();

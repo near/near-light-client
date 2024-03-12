@@ -2,13 +2,7 @@ use std::sync::Arc;
 
 use coerce::actor::{system::ActorSystem, IntoActor};
 use log::LevelFilter;
-use queue::QueueManager;
-use rpc::RpcServerImpl;
-
-mod config;
-mod queue;
-mod rpc;
-mod succinct;
+use nearx_operator::*;
 
 // batch id in relay
 //
@@ -20,18 +14,18 @@ pub async fn main() -> anyhow::Result<()> {
         .filter_module("reqwest", LevelFilter::Info)
         .init();
 
-    let config = config::Config::new()?;
+    let config = nearx_operator::config::Config::new()?;
 
     let system = ActorSystem::builder()
         .system_name("near-light-client-operator")
         .build();
-    let client = Arc::new(succinct::Client::new(&config).await?);
+    let client = Arc::new(SuccinctClient::new(&config).await?);
 
     let queue_actor = QueueManager::new(Default::default(), client.clone())
         .into_actor(Some("queue"), &system)
         .await?;
 
-    let server_handle = RpcServerImpl::new(client, queue_actor.clone())
+    let server_handle = RpcServer::new(client, queue_actor.clone())
         .run(&config)
         .await?;
 

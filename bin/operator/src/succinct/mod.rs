@@ -1,13 +1,11 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, ensure};
-use cached::proc_macro::cached;
-use ethers::{abi::AbiEncode, prelude::*};
+use anyhow::ensure;
+use ethers::prelude::*;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
-use near_light_client_rpc::{
-    prelude::{CryptoHash, Itertools},
-    TransactionOrReceiptId as TransactionOrReceiptIdPrimitive,
-};
+#[cfg(test)]
+use mockall::{automock, mock, predicate::*};
+use near_light_client_rpc::prelude::{CryptoHash, Itertools};
 use plonky2x::{
     backend::{
         circuit::DefaultParameters,
@@ -17,21 +15,22 @@ use plonky2x::{
     utils::hex,
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
+use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::Deserialize;
-use succinct_client::{request::SuccinctClient, utils::get_gateway_address};
+use succinct_client::{request::SuccinctClient as SuccinctClientExt, utils::get_gateway_address};
+use types::TransactionOrReceiptIdPrimitive;
 use uuid::Uuid;
 
-use self::types::{Deployment, ProofResponse};
-use crate::{config, rpc::VERIFY_ID_AMT, succinct::types::ProofRequestResponse};
+use self::types::{Circuit, Deployment, ProofResponse};
+use crate::{
+    config,
+    rpc::VERIFY_ID_AMT,
+    succinct::types::ProofRequestResponse,
+    types::{NearX, TransactionOrReceiptId},
+};
 
 pub mod types;
-
-abigen!(
-    NearX,
-    "../../nearx/contract/abi.json",
-    derives(serde::Deserialize, serde::Serialize),
-);
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Config {
@@ -71,16 +70,16 @@ fn default_timeout() -> u64 {
     30
 }
 
-#[derive(Clone)]
 pub struct Client {
     config: Config,
-    inner: reqwest_middleware::ClientWithMiddleware,
+    inner: ClientWithMiddleware,
     contract: NearX<Provider<Http>>,
-    succinct_client: SuccinctClient,
+    succinct_client: SuccinctClientExt,
     checkpoint_hash: CryptoHash,
     releases: Vec<Deployment>,
 }
 
+#[cfg_attr(test, automock)]
 impl Client {
     pub async fn new(config: &config::Config) -> anyhow::Result<Self> {
         log::info!("starting succinct client");
@@ -89,23 +88,24 @@ impl Client {
 
         let inner = Self::init_inner_client(&config.succinct).await?;
 
-        let succinct_client = SuccinctClient::new(
+        let succinct_client = SuccinctClientExt::new(
             config.succinct.rpc_url.clone(),
             config.succinct.api_key.clone(),
             false,
             false,
         );
 
-        let releases = Self::fetch_releases(&config.succinct, &chain_id, &inner).await?;
-
-        Ok(Self {
+        let mut s = Self {
             inner,
             contract,
             config: config.succinct.clone(),
             succinct_client,
             checkpoint_hash: config.checkpoint_head,
-            releases,
-        })
+            releases: Default::default(),
+        };
+        s.releases = s.fetch_releases(&chain_id).await?;
+
+        Ok(s)
     }
 
     async fn init_contract_client(config: &Config) -> anyhow::Result<(NearX<Provider<Http>>, u32)> {
@@ -117,9 +117,7 @@ impl Client {
         Ok((contract, chain_id))
     }
 
-    async fn init_inner_client(
-        config: &Config,
-    ) -> anyhow::Result<reqwest_middleware::ClientWithMiddleware> {
+    async fn init_inner_client(config: &Config) -> anyhow::Result<ClientWithMiddleware> {
         let mut headers = HeaderMap::new();
         let mut auth = HeaderValue::from_str(&format!("Bearer {}", config.api_key))?;
         auth.set_sensitive(true);
@@ -143,15 +141,12 @@ impl Client {
         Ok(client)
     }
 
-    async fn fetch_releases(
-        config: &Config,
-        chain_id: &u32,
-        client: &reqwest_middleware::ClientWithMiddleware,
-    ) -> anyhow::Result<Vec<Deployment>> {
-        Ok(Self::fetch_deployments(&client, &config)
+    async fn fetch_releases(&self, chain_id: &u32) -> anyhow::Result<Vec<Deployment>> {
+        Ok(self
+            .fetch_deployments()
             .await?
             .into_iter()
-            .filter(|d| d.release_info.release.name.contains(&config.version))
+            .filter(|d| d.release_info.release.name.contains(&self.config.version))
             .filter(|d| d.chain_id == *chain_id)
             .filter_map(|mut d| {
                 if d.gateway == Default::default() {
@@ -166,53 +161,6 @@ impl Client {
                 }
             })
             .collect_vec())
-    }
-
-    pub async fn request_proof(
-        &self,
-        release_id: &str,
-        data: BytesRequestData,
-    ) -> anyhow::Result<ProofId> {
-        let request = self.build_proof_request_bytes(release_id, data);
-        Ok(self
-            .inner
-            .post(format!("{}/proof/new", self.config.rpc_url))
-            .json(&request)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ProofRequestResponse>()
-            .await?
-            .proof_id)
-    }
-
-    pub async fn get(&self, proof_id: &ProofId) -> anyhow::Result<ProofResponse> {
-        log::debug!("getting proof {}", proof_id.0);
-        Ok(self
-            .inner
-            .get(format!("{}/proof/{}", self.config.rpc_url, proof_id.0))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?)
-    }
-
-    pub async fn fetch_deployments(
-        client: &reqwest_middleware::ClientWithMiddleware,
-        config: &Config,
-    ) -> anyhow::Result<Vec<Deployment>> {
-        log::debug!("getting deployments");
-        Ok(client
-            .get(format!(
-                "{}/deployments/{}/{}",
-                config.rpc_url, config.organisation_id, config.project_id
-            ))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?)
     }
 
     pub async fn extract_release_details(&self) -> anyhow::Result<(Deployment, Deployment)> {
@@ -281,25 +229,77 @@ impl Client {
             .concat(),
         }
     }
+    async fn fetch_deployments(&self) -> anyhow::Result<Vec<Deployment>> {
+        log::debug!("getting deployments");
+        Ok(self
+            .inner
+            .get(format!(
+                "{}/deployments/{}/{}",
+                self.config.rpc_url, self.config.organisation_id, self.config.project_id
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
+    }
 
+    async fn request_relayed_proof(
+        &self,
+        circuit: &Circuit,
+        req: BytesRequestData,
+    ) -> anyhow::Result<ProofId> {
+        let id = self
+            .succinct_client
+            .submit_request(
+                circuit.deployment(&self.releases).chain_id,
+                self.config.contract_address.0.into(),
+                circuit.as_function_selector().into(),
+                circuit.function_id(&self.contract).await?.into(),
+                req.input.into(),
+            )
+            .await
+            .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?;
+        Ok(id)
+    }
+    pub async fn request_proof(
+        &self,
+        circuit: &Circuit,
+        req: BytesRequestData,
+    ) -> anyhow::Result<ProofId> {
+        let release_id = circuit.deployment(&self.releases).release_info.release.id;
+        let req = self.build_proof_request_bytes(&release_id, req);
+
+        Ok(self
+            .inner
+            .post(format!("{}/proof/new", self.config.rpc_url))
+            .json(&req)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ProofRequestResponse>()
+            .await?
+            .proof_id)
+    }
+    pub async fn get_proof(&self, proof_id: &ProofId) -> anyhow::Result<ProofResponse> {
+        log::debug!("getting proof {}", proof_id.0);
+        Ok(self
+            .inner
+            .get(format!("{}/proof/{}", self.config.rpc_url, proof_id.0))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
+    }
     pub async fn sync(&self, relay: bool) -> anyhow::Result<ProofId> {
-        let (release, _) = self.extract_release_details().await?;
+        let circuit = Circuit::Sync;
         let req = self.build_sync_request(self.fetch_trusted_header_hash().await?);
 
         let id = if relay {
-            self.succinct_client
-                .submit_request(
-                    release.chain_id,
-                    self.config.contract_address.0.into(),
-                    SyncFunctionIdCall {}.encode().into(),
-                    self.fetch_sync_function_id().await?.into(),
-                    req.input.into(),
-                )
-                .await
-                .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?
+            self.request_relayed_proof(&circuit, req).await?
         } else {
-            self.request_proof(&release.release_info.release.id, req)
-                .await?
+            self.request_proof(&circuit, req).await?
         };
         Ok(id)
     }
@@ -314,28 +314,18 @@ impl Client {
             ids.len() == VERIFY_ID_AMT,
             "wrong number of transactions for verify"
         );
-        let (_, release) = self.extract_release_details().await?;
+        let circuit = Circuit::Verify;
         let req = self.build_verify_request(self.fetch_trusted_header_hash().await?, ids);
 
         let id = if relay {
-            self.succinct_client
-                .submit_request(
-                    release.chain_id,
-                    self.config.contract_address.0.into(),
-                    VerifyFunctionIdCall {}.encode().into(),
-                    self.fetch_verify_function_id().await?.into(),
-                    req.input.into(),
-                )
-                .await
-                .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?
+            self.request_relayed_proof(&circuit, req).await?
         } else {
-            self.request_proof(&release.release_info.release.id, req)
-                .await?
+            self.request_proof(&circuit, req).await?
         };
         Ok(id)
     }
 
-    pub async fn fetch_trusted_header_hash(&self) -> anyhow::Result<CryptoHash> {
+    async fn fetch_trusted_header_hash(&self) -> anyhow::Result<CryptoHash> {
         let mut h = self.contract.latest_header().await.map(CryptoHash)?;
         log::debug!("fetched trusted header hash {:?}", h);
         if h == CryptoHash::default() {
@@ -344,47 +334,43 @@ impl Client {
         }
         Ok(h)
     }
-    pub async fn fetch_sync_function_id(&self) -> anyhow::Result<[u8; 32]> {
-        Ok(self.contract.sync_function_id().await?)
-    }
-    pub async fn fetch_verify_function_id(&self) -> anyhow::Result<[u8; 32]> {
-        Ok(self.contract.verify_function_id().await?)
-    }
-}
-
-impl From<TransactionOrReceiptIdPrimitive> for TransactionOrReceiptId {
-    fn from(value: TransactionOrReceiptIdPrimitive) -> Self {
-        let (id, account, is_transaction) = match value {
-            TransactionOrReceiptIdPrimitive::Transaction {
-                transaction_hash,
-                sender_id,
-            } => (transaction_hash, sender_id, true),
-            TransactionOrReceiptIdPrimitive::Receipt {
-                receipt_id,
-                receiver_id,
-            } => (receipt_id, receiver_id, false),
-        };
-        TransactionOrReceiptId {
-            id: id.0,
-            account: near_light_client_protocol::config::pad_account_id(&account).into(),
-            is_transaction,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use test_utils::{fixture, testnet_state};
+    use test_utils::{fixture, logger, testnet_state};
 
-    use super::*;
+    use super::{MockClient, *};
     use crate::{config::Config, rpc::VERIFY_ID_AMT};
+
+    async fn mocks() -> (MockClient, Uuid, CryptoHash) {
+        logger();
+        let (header, _, _) = testnet_state();
+        let hash = header.hash();
+        let uuid = Uuid::new_v4();
+
+        let mut client = MockClient::new(&Config::test_config()).await.unwrap();
+        client
+            .expect_fetch_deployments()
+            .returning(|| Ok(fixture::<Vec<Deployment>>("deployments.json")));
+        client
+            .expect_fetch_trusted_header_hash()
+            .returning(move || Ok(hash));
+        client
+            .expect_request_proof()
+            .returning(move |_, _| Ok(ProofId(uuid.clone())));
+        client
+            .expect_request_relayed_proof()
+            .returning(move |_, _| Ok(ProofId(uuid)));
+        (client, uuid, hash)
+    }
 
     #[tokio::test]
     async fn test_can_build_sync() {
+        let (client, _, _) = mocks().await;
         let (header, _, _) = testnet_state();
         let hash = header.hash();
 
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
         let sync_release_id = "1cde66c3-46df-4aab-8409-4cbb97abee1c".to_string();
 
         let req = client.build_sync_request(hash);
@@ -406,7 +392,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync() {
-        pretty_env_logger::try_init();
         let client: Client = Client::new(&Config::test_config()).await.unwrap();
         let s = client.sync(false).await.unwrap();
         println!("synced with {:?}", s);
@@ -414,7 +399,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_relay() {
-        pretty_env_logger::try_init();
         let client: Client = Client::new(&Config::test_config()).await.unwrap();
         let s = client.sync(true).await.unwrap();
         println!("synced with {:?}", s);

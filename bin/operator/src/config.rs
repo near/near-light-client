@@ -45,8 +45,7 @@ impl Config {
         r
     }
 
-    #[cfg(test)]
-    pub(crate) fn test_config() -> Config {
+    pub fn test_config() -> Config {
         let s = ConfigTrait::builder()
             .add_source(File::with_name("../../default").required(false))
             .add_source(File::with_name("../../testnet").required(false))

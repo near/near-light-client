@@ -4,6 +4,8 @@ license.workspace = true
 name              = "nearx-operator"
 version.workspace = true
 
+[lib]
+
 [dependencies]
 anyhow.workspace            = true
 cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
@@ -31,11 +33,15 @@ uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] 
 near-light-client-protocol.workspace = true
 near-light-client-rpc.workspace      = true
 
-plonky2x        = { git = "https://github.com/succinctlabs/succinctx.git" }
-succinct-client = { git = "https://github.com/succinctlabs/succinctx.git" }
 http-cache-reqwest = "0.13.0"
+plonky2x           = { git = "https://github.com/succinctlabs/succinctx.git" }
+succinct-client    = { git = "https://github.com/succinctlabs/succinctx.git" }
 
 [dev-dependencies]
 hex.workspace                = true
+mockall                      = "0.12.1"
+mockall_double               = "0.3.1"
+mockito = "1.4.0"
 near-light-clientx.workspace = true
 test-utils.workspace         = true
+wiremock                     = "0.6.0"
