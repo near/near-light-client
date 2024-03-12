@@ -1,9 +1,12 @@
 use ethers::{abi::AbiEncode, contract::abigen, prelude::*};
 pub use near_light_client_rpc::TransactionOrReceiptId as TransactionOrReceiptIdPrimitive;
-use plonky2x::backend::{
-    circuit::DefaultParameters,
-    function::{ProofRequest, ProofResult},
-    prover::ProofId,
+use plonky2x::{
+    backend::{
+        circuit::DefaultParameters,
+        function::{ProofRequest, ProofResult},
+        prover::ProofId,
+    },
+    utils::serde::{deserialize_hex, serialize_hex},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -35,7 +38,9 @@ impl Circuit {
         Ok(id)
     }
     pub fn deployment(&self, releases: &[Deployment]) -> Deployment {
+        log::debug!("finding deployment in {:?}", releases);
         let find = |entrypoint: &str| -> Deployment {
+            log::debug!("finding deployment for {}", entrypoint);
             releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)
@@ -61,11 +66,14 @@ pub struct ProofResponse {
     pub id: Uuid,
     pub status: ProofStatus,
     pub proof_request: ProofRequest<DefaultParameters, 2>,
-    pub request_hash: [u8; 32],
+    #[serde(serialize_with = "serialize_hex")]
+    #[serde(deserialize_with = "deserialize_hex")]
+    pub request_hash: Vec<u8>,
     pub result: ProofResult<DefaultParameters, 2>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ProofStatus {
     Success,
     Failure,
@@ -93,7 +101,7 @@ pub struct Edges {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Release {
     pub id: String,
-    pub number: i64,
+    pub number: u64,
     pub name: String,
     #[serde(rename = "project_id")]
     pub project_id: String,
@@ -117,5 +125,25 @@ impl From<TransactionOrReceiptIdPrimitive> for TransactionOrReceiptId {
             account: near_light_client_protocol::config::pad_account_id(&account).into(),
             is_transaction,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_utils::fixture;
+
+    use super::*;
+
+    #[test]
+    fn test_deserialise_deployments() {
+        let _ = fixture::<Vec<Deployment>>("deployments.json");
+    }
+    #[test]
+    fn test_deserialise_sync_proof() {
+        let proof = fixture::<ProofResponse>("sync_proof.json");
+    }
+    #[test]
+    fn test_deserialise_verify_proof() {
+        let proof = fixture::<ProofResponse>("verify_proof.json");
     }
 }

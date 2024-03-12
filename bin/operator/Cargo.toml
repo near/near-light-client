@@ -39,9 +39,6 @@ succinct-client    = { git = "https://github.com/succinctlabs/succinctx.git" }
 
 [dev-dependencies]
 hex.workspace                = true
-mockall                      = "0.12.1"
-mockall_double               = "0.3.1"
-mockito = "1.4.0"
 near-light-clientx.workspace = true
 test-utils.workspace         = true
 wiremock                     = "0.6.0"

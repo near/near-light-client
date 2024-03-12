@@ -214,15 +214,13 @@ impl QueueManager {
         &self,
         msg: message::CheckProof,
     ) -> <message::CheckProof as Message>::Result {
-        log::info!("Awaiting proof {:?}", msg.0);
-
         let mut poll_count = 0;
+        // TODO: configure
         let sleep = tokio::time::sleep(Duration::from_secs(60));
         tokio::pin!(sleep);
 
         loop {
             if let Ok(proof) = self.succinct_client.get_proof(&msg.0).await {
-                log::info!("Got proof {:?}", proof);
                 match proof.status {
                     ProofStatus::Success => {
                         break Ok(proof);
@@ -276,58 +274,51 @@ impl QueueManager {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
 
     use near_light_client_rpc::TransactionOrReceiptId;
     use plonky2x::backend::prover::ProofId;
     use test_utils::{fixture, logger};
     use uuid::Uuid;
 
-    use self::succinct::Client;
     use super::*;
-    use crate::config::Config;
+    use crate::{succinct::tests::mocks, tests::Stubs};
 
     async fn manager() -> QueueManager {
-        let succinct_client = Client::new(&Config::test_config()).await.unwrap();
-        QueueManager::new(Default::default(), Arc::new(succinct_client))
+        let client = mocks().await;
+        QueueManager::new(Default::default(), Arc::new(client))
     }
 
     // TODO: move to integration tests
-    #[ignore = "test is a live e2e test"]
-    #[tokio::test]
-    async fn e2e_test_verify() {
-        logger();
-        let mut m = manager().await;
-
-        let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
-        let fixtures = fixture.iter().take(VERIFY_ID_AMT);
-        for r in fixtures {
-            m.prove(message::ProveTransaction {
-                tx: r.clone(),
-                id: None,
-            })
-            .await
-            .unwrap();
-        }
-        QueueManager::try_drain(m.succinct_client, m.proving_queue).await;
-    }
+    // #[ignore = "test is a live e2e test"]
+    // #[tokio::test]
+    // async fn e2e_test_verify() {
+    //     let mut m = manager().await;
+    //
+    //     let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
+    //     let fixtures = fixture.iter().take(VERIFY_ID_AMT);
+    //     for r in fixtures {
+    //         m.prove(message::ProveTransaction {
+    //             tx: r.clone(),
+    //             id: None,
+    //         })
+    //         .await
+    //         .unwrap();
+    //     }
+    //     QueueManager::try_drain(m.succinct_client, m.proving_queue).await;
+    // }
 
     #[tokio::test]
     async fn test_check_proof() {
-        logger();
         let m = manager().await;
 
         let r = m
-            .check_proof(
-                ProofId(Uuid::from_str("6bb1148e-1a2a-477e-a17b-20016cdaa32d").unwrap()).into(),
-            )
+            .check_proof(ProofId(Stubs::verify_pid()).into())
             .await
             .unwrap();
     }
 
     #[tokio::test]
     async fn test_weights() {
-        logger();
         let mut m = manager().await;
 
         let high_priority_id = 1;

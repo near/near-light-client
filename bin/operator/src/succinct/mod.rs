@@ -3,8 +3,6 @@ use std::str::FromStr;
 use anyhow::ensure;
 use ethers::prelude::*;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
-#[cfg(test)]
-use mockall::{automock, mock, predicate::*};
 use near_light_client_rpc::prelude::{CryptoHash, Itertools};
 use plonky2x::{
     backend::{
@@ -79,7 +77,6 @@ pub struct Client {
     releases: Vec<Deployment>,
 }
 
-#[cfg_attr(test, automock)]
 impl Client {
     pub async fn new(config: &config::Config) -> anyhow::Result<Self> {
         log::info!("starting succinct client");
@@ -142,6 +139,10 @@ impl Client {
     }
 
     async fn fetch_releases(&self, chain_id: &u32) -> anyhow::Result<Vec<Deployment>> {
+        log::debug!(
+            "filtering releases for {chain_id} and version {}",
+            self.config.version
+        );
         Ok(self
             .fetch_deployments()
             .await?
@@ -149,6 +150,7 @@ impl Client {
             .filter(|d| d.release_info.release.name.contains(&self.config.version))
             .filter(|d| d.chain_id == *chain_id)
             .filter_map(|mut d| {
+                log::trace!("matched deployment: {:?}", d);
                 if d.gateway == Default::default() {
                     get_gateway_address(*chain_id)
                         .and_then(|a| a.parse().ok())
@@ -161,6 +163,7 @@ impl Client {
                 }
             })
             .collect_vec())
+        .inspect(|r| log::trace!("releases: {:?}", r))
     }
 
     pub async fn extract_release_details(&self) -> anyhow::Result<(Deployment, Deployment)> {
@@ -241,7 +244,8 @@ impl Client {
             .await?
             .error_for_status()?
             .json()
-            .await?)
+            .await
+            .inspect(|d| log::debug!("fetched deployments: {:?}", d))?)
     }
 
     async fn request_relayed_proof(
@@ -259,7 +263,8 @@ impl Client {
                 req.input.into(),
             )
             .await
-            .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))?;
+            .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))
+            .inspect(|d| log::debug!("requested relay proof: {:?}", d))?;
         Ok(id)
     }
     pub async fn request_proof(
@@ -278,19 +283,21 @@ impl Client {
             .await?
             .error_for_status()?
             .json::<ProofRequestResponse>()
-            .await?
+            .await
+            .inspect(|d| log::debug!("requested proof: {:?}", d.proof_id))?
             .proof_id)
     }
     pub async fn get_proof(&self, proof_id: &ProofId) -> anyhow::Result<ProofResponse> {
-        log::debug!("getting proof {}", proof_id.0);
+        log::debug!("fetching proof: {}", proof_id.0);
         Ok(self
             .inner
             .get(format!("{}/proof/{}", self.config.rpc_url, proof_id.0))
             .send()
             .await?
             .error_for_status()?
-            .json()
-            .await?)
+            .json::<ProofResponse>()
+            .await
+            .inspect(|d| log::debug!("fetched proof: {:?}/{:?}", d.id, d.status))?)
     }
     pub async fn sync(&self, relay: bool) -> anyhow::Result<ProofId> {
         let circuit = Circuit::Sync;
@@ -337,37 +344,121 @@ impl Client {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
+    use serde_json::json;
     use test_utils::{fixture, logger, testnet_state};
+    use wiremock::{
+        matchers::{body_partial_json, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
 
-    use super::{MockClient, *};
-    use crate::{config::Config, rpc::VERIFY_ID_AMT};
+    use super::*;
+    use crate::rpc::VERIFY_ID_AMT;
 
-    async fn mocks() -> (MockClient, Uuid, CryptoHash) {
+    pub struct Stubs;
+    impl Stubs {
+        pub fn chain_id() -> u32 {
+            11155111
+        }
+
+        pub fn header_hash() -> CryptoHash {
+            let (header, _, _) = test_utils::testnet_state();
+            header.hash()
+        }
+
+        pub fn sync_pid() -> Uuid {
+            Uuid::from_str("038e3558-7ea5-4081-85fc-708cdd139525").unwrap()
+        }
+        pub fn verify_pid() -> Uuid {
+            Uuid::from_str("c3f9a7ad-b9d1-44d6-83fb-55894f56f2e6").unwrap()
+        }
+
+        pub fn version() -> String {
+            "v0.0.4-rc.1".to_string()
+        }
+    }
+
+    pub async fn mocks() -> Client {
         logger();
-        let (header, _, _) = testnet_state();
-        let hash = header.hash();
-        let uuid = Uuid::new_v4();
+        let deployments = fixture::<Vec<Deployment>>("deployments.json");
 
-        let mut client = MockClient::new(&Config::test_config()).await.unwrap();
+        let mut config = crate::Config::test_config();
+
+        let server = MockServer::start().await;
+        config.succinct.version = Stubs::version();
+        config.succinct.rpc_url = server.uri();
+        config.succinct.eth_rpc_url = server.uri();
+        config.succinct.rpc_url = server.uri();
+
+        // Mock for eth_chainId request
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .and(body_partial_json(json!({"method":"eth_chainId"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"jsonrpc":"2.0","id":1,"result":hex::encode((Stubs::chain_id() as u32).to_be_bytes())}),
+            ))
+            .mount(&server)
+            .await;
+
+        // Mock for eth_call request
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .and(body_partial_json(json!({"method":"eth_call"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"jsonrpc":"2.0","id":1,"result": hex::encode(Stubs::header_hash().0)}),
+            ))
+            .mount(&server)
+            .await;
+
+        // Mock for fetching deployments
+        Mock::given(method("GET"))
+            .and(path("/deployments/near/near-light-client"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&deployments))
+            .mount(&server)
+            .await;
+
+        // Mock for requesting a new platform proof
+        Mock::given(method("POST"))
+            .and(path("/proof/new"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"proof_id": Stubs::sync_pid()})),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/request/new"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"request_id": Stubs::sync_pid()})),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/proof/{}", Stubs::sync_pid())))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(fixture::<ProofResponse>("sync_proof.json")),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/proof/{}", Stubs::verify_pid())))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(fixture::<ProofResponse>("verify_proof.json")),
+            )
+            .mount(&server)
+            .await;
+
+        let client = Client::new(&config).await.unwrap();
         client
-            .expect_fetch_deployments()
-            .returning(|| Ok(fixture::<Vec<Deployment>>("deployments.json")));
-        client
-            .expect_fetch_trusted_header_hash()
-            .returning(move || Ok(hash));
-        client
-            .expect_request_proof()
-            .returning(move |_, _| Ok(ProofId(uuid.clone())));
-        client
-            .expect_request_relayed_proof()
-            .returning(move |_, _| Ok(ProofId(uuid)));
-        (client, uuid, hash)
     }
 
     #[tokio::test]
     async fn test_can_build_sync() {
-        let (client, _, _) = mocks().await;
+        let client = mocks().await;
         let (header, _, _) = testnet_state();
         let hash = header.hash();
 
@@ -392,14 +483,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync() {
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+        let client = mocks().await;
+
         let s = client.sync(false).await.unwrap();
         println!("synced with {:?}", s);
     }
 
     #[tokio::test]
     async fn test_sync_relay() {
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+        let client = mocks().await;
         let s = client.sync(true).await.unwrap();
         println!("synced with {:?}", s);
     }
@@ -409,7 +501,7 @@ mod tests {
         let (header, _, _) = testnet_state();
         let hash = header.hash();
 
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
+        let client = mocks().await;
         let verify_release_id = "c35d498e-f283-4b14-a42f-3a35807d3a70".to_string();
 
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
@@ -438,11 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify() {
-        pretty_env_logger::try_init();
-        let (header, _, _) = testnet_state();
-
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
-
+        let client = mocks().await;
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
             .into_iter()
             .take(VERIFY_ID_AMT)
@@ -454,11 +542,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_relay() {
-        pretty_env_logger::try_init();
-        let (header, _, _) = testnet_state();
-
-        let client: Client = Client::new(&Config::test_config()).await.unwrap();
-
+        let client = mocks().await;
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
             .into_iter()
             .take(VERIFY_ID_AMT)
