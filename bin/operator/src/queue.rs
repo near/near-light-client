@@ -4,10 +4,12 @@ use actix::{prelude::*, Addr};
 use anyhow::{anyhow, ensure, Result};
 use futures::{FutureExt, TryFutureExt};
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
-use near_light_client_rpc::{prelude::GetProof, TransactionOrReceiptId};
+use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
 use plonky2x::backend::prover::ProofId;
 use priority_queue::PriorityQueue;
+pub use types::RegistryInfo;
 
+use self::types::{PriorityWeight, TransactionOrReceiptIdNewtype};
 use crate::{
     rpc::VERIFY_ID_AMT,
     succinct::{
@@ -16,109 +18,21 @@ use crate::{
     },
 };
 
-type PriorityWeight = u32;
+mod types;
+
 // TODO: decide if we can try to identity hash based on ids, they're already
 // hashed
 // Collision <> receipt & tx?
 type Queue = PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>;
 
-#[derive(Debug, Clone)]
-pub struct TransactionOrReceiptIdNewtype(pub TransactionOrReceiptId);
-
-impl From<TransactionOrReceiptId> for TransactionOrReceiptIdNewtype {
-    fn from(id: TransactionOrReceiptId) -> Self {
-        Self(id)
-    }
-}
-impl std::hash::Hash for TransactionOrReceiptIdNewtype {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let (is_transaction, id, account) = match &self.0 {
-            GetProof::Transaction {
-                transaction_hash,
-                sender_id,
-            } => (true, transaction_hash, sender_id),
-            GetProof::Receipt {
-                receipt_id,
-                receiver_id,
-            } => (false, receipt_id, receiver_id),
-        };
-        is_transaction.hash(state);
-        id.hash(state);
-        account.hash(state);
-    }
-}
-
-impl PartialEq for TransactionOrReceiptIdNewtype {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
-            (
-                TransactionOrReceiptId::Transaction {
-                    transaction_hash: l1,
-                    sender_id: l2,
-                },
-                TransactionOrReceiptId::Transaction {
-                    transaction_hash: r1,
-                    sender_id: r2,
-                },
-            ) => l1 == r1 && l2 == r2,
-            (
-                TransactionOrReceiptId::Receipt {
-                    receipt_id: l1,
-                    receiver_id: l2,
-                },
-                TransactionOrReceiptId::Receipt {
-                    receipt_id: r1,
-                    receiver_id: r2,
-                },
-            ) => l1 == r1 && l2 == r2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for TransactionOrReceiptIdNewtype {}
-
-#[derive(Debug)]
-pub struct RegistryInfo {
-    pub id: usize,
-    // Their weight in the shared queue
-    pub weight: PriorityWeight,
-}
-
-#[derive(Debug, Clone, Message)]
-#[rtype(result = "Result<()>")]
-pub struct ProveTransaction {
-    pub id: Option<usize>,
-    pub tx: TransactionOrReceiptId,
-}
-
-#[derive(Debug, Clone, Message)]
-#[rtype(result = "Result<ProofResponse>")]
-pub struct CheckProof(pub ProofId);
-
-impl From<ProofId> for CheckProof {
-    fn from(id: ProofId) -> Self {
-        Self(id)
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Drain;
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct Register(pub RegistryInfo);
-
 /// An in memory queue as a placeholder until we decide on the flow
 pub struct QueueManager {
-    // TODO: subscribe to watch channel here
     registry: HashMap<usize, RegistryInfo>,
     succinct_client: Arc<succinct::Client>,
-    // TODO: decide if need parkinglot
     // TODO: persist me
     proving_queue: Queue,
     batches: HashMap<u32, Option<ProofId>>,
+    request_info: HashMap<ProofId, Option<ProofStatus>>,
 }
 
 impl QueueManager {
@@ -134,6 +48,7 @@ impl QueueManager {
             succinct_client,
             proving_queue,
             batches: Default::default(),
+            request_info: Default::default(),
         }
     }
 
@@ -162,7 +77,7 @@ impl QueueManager {
         tokio::pin!(sleep);
 
         loop {
-            if let Ok(proof) = self.succinct_client.get_proof(&msg).await {
+            if let Ok(proof) = self.succinct_client.get_proof(msg.clone()).await {
                 match proof.status {
                     ProofStatus::Success => {
                         break Ok(proof);
@@ -176,6 +91,7 @@ impl QueueManager {
             sleep.as_mut().await;
         }
     }
+
     fn make_batch(&mut self) -> (u32, Vec<TransactionOrReceiptId>) {
         let mut id = 0;
         let mut txs = vec![];
@@ -201,7 +117,20 @@ impl Actor for QueueManager {
         ctx.run_interval(Duration::from_secs(1), |_, ctx| {
             ctx.address().do_send(Drain)
         });
+        ctx.run_interval(Duration::from_secs(60 * 60), |_, ctx| {
+            ctx.address().do_send(Sync)
+        });
+        ctx.run_interval(Duration::from_secs(60), |_, ctx| {
+            ctx.address().do_send(Cleanup)
+        });
     }
+}
+
+#[derive(Message)]
+#[rtype(result = "Result<()>")]
+pub struct ProveTransaction {
+    pub id: Option<usize>,
+    pub tx: TransactionOrReceiptId,
 }
 
 impl Handler<ProveTransaction> for QueueManager {
@@ -210,6 +139,16 @@ impl Handler<ProveTransaction> for QueueManager {
     fn handle(&mut self, msg: ProveTransaction, _ctx: &mut Self::Context) -> Self::Result {
         self.prove(msg.id, msg.tx)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Message)]
+#[rtype(result = "Result<ProofResponse>")]
+pub struct CheckProof(pub ProofId);
+
+impl From<ProofId> for CheckProof {
+    fn from(id: ProofId) -> Self {
+        Self(id)
     }
 }
 
@@ -224,6 +163,43 @@ impl Handler<CheckProof> for QueueManager {
         todo!()
     }
 }
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Register(pub RegistryInfo);
+
+impl Handler<Register> for QueueManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: Register, _ctx: &mut Self::Context) -> Self::Result {
+        self.registry.insert(msg.0.id, msg.0);
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Sync;
+
+impl Handler<Sync> for QueueManager {
+    type Result = AtomicResponse<Self, ()>;
+
+    fn handle(&mut self, _msg: Sync, _ctx: &mut Self::Context) -> Self::Result {
+        let client = self.succinct_client.clone();
+        // Not ssure this needs atomic
+        AtomicResponse::new(Box::pin(
+            async move { client.sync(true).await.unwrap() }
+                .into_actor(self)
+                .map(move |r, this, _| {
+                    log::debug!("syncing {:?}", r);
+                    this.request_info.insert(r, None);
+                }),
+        ))
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Drain;
 
 impl Handler<Drain> for QueueManager {
     type Result = AtomicResponse<Self, ()>;
@@ -247,7 +223,60 @@ impl Handler<Drain> for QueueManager {
                 // Once verify proof id is returned, write the result to ourselves
                 .map(move |r, this, _| {
                     this.batches.get_mut(&id).unwrap().replace(r);
+                    log::debug!("batch {id} done, batches: {:?}", this.batches);
                 }),
+        ))
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Cleanup;
+
+impl Handler<Cleanup> for QueueManager {
+    type Result = AtomicResponse<Self, ()>;
+
+    fn handle(&mut self, _msg: Cleanup, _ctx: &mut Self::Context) -> Self::Result {
+        log::debug!("cleaning up");
+        // Need to check the proofs, update their state here if they
+        // are broken OR if they need to be relayed to the gateway manually
+        //
+        let to_check = self
+            .batches
+            .clone()
+            .into_iter()
+            .filter_map(|(_, pid)| pid)
+            .filter(|pid| self.request_info.get(pid).is_none())
+            .take(30) // TODO: configure
+            .collect_vec();
+
+        if to_check.is_empty() {
+            return AtomicResponse::new(Box::pin(async {}.into_actor(self)));
+        }
+
+        let client = self.succinct_client.clone();
+        // Not ssure this needs atomic
+        AtomicResponse::new(Box::pin(
+            async move {
+                let mut futs = vec![];
+                log::debug!("checking on {} proofs", to_check.len());
+                for pid in to_check {
+                    futs.push(client.get_proof(pid).map(move |p| (pid, p)));
+                }
+                futures::future::join_all(futs).await
+            }
+            .into_actor(self)
+            .map(move |r, this, _| {
+                r.into_iter().for_each(|(pid, p)| match p {
+                    Ok(p) => {
+                        log::debug!("proof {:?} done: {:?}", pid, p);
+                        this.request_info.insert(pid, Some(p.status));
+                    }
+                    Err(e) => {
+                        log::error!("{:?}", e);
+                    }
+                });
+            }),
         ))
     }
 }

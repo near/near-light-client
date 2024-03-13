@@ -287,7 +287,7 @@ impl Client {
             .inspect(|d| log::debug!("requested proof: {:?}", d.proof_id))?
             .proof_id)
     }
-    pub async fn get_proof(&self, proof_id: &ProofId) -> anyhow::Result<ProofResponse> {
+    pub async fn get_proof(&self, proof_id: ProofId) -> anyhow::Result<ProofResponse> {
         log::debug!("fetching proof: {}", proof_id.0);
         Ok(self
             .inner

@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     config::Config,
-    queue::{ProveTransaction, QueueManager},
+    queue::{ProveTransaction, QueueManager, Register, RegistryInfo},
     succinct,
 };
 
@@ -46,7 +46,7 @@ impl RpcServerImpl {
     }
 }
 
-#[rpc(server, namespace = "prove")]
+#[rpc(server)]
 pub trait ProveRpc {
     #[method(name = "sync")]
     async fn sync(&self) -> Result<ProofId>;
@@ -54,11 +54,14 @@ pub trait ProveRpc {
     #[method(name = "verify")]
     async fn verify(&self, ids: Vec<GetProof>) -> Result<ProofId>;
 
-    #[method(name = "push")]
+    #[method(name = "prove")]
     async fn push(&self, ids: Vec<GetProof>) -> Result<()>;
 
     #[subscription(name = "subscribe" => "override", item = Vec<ProofResponse>)]
     async fn subscribe_proof(&self, keys: Option<Vec<ProofId>>) -> SubscriptionResult;
+
+    #[method(name = "register")]
+    async fn register(&self, info: RegistryInfo) -> Result<()>;
 }
 
 #[async_trait]
@@ -108,7 +111,7 @@ impl ProveRpcServer for RpcServerImpl {
                 }
                 let mut successful = vec![];
                 for (i, id) in proofs.clone().iter().enumerate() {
-                    let res = self.succinct_client.get_proof(&id).await;
+                    let res = self.succinct_client.get_proof(id.clone()).await;
                     if let Ok(res) = res {
                         let msg = SubscriptionMessage::from_json(&res).unwrap();
                         sink.send(msg).await.unwrap();
@@ -122,6 +125,10 @@ impl ProveRpcServer for RpcServerImpl {
                 }
             }
         }
+        Ok(())
+    }
+    async fn register(&self, info: RegistryInfo) -> Result<()> {
+        self.queue.send(Register(info)).await;
         Ok(())
     }
 }
