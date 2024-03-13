@@ -1,5 +1,7 @@
-use near_light_client_rpc::prelude::Itertools;
-use nearx_operator::{config::Config, rpc::VERIFY_ID_AMT, succinct::*};
+use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use nearx_operator::{
+    config::Config, rpc::VERIFY_ID_AMT, succinct::*, types::TransactionOrReceiptIdPrimitive,
+};
 use test_utils::{fixture, testnet_state};
 
 async fn client() -> Client {
@@ -39,4 +41,10 @@ async fn test_verify_relay() {
 
     let s = client.verify(txs, true).await.unwrap();
     println!("verify with {:?}", s);
+}
+
+async fn test_check_proof() {
+    let c = client().await;
+    let proofs = c.fetch_proofs().await.unwrap();
+    println!("{:?}", proofs);
 }

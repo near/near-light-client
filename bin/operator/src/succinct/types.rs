@@ -66,10 +66,13 @@ pub struct ProofResponse {
     pub id: Uuid,
     pub status: ProofStatus,
     pub proof_request: ProofRequest<DefaultParameters, 2>,
-    #[serde(serialize_with = "serialize_hex")]
-    #[serde(deserialize_with = "deserialize_hex")]
-    pub request_hash: Vec<u8>,
-    pub result: ProofResult<DefaultParameters, 2>,
+    pub result: Option<ProofResult<DefaultParameters, 2>>,
+    pub edges: ProofEdges,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProofEdges {
+    pub request: Option<Request>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +81,7 @@ pub enum ProofStatus {
     Success,
     Failure,
     Running,
+    Requested,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,11 +94,11 @@ pub struct Deployment {
     pub gateway: Address,
     pub tx_hash: H256,
     #[serde(rename = "edges")]
-    pub release_info: Edges,
+    pub release_info: DeploymentEdges,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Edges {
+pub struct DeploymentEdges {
     pub release: Release,
 }
 
@@ -106,6 +110,11 @@ pub struct Release {
     #[serde(rename = "project_id")]
     pub project_id: String,
     pub entrypoint: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub id: String,
 }
 
 impl From<TransactionOrReceiptIdPrimitive> for TransactionOrReceiptId {

@@ -83,7 +83,7 @@ impl QueueManager {
                         break Ok(proof);
                     }
                     ProofStatus::Failure => break Ok(proof),
-                    ProofStatus::Running => {}
+                    _ => {}
                 }
             }
             poll_count += 1;

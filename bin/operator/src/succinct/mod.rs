@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use anyhow::ensure;
 use ethers::prelude::*;
@@ -253,7 +253,7 @@ impl Client {
         circuit: &Circuit,
         req: BytesRequestData,
     ) -> anyhow::Result<ProofId> {
-        let id = self
+        let request_id = self
             .succinct_client
             .submit_request(
                 circuit.deployment(&self.releases).chain_id,
@@ -263,9 +263,52 @@ impl Client {
                 req.input.into(),
             )
             .await
-            .and_then(|id| Uuid::from_str(&id).map(ProofId).map_err(anyhow::Error::msg))
             .inspect(|d| log::debug!("requested relay proof: {:?}", d))?;
-        Ok(id)
+        Ok(self.wait_for_proof(&request_id).await?)
+    }
+
+    pub async fn fetch_proofs(&self) -> anyhow::Result<Vec<ProofResponse>> {
+        let res: anyhow::Result<_> = Ok(self
+            .inner
+            .get(format!("{}/proofs", self.config.rpc_url))
+            .query(&[
+                (
+                    "project",
+                    format!("{}/{}", self.config.organisation_id, self.config.project_id),
+                ),
+                ("limit", "10".to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<ProofResponse>>()
+            .await?);
+        res
+    }
+
+    // We wait for the proof to be submitted to the explorer so we can track them by
+    // their proof id's
+    async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        let mut attempts = 0;
+        loop {
+            let proofs = self.fetch_proofs().await?;
+            if let Some(p) = proofs.iter().find(|p| {
+                if let Some(request) = &p.edges.request {
+                    request.id == request_id
+                } else {
+                    false
+                }
+            }) {
+                break Ok(ProofId(p.id));
+            } else {
+                attempts += 1;
+                if attempts > 10 {
+                    anyhow::bail!("{request_id} timed out waiting for proof id");
+                }
+                interval.tick().await;
+            }
+        }
     }
     pub async fn request_proof(
         &self,
@@ -550,5 +593,10 @@ pub mod tests {
 
         let s = client.verify(txs, true).await.unwrap();
         println!("verify with {:?}", s);
+    }
+    #[tokio::test]
+    async fn test_check_proof() {
+        let client = mocks().await;
+        let proofs = client.fetch_proofs().await.unwrap();
     }
 }
