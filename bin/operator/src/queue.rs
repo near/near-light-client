@@ -1,16 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{anyhow, ensure};
-use coerce::actor::{
-    context::ActorContext,
-    message::{Handler, Message},
-    Actor,
-};
+use actix::{prelude::*, Addr};
+use anyhow::{anyhow, ensure, Result};
+use futures::{FutureExt, TryFutureExt};
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
-use jsonrpsee_core::async_trait;
 use near_light_client_rpc::{prelude::GetProof, TransactionOrReceiptId};
+use plonky2x::backend::prover::ProofId;
 use priority_queue::PriorityQueue;
-use tokio::sync::RwLock;
 
 use crate::{
     rpc::VERIFY_ID_AMT,
@@ -20,8 +16,11 @@ use crate::{
     },
 };
 
-// TODO: weights management
 type PriorityWeight = u32;
+// TODO: decide if we can try to identity hash based on ids, they're already
+// hashed
+// Collision <> receipt & tx?
+type Queue = PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>;
 
 #[derive(Debug, Clone)]
 pub struct TransactionOrReceiptIdNewtype(pub TransactionOrReceiptId);
@@ -31,7 +30,6 @@ impl From<TransactionOrReceiptId> for TransactionOrReceiptIdNewtype {
         Self(id)
     }
 }
-
 impl std::hash::Hash for TransactionOrReceiptIdNewtype {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let (is_transaction, id, account) = match &self.0 {
@@ -87,95 +85,40 @@ pub struct RegistryInfo {
     pub weight: PriorityWeight,
 }
 
-pub mod message {
-    use anyhow::Result;
-    use coerce::actor::message::Message;
-    use plonky2x::backend::prover::ProofId;
-
-    use super::*;
-
-    #[derive(Debug, Clone)]
-    pub struct ProveTransaction {
-        pub id: Option<usize>,
-        pub tx: TransactionOrReceiptId,
-    }
-
-    impl Message for ProveTransaction {
-        type Result = Result<()>;
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct CheckProof(pub ProofId);
-    impl From<ProofId> for CheckProof {
-        fn from(id: ProofId) -> Self {
-            Self(id)
-        }
-    }
-
-    impl Message for CheckProof {
-        type Result = Result<ProofResponse>;
-    }
-
-    pub struct Drain;
-
-    impl Message for Drain {
-        type Result = ();
-    }
-
-    pub struct Register(pub RegistryInfo);
+#[derive(Debug, Clone, Message)]
+#[rtype(result = "Result<()>")]
+pub struct ProveTransaction {
+    pub id: Option<usize>,
+    pub tx: TransactionOrReceiptId,
 }
+
+#[derive(Debug, Clone, Message)]
+#[rtype(result = "Result<ProofResponse>")]
+pub struct CheckProof(pub ProofId);
+
+impl From<ProofId> for CheckProof {
+    fn from(id: ProofId) -> Self {
+        Self(id)
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Drain;
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Register(pub RegistryInfo);
 
 /// An in memory queue as a placeholder until we decide on the flow
 pub struct QueueManager {
+    // TODO: subscribe to watch channel here
     registry: HashMap<usize, RegistryInfo>,
-    // TODO: decide if need parkinglot
     succinct_client: Arc<succinct::Client>,
+    // TODO: decide if need parkinglot
     // TODO: persist me
-    proving_queue: Arc<
-        RwLock<PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>>,
-    >,
-}
-
-#[async_trait]
-impl Actor for QueueManager {
-    async fn started(&mut self, _ctx: &mut ActorContext) {
-        tokio::spawn(self.run());
-    }
-}
-
-// TODO: subscription topics
-
-#[async_trait]
-impl Handler<message::ProveTransaction> for QueueManager {
-    async fn handle(
-        &mut self,
-        msg: message::ProveTransaction,
-        _ctx: &mut ActorContext,
-    ) -> <message::ProveTransaction as coerce::actor::message::Message>::Result {
-        self.prove(msg).await
-    }
-}
-
-#[async_trait]
-impl Handler<message::CheckProof> for QueueManager {
-    async fn handle(
-        &mut self,
-        msg: message::CheckProof,
-        _ctx: &mut ActorContext,
-    ) -> <message::CheckProof as coerce::actor::message::Message>::Result {
-        self.check_proof(msg).await
-    }
-}
-
-#[async_trait]
-impl Handler<message::Drain> for QueueManager {
-    async fn handle(
-        &mut self,
-        _msg: message::Drain,
-        _ctx: &mut ActorContext,
-    ) -> <message::Drain as coerce::actor::message::Message>::Result {
-        Self::try_drain(self.succinct_client.clone(), self.proving_queue.clone()).await
-    }
+    proving_queue: Queue,
+    batches: HashMap<u32, Option<ProofId>>,
 }
 
 impl QueueManager {
@@ -184,43 +127,42 @@ impl QueueManager {
         succinct_client: Arc<succinct::Client>,
     ) -> Self {
         log::info!("starting queue manager");
-        let proving_queue = PriorityQueue::<_, _, DefaultHashBuilder>::with_default_hasher();
+        let proving_queue = Queue::with_default_hasher();
 
         Self {
             registry,
             succinct_client,
-            proving_queue: Arc::new(RwLock::new(proving_queue)),
+            proving_queue,
+            batches: Default::default(),
         }
     }
 
-    async fn prove(
+    fn prove(
         &mut self,
-        msg: message::ProveTransaction,
-    ) -> <message::ProveTransaction as Message>::Result {
-        let weight = if let Some(id) = msg.id {
+        id: Option<usize>,
+        tx: TransactionOrReceiptId,
+    ) -> <ProveTransaction as Message>::Result {
+        let weight = if let Some(id) = id {
             self.registry
                 .get(&id)
                 .ok_or_else(|| anyhow!("id not found"))?
                 .weight
         } else {
-            2
+            1
         };
-        log::info!("Adding to proof queue {:?} with weight {weight}", msg);
-        self.proving_queue.write().await.push(msg.tx.into(), weight);
+        log::debug!("adding to {:?} with weight: {weight}", tx);
+        self.proving_queue.push(tx.into(), weight);
         Ok(())
     }
 
-    async fn check_proof(
-        &self,
-        msg: message::CheckProof,
-    ) -> <message::CheckProof as Message>::Result {
+    async fn check_proof(&self, msg: ProofId) -> <CheckProof as Message>::Result {
         let mut poll_count = 0;
         // TODO: configure
         let sleep = tokio::time::sleep(Duration::from_secs(60));
         tokio::pin!(sleep);
 
         loop {
-            if let Ok(proof) = self.succinct_client.get_proof(&msg.0).await {
+            if let Ok(proof) = self.succinct_client.get_proof(&msg).await {
                 match proof.status {
                     ProofStatus::Success => {
                         break Ok(proof);
@@ -234,41 +176,79 @@ impl QueueManager {
             sleep.as_mut().await;
         }
     }
-
-    async fn try_drain(
-        succinct: Arc<succinct::Client>,
-        queue: Arc<
-            RwLock<
-                PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>,
-            >,
-        >,
-    ) {
-        log::trace!("checking queue");
-        let mut queue = queue.write().await;
-        if queue.len() >= VERIFY_ID_AMT {
-            let mut txs = vec![];
+    fn make_batch(&mut self) -> (u32, Vec<TransactionOrReceiptId>) {
+        let mut id = 0;
+        let mut txs = vec![];
+        if self.proving_queue.len() >= VERIFY_ID_AMT {
             for _ in 0..VERIFY_ID_AMT {
-                let (req, _) = queue.pop().unwrap();
+                let (req, _) = self.proving_queue.pop().unwrap();
                 txs.push(req.0);
             }
-            let id = succinct.verify(txs, true).await.unwrap();
-            // TODO: selfjobs.push(Job::CheckProof(id), 1);
         }
+        if !txs.is_empty() {
+            let new_id = self.batches.len() as u32;
+            self.batches.insert(new_id, None);
+            id = new_id;
+        }
+        (id, txs)
     }
+}
 
-    pub fn run(&mut self) -> tokio::task::JoinHandle<()> {
-        let queue = self.proving_queue.clone();
-        let succinct = self.succinct_client.clone();
+impl Actor for QueueManager {
+    type Context = Context<Self>;
 
-        tokio::spawn(async move {
-            loop {
-                // TODO: housekeeping job
-                tokio::select! {
-                    _ = Self::try_drain(succinct.clone(), queue.clone()) => {}
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        })
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.run_interval(Duration::from_secs(1), |_, ctx| {
+            ctx.address().do_send(Drain)
+        });
+    }
+}
+
+impl Handler<ProveTransaction> for QueueManager {
+    type Result = Result<()>;
+
+    fn handle(&mut self, msg: ProveTransaction, _ctx: &mut Self::Context) -> Self::Result {
+        self.prove(msg.id, msg.tx)?;
+        Ok(())
+    }
+}
+
+// TODO: change to periodic job to check proofs for all batches and clean up
+impl Handler<CheckProof> for QueueManager {
+    type Result = ResponseFuture<Result<ProofResponse>>;
+
+    fn handle(&mut self, msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
+        // // This feels like a succinct client job, keep checking queues
+        // let fut = self.check_proof(msg.0);
+        // Box::pin(fut)
+        todo!()
+    }
+}
+
+impl Handler<Drain> for QueueManager {
+    type Result = AtomicResponse<Self, ()>;
+
+    fn handle(&mut self, _msg: Drain, _ctx: &mut Self::Context) -> Self::Result {
+        // First pull the correct transactions
+        // Create batch and write it
+        let (id, batch) = self.make_batch();
+        // TODO: cleanup/retry procedures
+        //
+        if batch.is_empty() {
+            return AtomicResponse::new(Box::pin(async {}.into_actor(self)));
+        }
+
+        let client = self.succinct_client.clone();
+        // Not ssure this needs atomic
+        AtomicResponse::new(Box::pin(
+            async move { client.verify(batch, true).await.unwrap() }
+                // Then ask succinct to verify
+                .into_actor(self)
+                // Once verify proof id is returned, write the result to ourselves
+                .map(move |r, this, _| {
+                    this.batches.get_mut(&id).unwrap().replace(r);
+                }),
+        ))
     }
 }
 
@@ -277,8 +257,7 @@ mod tests {
 
     use near_light_client_rpc::TransactionOrReceiptId;
     use plonky2x::backend::prover::ProofId;
-    use test_utils::{fixture, logger};
-    use uuid::Uuid;
+    use test_utils::fixture;
 
     use super::*;
     use crate::{succinct::tests::mocks, tests::Stubs};
@@ -321,44 +300,57 @@ mod tests {
     async fn test_weights() {
         let mut m = manager().await;
 
-        let high_priority_id = 1;
-        let registry = vec![(
-            high_priority_id,
-            RegistryInfo {
-                id: high_priority_id,
-                weight: 5,
-            },
-        )]
-        .into_iter()
-        .collect();
-        m.registry = registry;
-
         let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
-        let fixtures = fixture.iter().take(3);
-        for r in fixtures {
-            m.prove(message::ProveTransaction {
-                tx: r.clone(),
-                id: None,
-            })
-            .await
-            .unwrap();
+        let to_take = VERIFY_ID_AMT - 1;
+        let fixtures = fixture.clone().into_iter().take(to_take);
+        let priority_from = VERIFY_ID_AMT - 7;
+
+        let mut priority: Vec<TransactionOrReceiptIdNewtype> = vec![];
+
+        for (i, r) in fixtures.enumerate() {
+            let id = if i >= priority_from {
+                m.registry.insert(
+                    i,
+                    RegistryInfo {
+                        id: i,
+                        weight: i as u32,
+                    },
+                );
+                // Store the prioritsed entries
+                priority.push(r.clone().into());
+                Some(i)
+            } else {
+                None
+            };
+            m.prove(id, r).unwrap();
         }
 
-        let mut p: Vec<TransactionOrReceiptIdNewtype> = vec![];
-        for priority_tx in fixture.iter().rev().take(5) {
-            m.prove(message::ProveTransaction {
-                tx: priority_tx.clone(),
-                id: Some(high_priority_id),
-            })
-            .await
-            .unwrap();
-            p.push(priority_tx.clone().into());
+        let mut check_queue = m.proving_queue.clone();
+
+        let mut i = to_take - 1;
+        while let Some((tx, w)) = check_queue.pop() {
+            if i >= priority_from {
+                assert_eq!(i as u32, w);
+                assert!(priority.contains(&tx));
+                i -= 1;
+            } else {
+                assert_eq!(w, 1)
+            }
         }
 
-        let (ret, wei) = m.proving_queue.write().await.pop().unwrap();
-        assert_eq!(wei, 5);
-        assert!(p.contains(&ret));
+        let (tx, w) = m.proving_queue.pop().unwrap();
+        // Make empty batch, since theres not enough to fill
+        let (id, batch) = m.make_batch();
+        assert_eq!(id, 0);
+        assert!(batch.is_empty());
 
-        QueueManager::try_drain(m.succinct_client, m.proving_queue).await;
+        // Put the tx we took back
+        m.prove(Some(w as usize), tx.0).unwrap();
+        m.prove(None, fixture.last().unwrap().clone()).unwrap();
+        println!("{}", m.proving_queue.len());
+
+        let (id, batch) = m.make_batch();
+        assert_eq!(id, 0);
+        assert!(!batch.is_empty());
     }
 }

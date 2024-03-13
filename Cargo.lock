@@ -3864,9 +3864,9 @@ dependencies = [
 name = "nearx-operator"
 version = "0.3.0"
 dependencies = [
+ "actix",
  "anyhow",
  "cached",
- "coerce",
  "config",
  "ethers",
  "flume",

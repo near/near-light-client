@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use coerce::actor::LocalActorRef;
+use actix::Addr;
 use jsonrpsee::{
     proc_macros::rpc,
     server::Server,
@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     config::Config,
-    queue::{message::ProveTransaction, QueueManager},
+    queue::{ProveTransaction, QueueManager},
     succinct,
 };
 
@@ -25,11 +25,11 @@ type Result<T> = core::result::Result<T, ErrorObjectOwned>;
 
 pub struct RpcServerImpl {
     succinct_client: Arc<succinct::Client>,
-    queue: LocalActorRef<QueueManager>,
+    queue: Addr<QueueManager>,
 }
 
 impl RpcServerImpl {
-    pub fn new(succinct_client: Arc<succinct::Client>, queue: LocalActorRef<QueueManager>) -> Self {
+    pub fn new(succinct_client: Arc<succinct::Client>, queue: Addr<QueueManager>) -> Self {
         log::info!("starting rpc server");
         Self {
             succinct_client,

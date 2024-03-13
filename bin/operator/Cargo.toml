@@ -7,9 +7,9 @@ version.workspace = true
 [lib]
 
 [dependencies]
+actix                       = { version = "*", features = ["macros"] }
 anyhow.workspace            = true
 cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
-coerce.workspace            = true
 config.workspace            = true
 ethers                      = { version = "2.0" }
 flume                       = "*"

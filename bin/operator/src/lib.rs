@@ -6,6 +6,8 @@ pub mod rpc;
 pub mod succinct;
 
 pub mod prelude {
+    pub use actix::{self, prelude::*};
+
     pub use crate::{
         config::Config,
         queue::QueueManager,
