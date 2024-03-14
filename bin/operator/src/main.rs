@@ -15,7 +15,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let client = Arc::new(SuccinctClient::new(&config).await?);
 
-    let engine = Engine::new(Default::default(), client.clone()).start();
+    let engine = Engine::new(client.clone()).start();
 
     let server_handle = RpcServer::new(client, engine.clone()).run(&config).await?;
 

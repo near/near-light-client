@@ -20,8 +20,11 @@ function script() {
     TAIL="--broadcast"
   fi
 
-  if [ -z "$SKIP_VERIFY" ]; then
-    TAIL="$TAIL --verify --verifier etherscan"
+  if [ $1 == "Deploy" ]; then
+    VERIFIER="${VERIFIER:---verifier etherscan}"
+    if [ -z "$SKIP_VERIFY" ]; then
+      TAIL="$TAIL --verify $VERIFIER"
+    fi
   fi
 
   if [ ! -z "$IS_LEGACY" ]; then
@@ -35,7 +38,7 @@ function script() {
       --sender $ETH_PUBLIC_KEY \
       --rpc-url $ETH_RPC_URL \
       --private-key $ETH_PRIVATE_KEY \
-      $TAIL
+      $TAIL -vvvv
   )
 }
 

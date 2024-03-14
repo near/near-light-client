@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) type PriorityWeight = u32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionOrReceiptIdNewtype(pub TransactionOrReceiptId);
 
 impl From<TransactionOrReceiptId> for TransactionOrReceiptIdNewtype {
@@ -59,7 +59,7 @@ impl PartialEq for TransactionOrReceiptIdNewtype {
 
 impl Eq for TransactionOrReceiptIdNewtype {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryInfo {
     pub id: usize,
     // Their weight in the shared queue

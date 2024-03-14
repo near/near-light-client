@@ -9,13 +9,12 @@ use jsonrpsee::{
 };
 use jsonrpsee_core::{async_trait, SubscriptionResult};
 use near_light_client_rpc::prelude::GetProof;
-use plonky2x::backend::prover::ProofId;
 use tokio::task::JoinHandle;
 
 use crate::{
     config::Config,
     engine::{Engine, ProveTransaction, Register, RegistryInfo},
-    succinct,
+    succinct::{self, ProofId},
 };
 
 type Result<T> = core::result::Result<T, ErrorObjectOwned>;
@@ -33,6 +32,7 @@ impl RpcServerImpl {
             queue,
         }
     }
+
     pub async fn run(self, config: &Config) -> anyhow::Result<JoinHandle<()>> {
         let server = Server::builder()
             .build(config.host.parse::<SocketAddr>()?)
@@ -70,6 +70,7 @@ impl ProveRpcServer for RpcServerImpl {
         })?;
         Ok(pid)
     }
+
     async fn verify(&self, ids: Vec<GetProof>) -> Result<ProofId> {
         let pid = self.succinct_client.verify(ids, true).await.map_err(|e| {
             log::error!("{:?}", e);
@@ -77,6 +78,7 @@ impl ProveRpcServer for RpcServerImpl {
         })?;
         Ok(pid)
     }
+
     async fn push(&self, ids: Vec<GetProof>) -> Result<()> {
         for tx in ids {
             self.queue
@@ -90,6 +92,7 @@ impl ProveRpcServer for RpcServerImpl {
         }
         Ok(())
     }
+
     async fn subscribe_proof(
         &self,
         pending: PendingSubscriptionSink,
@@ -108,7 +111,7 @@ impl ProveRpcServer for RpcServerImpl {
                 }
                 let mut successful = vec![];
                 for (i, id) in proofs.clone().iter().enumerate() {
-                    let res = self.succinct_client.get_proof(id.clone()).await;
+                    let res = self.succinct_client.get_proof(*id).await;
                     if let Ok(res) = res {
                         let msg = SubscriptionMessage::from_json(&res).unwrap();
                         sink.send(msg).await.unwrap();
@@ -124,8 +127,9 @@ impl ProveRpcServer for RpcServerImpl {
         }
         Ok(())
     }
+
     async fn register(&self, info: RegistryInfo) -> Result<()> {
-        self.queue.send(Register(info)).await;
+        self.queue.send(Register(info)).await.unwrap();
         Ok(())
     }
 }
