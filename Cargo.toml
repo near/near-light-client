@@ -48,6 +48,15 @@ near-light-client-rpc        = { path = "crates/rpc" }
 near-light-clientx = { path = "nearx" }
 test-utils         = { path = "crates/test-utils" }
 
+[patch.crates-io]
+alloy-core       = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+alloy-dyn-abi    = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+alloy-json-abi   = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+alloy-sol-macro  = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+alloy-sol-types  = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+syn-solidity     = { git = "https://github.com/alloy-rs/core", rev = "907d61a45a9135e979310990744080eef5f03fe5" }
+
 [patch."https://github.com/succinctlabs/starkyx.git"]
 starkyx = { git = "https://github.com/dndll/starkyx.git" }
 #curta = { path = "./vendor/starkyx/starkyx" }

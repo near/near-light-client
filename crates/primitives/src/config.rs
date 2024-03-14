@@ -28,16 +28,18 @@ where
 
         let env_prefix = "NEAR_LIGHT_CLIENT";
 
-        let required = env::var(format!("{path}/{env_prefix}_CONFIG_FILE"))
-            .unwrap_or_else(|_| "default".to_string());
+        let required = env::var(format!("{env_prefix}_CONFIG_FILE"))
+            .unwrap_or_else(|_| format!("{path}/default"));
+        log::debug!("required file: {required}");
 
-        let mode_path = env::var(format!("{path}/{env_prefix}_NETWORK"))
-            .unwrap_or_else(|_| "testnet".into())
-            .to_lowercase();
+        let mode_path = env::var(format!("{env_prefix}_NETWORK"))
+            .map(|s| s.to_lowercase())
+            .unwrap_or_else(|_| format!("{path}/testnet"));
+        log::debug!("mode file: {mode_path}");
+
         let local_path = format!("{path}/local");
+        log::debug!("local file: {local_path}");
 
-        log::debug!("Config path {required}");
-        log::debug!("Run mode {mode_path}");
         let s = ConfigTrait::builder()
             .add_source(File::with_name(&required).required(true))
             .add_source(File::with_name(&mode_path).required(false))
@@ -46,8 +48,7 @@ where
             .add_source(Environment::with_prefix(env_prefix).try_parsing(true))
             .build()?;
 
-        let r = s.try_deserialize();
-        r
+        s.try_deserialize()
     }
 
     fn test_config() -> T {

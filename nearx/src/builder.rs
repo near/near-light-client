@@ -1,14 +1,19 @@
 use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::Itertools;
-use plonky2x::prelude::*;
+use plonky2x::{
+    frontend::{
+        curta::ec::point::CompressedEdwardsY, ecc::curve25519::ed25519::eddsa::DUMMY_PUBLIC_KEY,
+    },
+    prelude::*,
+};
 use pretty_assertions::assert_eq;
 
 use crate::{
     merkle::{MerklePathVariable, NearMerkleTree},
     variables::{
-        ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,
-        BuildEndorsement, CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable,
-        SyncedVariable, ValidatorStakeVariable,
+        ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BuildEndorsement,
+        CryptoHashVariable, HeaderVariable, ProofVariable, PublicKeyVariable, StakeInfoVariable,
+        Validators,
     },
 };
 
@@ -25,17 +30,17 @@ pub trait Ensure<L: PlonkParameters<D>, const D: usize> {
         epoch_id: &CryptoHashVariable,
     ) -> BoolVariable;
 
-    fn ensure_if_next_epoch_contains_next_bps(
+    fn ensure_if_next_epoch_contains_next_bps<const LEN: usize>(
         &mut self,
         head: &HeaderVariable,
         epoch_id: &CryptoHashVariable,
-        next_bps: &BpsArr<ValidatorStakeVariable>,
+        next_bps: &Validators<LEN>,
     ) -> BoolVariable;
 
     fn validate_signatures<const LEN: usize>(
         &mut self,
         approvals: &BpsApprovals<LEN>,
-        bps: &BpsArr<ValidatorStakeVariable, LEN>,
+        bps: &Validators<LEN>,
         approval_message: ApprovalMessage,
     ) -> StakeInfoVariable;
 
@@ -44,7 +49,7 @@ pub trait Ensure<L: PlonkParameters<D>, const D: usize> {
     fn ensure_next_bps_is_valid(
         &mut self,
         expected_hash: &CryptoHashVariable,
-        next_bps_hash: Option<&CryptoHashVariable>,
+        next_bps_hash: &CryptoHashVariable,
     ) -> BoolVariable;
 
     fn ensure_block_hash_matches_outcome(
@@ -97,14 +102,14 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
         self.or(this, next)
     }
 
-    fn ensure_if_next_epoch_contains_next_bps(
+    fn ensure_if_next_epoch_contains_next_bps<const LEN: usize>(
         &mut self,
         head: &HeaderVariable,
         epoch_id: &CryptoHashVariable,
-        next_bps: &BpsArr<ValidatorStakeVariable>,
+        next_bps: &Validators<LEN>,
     ) -> BoolVariable {
         let is_next_epoch = self.is_equal(head.inner_lite.next_epoch_id, *epoch_id);
-        let is_not_empty = self.constant(next_bps.len() > 0);
+        let is_not_empty = self.constant(next_bps.inner.len() > 0);
         let ok_anyway = self._true();
         self.select(is_next_epoch, is_not_empty, ok_anyway)
     }
@@ -112,33 +117,41 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
     fn validate_signatures<const LEN: usize>(
         &mut self,
         approvals_after_next: &BpsApprovals<LEN>,
-        epoch_bps: &BpsArr<ValidatorStakeVariable, LEN>,
+        epoch_bps: &Validators<LEN>,
         approval_message: ApprovalMessage,
     ) -> StakeInfoVariable {
         assert_eq!(approvals_after_next.is_active.len(), LEN);
         assert_eq!(approvals_after_next.signatures.len(), LEN);
-        assert_eq!(epoch_bps.data.len(), LEN);
+        assert_eq!(epoch_bps.inner.len(), LEN);
 
         let messages = [approval_message; LEN];
 
+        let dummy_pk = self.constant::<PublicKeyVariable>(CompressedEdwardsY(DUMMY_PUBLIC_KEY));
+        let inactive = self._false();
+
         let mut pubkeys = vec![];
+        let mut active = vec![];
         let mut total_stake = self.zero();
         let mut approved_stake = self.zero();
 
         for i in 0..LEN {
-            let vs = &epoch_bps.data[i];
+            let vs = &epoch_bps.inner.data[i];
+
+            let is_dummy = self.is_equal(dummy_pk.clone(), vs.public_key.clone());
+            let sig_active = approvals_after_next.is_active[i];
+            let is_active = self.select(is_dummy, inactive, sig_active);
 
             pubkeys.push(vs.public_key.clone());
+            active.push(is_active.clone());
 
-            let maybe_add = self.add(approved_stake, vs.stake);
-            approved_stake =
-                self.select(approvals_after_next.is_active[i], maybe_add, approved_stake);
+            let added_stake = self.add(approved_stake, vs.stake);
             total_stake = self.add(total_stake, vs.stake);
+            approved_stake = self.select(is_active, added_stake, approved_stake);
         }
 
         // TODO: what happens if a conditionally active signature fails?
         self.curta_eddsa_verify_sigs_conditional(
-            approvals_after_next.is_active.clone(),
+            ArrayVariable::new(active),
             None,
             ArrayVariable::new(messages.to_vec()),
             approvals_after_next.signatures.clone(),
@@ -164,13 +177,15 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
     fn ensure_next_bps_is_valid(
         &mut self,
         expected_hash: &CryptoHashVariable,
-        next_bps_hash: Option<&CryptoHashVariable>,
+        next_bps_hash: &CryptoHashVariable,
     ) -> BoolVariable {
-        if let Some(next_bps) = next_bps_hash {
-            self.is_equal(*next_bps, *expected_hash)
-        } else {
-            self._true()
-        }
+        let zeroed = self.constant::<CryptoHashVariable>([0u8; 32].into());
+
+        let is_empty = self.is_equal(*next_bps_hash, zeroed);
+        let is_valid = self.is_equal(*next_bps_hash, *expected_hash);
+        let ok_anyway = self._true();
+
+        self.select(is_empty, ok_anyway, is_valid)
     }
 
     fn ensure_block_hash_matches_outcome(
@@ -234,59 +249,69 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
 }
 
 pub trait Sync<L: PlonkParameters<D>, const D: usize> {
-    fn sync(
+    fn sync<const LEN: usize>(
         &mut self,
         head: &HeaderVariable,
-        epoch_bps: &BpsArr<ValidatorStakeVariable>,
-        next_block: &BlockVariable,
-    ) -> SyncedVariable;
+        epoch_bps: &Validators<LEN>,
+        next_block: &BlockVariable<LEN>,
+    ) -> HeaderVariable;
 
-    fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage;
+    fn reconstruct_approval_message<const LEN: usize>(
+        &mut self,
+        next_block: &BlockVariable<LEN>,
+    ) -> ApprovalMessage;
 }
 
 impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> {
-    fn sync(
+    fn sync<const LEN: usize>(
         &mut self,
         head: &HeaderVariable,
-        epoch_bps: &BpsArr<ValidatorStakeVariable>,
-        next_block: &BlockVariable,
-    ) -> SyncedVariable {
-        let a = self.ensure_not_already_verified(head, &next_block.header.inner_lite.height);
-        self.assertx(a);
+        epoch_bps: &Validators<LEN>,
+        next_block: &BlockVariable<LEN>,
+    ) -> HeaderVariable {
+        let not_verified =
+            self.ensure_not_already_verified(head, &next_block.header.inner_lite.height);
+        self.watch(&not_verified, "ensure_not_already_verified");
 
-        let b = self.ensure_epoch_is_current_or_next(head, &next_block.header.inner_lite.epoch_id);
-        self.assertx(b);
+        let valid_epoch =
+            self.ensure_epoch_is_current_or_next(head, &next_block.header.inner_lite.epoch_id);
+        self.watch(&valid_epoch, "ensure_epoch_is_current_or_next");
 
-        let c = self.ensure_if_next_epoch_contains_next_bps(
+        let has_bps = self.ensure_if_next_epoch_contains_next_bps(
             head,
             &next_block.header.inner_lite.epoch_id,
             &next_block.next_bps,
         );
-        self.assertx(c);
+        self.watch(&has_bps, "ensure_if_next_epoch_contains_next_bps");
 
         let approval = self.reconstruct_approval_message(next_block);
+        self.watch(&approval, "reconstruct_approval_message");
         let stake = self.validate_signatures(&next_block.approvals_after_next, epoch_bps, approval);
-        let d = self.ensure_stake_is_sufficient(&stake);
-        self.assertx(d);
+        self.watch(&stake, "validate_signatures");
+        let enough_stake = self.ensure_stake_is_sufficient(&stake);
+        self.watch(&enough_stake, "ensure_stake_is_sufficient");
 
-        if next_block.next_bps.len() > 0 {
-            // TODO: hashing bps in circut
-            let e = self.ensure_next_bps_is_valid(
-                &next_block.header.inner_lite.next_bp_hash,
-                Some(&next_block.next_bps_hash),
-            );
-            self.assertx(e);
-            assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
-        }
-        // FIXME: remove this, return the new head
-        SyncedVariable {
-            new_head: next_block.header.to_owned(),
-            next_bps_epoch: next_block.header.inner_lite.next_epoch_id,
-            next_bps: next_block.next_bps.to_owned(),
-        }
+        let x = self.and(not_verified, valid_epoch);
+        let y = self.and(has_bps, enough_stake);
+        let all = self.and(x, y);
+        self.watch(&all, "all");
+        self.assertx(all);
+
+        // TODO: test me
+        let bps_valid = self.ensure_next_bps_is_valid(
+            &next_block.header.inner_lite.next_bp_hash,
+            &next_block.next_bps_hash,
+        );
+        self.assertx(bps_valid);
+        assert!(next_block.next_bps.inner.len() == NUM_BLOCK_PRODUCER_SEATS);
+
+        next_block.header.to_owned()
     }
 
-    fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage {
+    fn reconstruct_approval_message<const LEN: usize>(
+        &mut self,
+        next_block: &BlockVariable<LEN>,
+    ) -> ApprovalMessage {
         let next_header_hash = next_block.header.hash(self);
         let next_block_hash =
             self.curta_sha256_pair(next_block.next_block_inner_hash, next_header_hash);
@@ -463,7 +488,7 @@ mod tests {
 
         let define = |builder: &mut B| {
             let header = builder.read::<HeaderVariable>();
-            let next_bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
+            let next_bps = builder.read::<Validators>();
 
             let current =
                 builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
@@ -480,13 +505,13 @@ mod tests {
             builder.write::<BoolVariable>(contains_next_bps);
 
             let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
-            let is_valid = builder
-                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            let is_valid =
+                builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, &next_bps_hash);
             builder.write::<BoolVariable>(is_valid);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(header.clone().into());
-            input.write::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(Some(bps)));
+            input.write::<Validators>(ValidatorsVariableValue::from_iter(bps));
         };
         let assertions = |mut output: PO| {
             assert!(output.read::<BoolVariable>(), "epoch is current");
@@ -501,12 +526,12 @@ mod tests {
     fn test_reconstruct_approval_msg() {
         let (_, _, next_block) = test_state();
         let define = |builder: &mut B| {
-            let next_block = builder.read::<BlockVariable>();
+            let next_block = builder.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
             let os = builder.reconstruct_approval_message(&next_block);
             builder.write::<ApprovalMessage>(os);
         };
         let writer = |input: &mut PI| {
-            input.write::<BlockVariable>(next_block.clone().into());
+            input.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.clone().into());
         };
         let assertions = |mut output: PO| {
             let created = output.read::<ApprovalMessage>();
@@ -520,7 +545,7 @@ mod tests {
     fn test_raw_le_bytes() {
         let (_, _, next_block) = test_state();
         let define = |builder: &mut B| {
-            let next_block = builder.read::<BlockVariable>();
+            let next_block = builder.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
 
             let mut bytes = vec![];
             for target in next_block.header.inner_lite.height.targets() {
@@ -539,7 +564,7 @@ mod tests {
             builder.write::<BytesVariable<8>>(BytesVariable(bytes.try_into().unwrap()));
         };
         let writer = |input: &mut PI| {
-            input.write::<BlockVariable>(next_block.clone().into());
+            input.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.clone().into());
         };
         let assertions = |mut output: PO| {
             let bytes = output.read::<BytesVariable<8>>();
@@ -557,6 +582,7 @@ mod tests {
 /// TODO: CI for only beefy tests
 #[cfg(test)]
 mod beefy_tests {
+    use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
     use serial_test::serial;
 
     use crate::{
@@ -574,7 +600,7 @@ mod beefy_tests {
 
         let define = |builder: &mut B| {
             let header = builder.read::<HeaderVariable>();
-            let next_bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
+            let next_bps = builder.read::<Validators>();
 
             let current =
                 builder.ensure_epoch_is_current_or_next(&header, &header.inner_lite.epoch_id);
@@ -591,13 +617,13 @@ mod beefy_tests {
             builder.write::<BoolVariable>(contains_next_bps);
 
             let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
-            let is_valid = builder
-                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            let is_valid =
+                builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, &next_bps_hash);
             builder.write::<BoolVariable>(is_valid);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(header.clone().into());
-            input.write::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(Some(bps)));
+            input.write::<Validators>(ValidatorsVariableValue::from_iter(bps));
         };
         let assertions = |mut output: PO| {
             assert!(output.read::<BoolVariable>(), "epoch is current");
@@ -643,19 +669,22 @@ mod beefy_tests {
 
         let define = |builder: &mut B| {
             let head = builder.read::<HeaderVariable>();
-            let bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
-            let next_block = builder.read::<BlockVariable>();
+            let bps = builder.read::<Validators>();
+            let next_block = builder.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
             let synced = builder.sync(&head, &bps, &next_block);
-            builder.write::<SyncedVariable>(synced);
+            builder.write::<HeaderVariable>(synced);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(head.into());
-            input.write::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(Some(next_bps)));
-            input.write::<BlockVariable>(next_block.clone().into());
+            input.write::<Validators<NUM_BLOCK_PRODUCER_SEATS>>(
+                ValidatorsVariableValue::from_iter(next_bps),
+            );
+            input.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.clone().into());
         };
         let assertions = |mut output: PO| {
-            let header = output.read::<SyncedVariable>();
+            let header = output.read::<HeaderVariable>();
             println!("header: {:?}", header);
+            // TODO: assert
         };
         builder_suite(define, writer, assertions);
     }
@@ -666,18 +695,17 @@ mod beefy_tests {
     fn beefy_builder_test_bounded_signatures() {
         let (_, bps, next_block) = test_state();
         const BPS_AMT: usize = 15;
+        let r = 0..BPS_AMT;
 
         let define = |builder: &mut B| {
-            let bps = builder.read::<BpsArr<ValidatorStakeVariable, BPS_AMT>>();
-            let next_block = builder.read::<BlockVariable>();
+            let bps = builder.read::<Validators<BPS_AMT>>();
+            let next_block = builder.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
 
             let next_block_approvals = BpsApprovals {
-                signatures: next_block.approvals_after_next.signatures[0..BPS_AMT]
+                signatures: next_block.approvals_after_next.signatures[r.clone()]
                     .to_vec()
                     .into(),
-                is_active: next_block.approvals_after_next.is_active[0..BPS_AMT]
-                    .to_vec()
-                    .into(),
+                is_active: next_block.approvals_after_next.is_active[r].to_vec().into(),
             };
 
             let msg = builder.reconstruct_approval_message(&next_block);
@@ -685,10 +713,8 @@ mod beefy_tests {
             builder.validate_signatures(&next_block_approvals, &bps, msg);
         };
         let writer = |input: &mut PI| {
-            input.write::<BpsArr<ValidatorStakeVariable, BPS_AMT>>(
-                bps_to_variable(Some(bps.clone()))[0..BPS_AMT].into(),
-            );
-            input.write::<BlockVariable>(next_block.into());
+            input.write::<Validators<BPS_AMT>>(bps.into_iter().collect());
+            input.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.into());
         };
         let assertions = |mut _output: PO| {};
         builder_suite(define, writer, assertions);

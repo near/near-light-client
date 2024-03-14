@@ -1,33 +1,41 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
-use anyhow::ensure;
-use ethers::prelude::*;
+use alloy::{
+    primitives::*,
+    providers::{network::Ethereum, Provider as ProviderExt, RootProvider},
+    sol_types::SolValue,
+    transports::{http::Http, TransportResult},
+};
+use anyhow::{ensure, Context};
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use near_light_client_rpc::prelude::{CryptoHash, Itertools};
-use plonky2x::{
+pub use near_light_clientx::plonky2x::backend::prover::ProofId;
+use near_light_clientx::plonky2x::{
     backend::{
         circuit::DefaultParameters,
         function::{BytesRequestData, ProofRequest, ProofRequestBase},
-        prover::ProofId,
     },
     utils::hex,
 };
-use reqwest::header::{self, HeaderMap, HeaderValue};
+use reqwest::{
+    header::{self, HeaderMap, HeaderValue},
+    Url,
+};
 use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::Deserialize;
 use succinct_client::{request::SuccinctClient as SuccinctClientExt, utils::get_gateway_address};
 use types::TransactionOrReceiptIdPrimitive;
 
-use self::types::{Circuit, Deployment, ProofResponse};
+use self::types::{Circuit, Deployment, NearX::NearXInstance, NearXClient, ProofResponse};
 use crate::{
-    config,
-    rpc::VERIFY_ID_AMT,
-    succinct::types::ProofRequestResponse,
-    types::{NearX, TransactionOrReceiptId},
+    config, succinct::types::ProofRequestResponse, types::NearX::TransactionOrReceiptId,
+    VERIFY_ID_AMT,
 };
 
 pub mod types;
+
+type Provider = RootProvider<Ethereum, Http<reqwest::Client>>;
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Config {
@@ -58,6 +66,7 @@ fn default_organisation() -> String {
 fn default_project() -> String {
     "near-light-client".into()
 }
+
 fn default_max_retries() -> u32 {
     3
 }
@@ -69,7 +78,7 @@ fn default_timeout() -> u64 {
 pub struct Client {
     config: Config,
     inner: ClientWithMiddleware,
-    contract: NearX<Provider<Http>>,
+    contract: NearXInstance<Ethereum, Http<reqwest::Client>, Provider>,
     ext: SuccinctClientExt,
     genesis: CryptoHash,
     releases: Vec<Deployment>,
@@ -83,6 +92,7 @@ impl Client {
 
         let inner = Self::init_inner_client(&config.succinct).await?;
 
+        // TODO: introduce override when succinct wont relay the proof
         let succinct_client = SuccinctClientExt::new(
             config.succinct.rpc_url.clone(),
             config.succinct.api_key.clone(),
@@ -100,20 +110,26 @@ impl Client {
         };
         s.releases = s.fetch_releases(&chain_id).await?;
         ensure!(
-            s.config.contract_address != Default::default(),
+            s.config.contract_address != Address::ZERO,
             "invalid contract address",
         );
 
         Ok(s)
     }
 
-    async fn init_contract_client(config: &Config) -> anyhow::Result<(NearX<Provider<Http>>, u32)> {
-        let provider = Provider::<Http>::try_from(&config.eth_rpc_url)?;
-        let contract = NearX::new(config.contract_address.0, provider.into());
-        let chain_id = contract.client().get_chainid().await.map(|s| s.as_u32())?;
+    async fn init_contract_client(config: &Config) -> anyhow::Result<(NearXClient, u32)> {
+        log::debug!("initializing contract client");
+
+        let url = Url::from_str(&config.eth_rpc_url).with_context(|| "invalid rpc url")?;
+        let inner = Provider::new_http(url);
+        let chain_id = inner
+            .get_chain_id()
+            .await
+            .with_context(|| "failed to get chain id")?;
+        let contract = NearXInstance::new(config.contract_address, inner.into());
         log::debug!("chain id: {}", chain_id);
 
-        Ok((contract, chain_id))
+        Ok((contract, chain_id.to()))
     }
 
     async fn init_inner_client(config: &Config) -> anyhow::Result<ClientWithMiddleware> {
@@ -145,46 +161,36 @@ impl Client {
             "filtering releases for {chain_id} and version {}",
             self.config.version
         );
-        Ok(self
-            .fetch_deployments()
-            .await?
+        Ok(Self::extract_release_details(
+            self.fetch_deployments().await?,
+            chain_id,
+            &self.config.version,
+        ))
+        .inspect(|r| log::trace!("releases: {:?}", r))
+    }
+
+    pub fn extract_release_details(
+        deployments: Vec<Deployment>,
+        chain_id: &u32,
+        version: &str,
+    ) -> Vec<Deployment> {
+        let gateway: Option<Address> = get_gateway_address(*chain_id).and_then(|a| a.parse().ok());
+        deployments
             .into_iter()
-            .filter(|d| d.release_info.release.name.contains(&self.config.version))
+            .filter(|d| d.release_info.release.name.contains(version))
             .filter(|d| d.chain_id == *chain_id)
             .filter_map(|mut d| {
-                if d.gateway == Default::default() {
-                    get_gateway_address(*chain_id)
-                        .and_then(|a| a.parse().ok())
-                        .map(|a| {
-                            d.gateway = a;
-                            d
-                        })
+                if d.gateway == Address::ZERO {
+                    gateway.map(|a| {
+                        d.gateway = a;
+                        d
+                    })
                 } else {
                     log::debug!("matched deployment: {:#?}", d);
                     Some(d)
                 }
             })
-            .collect_vec())
-        .inspect(|r| log::trace!("releases: {:?}", r))
-    }
-
-    pub async fn extract_release_details(&self) -> anyhow::Result<(Deployment, Deployment)> {
-        let find = |entrypoint: &str| -> Deployment {
-            self.releases
-                .iter()
-                .find(|r| r.release_info.release.entrypoint == entrypoint)
-                .expect(&format!(
-                    "could not find release for entrypoint {entrypoint}"
-                ))
-                .to_owned()
-        };
-
-        let sync = find("sync");
-        log::debug!("sync release: {:?}", sync);
-        let verify = find("verify");
-        log::debug!("verify release: {:?}", verify);
-
-        Ok((sync, verify))
+            .collect_vec()
     }
 
     pub fn build_proof_request_bytes(
@@ -223,17 +229,15 @@ impl Client {
             // TODO: define this input by abi
             input: [
                 trusted_header_hash.0.to_vec(),
-                ethers::abi::encode_packed(
-                    &ids.into_iter()
-                        .map(TransactionOrReceiptId::from)
-                        .flat_map(ethers::abi::Tokenize::into_tokens)
-                        .collect_vec(),
-                )
-                .unwrap(),
+                ids.into_iter()
+                    .map(TransactionOrReceiptId::from)
+                    .collect_vec()
+                    .abi_encode_packed(),
             ]
             .concat(),
         }
     }
+
     async fn fetch_deployments(&self) -> anyhow::Result<Vec<Deployment>> {
         log::debug!("getting deployments");
         Ok(self
@@ -263,14 +267,18 @@ impl Client {
             .ext
             .submit_request(
                 circuit.deployment(&self.releases).chain_id,
-                self.config.contract_address.0.into(),
-                circuit.as_function_selector().into(),
-                circuit.function_id(&self.contract).await?.into(),
+                self.config.contract_address.0 .0.into(),
+                circuit.as_function_input(&req.input).into(),
+                circuit
+                    .function_id(&self.contract)
+                    .await
+                    .inspect(|d| log::debug!("function_id: {:?}", d))?
+                    .into(),
                 req.input.into(),
             )
             .await
             .inspect(|d| log::debug!("requested relay proof: {:?}", d))?;
-        Ok(self.wait_for_proof(&request_id).await?)
+        self.wait_for_proof(&request_id).await
     }
 
     pub async fn fetch_proofs(&self) -> anyhow::Result<Vec<ProofResponse>> {
@@ -295,18 +303,12 @@ impl Client {
     // We wait for the proof to be submitted to the explorer so we can track them by
     // their proof id's
     // TODO: change this to support request & proof id, for checking later
-    async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
+    pub async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         let mut attempts = 0;
         loop {
             let proofs = self.fetch_proofs().await?;
-            if let Some(p) = proofs.iter().find(|p| {
-                if let Some(request) = &p.edges.request {
-                    request.id == request_id
-                } else {
-                    false
-                }
-            }) {
+            if let Some(p) = Self::search_for_request(&proofs, request_id) {
                 break Ok(ProofId(p.id));
             }
             attempts += 1;
@@ -316,6 +318,25 @@ impl Client {
             interval.tick().await;
         }
     }
+    fn search_for_request<'p>(
+        proofs: &'p [ProofResponse],
+        request_id: &str,
+    ) -> Option<&'p ProofResponse> {
+        proofs
+            .iter()
+            .find(|p| {
+                p.edges
+                    .requests
+                    .iter()
+                    .find(|r| {
+                        log::debug!("checking if {:?} matches {:?}", r.id, request_id);
+                        r.id == request_id
+                    })
+                    .is_some()
+            })
+            .inspect(|p| log::debug!("found proof {:?} matching request: {:?}", p.id, request_id))
+    }
+
     pub async fn request_proof(
         &self,
         circuit: &Circuit,
@@ -336,6 +357,7 @@ impl Client {
             .inspect(|d| log::debug!("requested proof: {:?}", d.proof_id))?
             .proof_id)
     }
+
     pub async fn get_proof(&self, proof_id: ProofId) -> anyhow::Result<ProofResponse> {
         log::debug!("fetching proof: {}", proof_id.0);
         Ok(self
@@ -348,6 +370,7 @@ impl Client {
             .await
             .inspect(|d| log::debug!("fetched proof: {:?}/{:?}", d.id, d.status))?)
     }
+
     pub async fn sync(&self, relay: bool) -> anyhow::Result<ProofId> {
         let circuit = Circuit::Sync;
         let req = self.build_sync_request(self.fetch_trusted_header_hash().await?);
@@ -382,7 +405,13 @@ impl Client {
     }
 
     async fn fetch_trusted_header_hash(&self) -> anyhow::Result<CryptoHash> {
-        let mut h = self.contract.latest_header().await.map(CryptoHash)?;
+        let mut h = self
+            .contract
+            .latestHeader()
+            .call()
+            .await
+            .map(|x| *x._0)
+            .map(CryptoHash)?;
         log::debug!("fetched trusted header hash {:?}", h);
         if h == CryptoHash::default() {
             log::info!("no trusted header found, using checkpoint hash");
@@ -396,69 +425,122 @@ impl Client {
 pub mod tests {
     use std::str::FromStr;
 
+    use alloy::sol_types::SolCall;
     use near_light_client_primitives::config::BaseConfig;
     use serde_json::json;
     use test_utils::{fixture, logger, testnet_state};
     use uuid::Uuid;
     use wiremock::{
-        matchers::{body_partial_json, method, path},
+        matchers::{body_partial_json, body_string_contains, method, path, query_param_contains},
         Mock, MockServer, ResponseTemplate,
     };
 
+    use self::types::NearX;
     use super::*;
-    use crate::rpc::VERIFY_ID_AMT;
 
-    pub struct Stubs;
-    impl Stubs {
-        pub fn chain_id() -> u32 {
-            11155111
+    pub struct Stub(Circuit);
+    impl Stub {
+        pub fn selector(&self) -> String {
+            let selector = match self.0 {
+                Circuit::Sync => NearX::syncFunctionIdCall::SELECTOR,
+                Circuit::Verify => NearX::verifyFunctionIdCall::SELECTOR,
+            };
+            hex!(selector)
         }
+        pub fn proof_id(&self) -> Uuid {
+            Uuid::from_str(match self.0 {
+                Circuit::Sync => "cde59ba0-a60b-4721-b96c-61401ff28852",
+                Circuit::Verify => "582276cc-62f0-4728-9a20-86f260c09874",
+            })
+            .unwrap()
+        }
+        pub fn request_id(&self) -> String {
+            match self.0 {
+                Circuit::Sync => "64bb0a1e-2695-42c8-aee3-9d8c1b17b379",
+                Circuit::Verify => "533a983c-ec21-456c-a1dc-79965df9de5f",
+            }
+            .to_string()
+        }
+        pub async fn mock(&self, server: &MockServer, releases: &[Deployment]) {
+            let d = self.0.deployment(releases);
+            // Stub the get function id
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .and(body_string_contains(self.selector()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": d.function_id
+                })))
+                .mount(server)
+                .await;
 
-        pub fn header_hash() -> CryptoHash {
-            let (header, _, _) = test_utils::testnet_state();
-            header.hash()
-        }
+            // Mock for requesting a new platform proof
+            Mock::given(method("POST"))
+                .and(path("/proof/new"))
+                .and(body_string_contains(&d.release_info.release.id))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!({"proof_id": self.proof_id()})),
+                )
+                .mount(&server)
+                .await;
 
-        pub fn sync_pid() -> Uuid {
-            Uuid::from_str("038e3558-7ea5-4081-85fc-708cdd139525").unwrap()
-        }
-        pub fn verify_pid() -> Uuid {
-            Uuid::from_str("c3f9a7ad-b9d1-44d6-83fb-55894f56f2e6").unwrap()
-        }
+            Mock::given(method("POST"))
+                .and(path("/request/new"))
+                .and(body_string_contains(&d.function_id))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(json!({"request_id":
+                self.request_id()})),
+                )
+                .mount(&server)
+                .await;
 
-        pub fn version() -> String {
-            "v0.0.4-rc.1".to_string()
+            let proof_fixture = match self.0 {
+                Circuit::Sync => "sync_proof.json",
+                Circuit::Verify => "verify_proof.json",
+            };
+
+            Mock::given(method("GET"))
+                .and(path(format!("/proof/{}", self.proof_id())))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(fixture::<ProofResponse>(proof_fixture)),
+                )
+                .mount(&server)
+                .await;
         }
     }
 
+    impl From<Circuit> for Stub {
+        fn from(value: Circuit) -> Self {
+            Self(value)
+        }
+    }
+
+    const CHAIN_ID: u32 = 421614;
+    const VERSION: &str = "dev";
+    const HEADER_HASH: &str = "0x63b87190ffbaa36d7dab50f918fe36f70ab26910a0e9d797161e2356561598e3";
+
     pub async fn mocks() -> Client {
         logger();
-        let deployments = fixture::<Vec<Deployment>>("deployments.json");
 
+        let deployments = fixture::<Vec<Deployment>>("deployments.json");
         let mut config = crate::config::Config::test_config();
+        config.succinct.version = VERSION.to_string();
 
         let server = MockServer::start().await;
-        config.succinct.version = Stubs::version();
         config.succinct.rpc_url = server.uri();
         config.succinct.eth_rpc_url = server.uri();
         config.succinct.rpc_url = server.uri();
+
+        let releases = Client::extract_release_details(deployments.clone(), &CHAIN_ID, &VERSION);
 
         // Mock for eth_chainId request
         Mock::given(method("POST"))
             .and(path("/"))
             .and(body_partial_json(json!({"method":"eth_chainId"})))
             .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({"jsonrpc":"2.0","id":1,"result":hex::encode((Stubs::chain_id() as u32).to_be_bytes())}),
-            ))
-            .mount(&server)
-            .await;
-
-        // Mock for eth_call request
-        Mock::given(method("POST"))
-            .and(path("/"))
-            .and(body_partial_json(json!({"method":"eth_call"})))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({"jsonrpc":"2.0","id":1,"result": hex::encode(Stubs::header_hash().0)}),
+                json!({"jsonrpc":"2.0","id":1,"result":hex!(CHAIN_ID.to_be_bytes())}),
             ))
             .mount(&server)
             .await;
@@ -470,43 +552,33 @@ pub mod tests {
             .mount(&server)
             .await;
 
-        // Mock for requesting a new platform proof
-        Mock::given(method("POST"))
-            .and(path("/proof/new"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({"proof_id": Stubs::sync_pid()})),
-            )
-            .mount(&server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(path("/request/new"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({"request_id": Stubs::sync_pid()})),
-            )
-            .mount(&server)
-            .await;
-
         Mock::given(method("GET"))
-            .and(path(format!("/proof/{}", Stubs::sync_pid())))
+            .and(path("/proofs"))
+            .and(query_param_contains("project", "near-light-client"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(fixture::<ProofResponse>("sync_proof.json")),
+                    .set_body_json(fixture::<Vec<ProofResponse>>("get_proofs.json")),
             )
             .mount(&server)
             .await;
 
-        Mock::given(method("GET"))
-            .and(path(format!("/proof/{}", Stubs::verify_pid())))
+        // Mock the getTrustedHeaderHash
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .and(body_string_contains(hex!(
+                NearX::latestHeaderCall::SELECTOR
+            )))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(fixture::<ProofResponse>("verify_proof.json")),
+                    .set_body_json(json!({"jsonrpc":"2.0","id":1,"result":HEADER_HASH})),
             )
             .mount(&server)
             .await;
 
-        let client = Client::new(&config).await.unwrap();
-        client
+        Stub(Circuit::Sync).mock(&server, &releases).await;
+        Stub(Circuit::Verify).mock(&server, &releases).await;
+
+        Client::new(&config).await.unwrap()
     }
 
     #[tokio::test]
@@ -570,8 +642,6 @@ pub mod tests {
         if let ProofRequest::Bytes(full) =
             client.build_proof_request_bytes(&verify_release_id, req.clone())
         {
-            println!("{}", serde_json::to_string_pretty(&full).unwrap());
-
             assert_eq!(full.data.input, req.input);
             assert_eq!(full.parent_id, None);
             assert_eq!(full.files, None);
@@ -579,6 +649,8 @@ pub mod tests {
         } else {
             panic!("wrong request type");
         }
+        let bytes = Circuit::Verify.as_function_input(&req.input);
+        pretty_assertions::assert_eq!(hex!(&bytes[4..]), hex!(req.input));
     }
 
     #[tokio::test]
@@ -607,6 +679,6 @@ pub mod tests {
     #[tokio::test]
     async fn test_check_proof() {
         let client = mocks().await;
-        let proofs = client.fetch_proofs().await.unwrap();
+        let _proofs = client.fetch_proofs().await.unwrap();
     }
 }

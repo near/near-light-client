@@ -1,9 +1,11 @@
-use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use std::str::FromStr;
+
+use near_light_client_rpc::prelude::Itertools;
 use nearx_operator::{
-    config::Config, rpc::VERIFY_ID_AMT, succinct::*, types::TransactionOrReceiptIdPrimitive,
-    BaseConfig,
+    config::Config, succinct::*, types::TransactionOrReceiptIdPrimitive, BaseConfig, VERIFY_ID_AMT,
 };
 use test_utils::fixture;
+use uuid::Uuid;
 
 async fn client() -> Client {
     pretty_env_logger::try_init().ok();
@@ -51,6 +53,11 @@ async fn test_verify_relay() {
 #[tokio::test]
 async fn test_check_proof() {
     let c = client().await;
-    let proofs = c.fetch_proofs().await.unwrap();
-    println!("{:?}", proofs);
+    let request_id = "76688871-5262-4384-9891-0a68fe7a2efb";
+    let p = c.wait_for_proof(&request_id).await.unwrap();
+    println!("found proof: {:?}", p);
+    assert_eq!(
+        p.0,
+        Uuid::from_str("3dcaeed9-b467-4d4f-bfb5-c22bac100527").unwrap()
+    );
 }

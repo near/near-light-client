@@ -1,9 +1,11 @@
 pub use prelude::*;
 
 pub mod config;
-pub mod queue;
+pub mod engine;
 pub mod rpc;
 pub mod succinct;
+
+pub const VERIFY_ID_AMT: usize = 128;
 
 pub mod prelude {
     pub use actix::{self, prelude::*};
@@ -11,7 +13,7 @@ pub mod prelude {
 
     pub use crate::{
         config::Config,
-        queue::QueueManager,
+        engine::Engine,
         rpc::{ProveRpcServer as RpcServerExt, RpcServerImpl as RpcServer},
         succinct::{Client as SuccinctClient, *},
     };

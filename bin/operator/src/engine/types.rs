@@ -1,25 +1,9 @@
-use std::{sync::Arc, time::Duration};
-
-use actix::{prelude::*, Addr};
-use anyhow::{anyhow, ensure, Result};
-use futures::{FutureExt, TryFutureExt};
-use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::GetProof, TransactionOrReceiptId};
-use plonky2x::backend::prover::ProofId;
-use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    rpc::VERIFY_ID_AMT,
-    succinct::{
-        self,
-        types::{ProofResponse, ProofStatus},
-    },
-};
 
 pub(crate) type PriorityWeight = u32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionOrReceiptIdNewtype(pub TransactionOrReceiptId);
 
 impl From<TransactionOrReceiptId> for TransactionOrReceiptIdNewtype {
@@ -75,7 +59,7 @@ impl PartialEq for TransactionOrReceiptIdNewtype {
 
 impl Eq for TransactionOrReceiptIdNewtype {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryInfo {
     pub id: usize,
     // Their weight in the shared queue
