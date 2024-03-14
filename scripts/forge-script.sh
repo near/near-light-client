@@ -42,8 +42,7 @@ function script() {
 function pullDeployment() {
   echo "Getting deployments"
   (cd "api/NEAR Light Client" && npx -y @usebruno/cli run "Succinct/Get Deployments.bru" --env testnet -o /tmp/result.json)
-  RESULT=$(cat /tmp/result.json | jq '.results[0].response.data')
-  RESULT=$(echo $RESULT | jq -r "[.[] | select(.chain_id == $CHAIN_ID)]")
+  RESULT=$(cat /tmp/result.json | jq '.results[0].response.data' | jq -r "[.[] | select(.chain_id == $CHAIN_ID)]")
   echo $RESULT
 }
 

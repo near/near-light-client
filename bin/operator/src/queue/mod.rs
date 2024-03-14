@@ -92,21 +92,19 @@ impl QueueManager {
         }
     }
 
-    fn make_batch(&mut self) -> (u32, Vec<TransactionOrReceiptId>) {
-        let mut id = 0;
-        let mut txs = vec![];
+    fn make_batch(&mut self) -> Option<(u32, Vec<TransactionOrReceiptId>)> {
         if self.proving_queue.len() >= VERIFY_ID_AMT {
+            let id = self.batches.len() as u32;
+            let mut txs = vec![];
             for _ in 0..VERIFY_ID_AMT {
                 let (req, _) = self.proving_queue.pop().unwrap();
                 txs.push(req.0);
             }
+            self.batches.insert(id, None);
+            Some((id, txs))
+        } else {
+            None
         }
-        if !txs.is_empty() {
-            let new_id = self.batches.len() as u32;
-            self.batches.insert(new_id, None);
-            id = new_id;
-        }
-        (id, txs)
     }
 }
 
@@ -117,7 +115,7 @@ impl Actor for QueueManager {
         ctx.run_interval(Duration::from_secs(1), |_, ctx| {
             ctx.address().do_send(Drain)
         });
-        ctx.run_interval(Duration::from_secs(60 * 60), |_, ctx| {
+        ctx.run_interval(Duration::from_secs(60 * 30), |_, ctx| {
             ctx.address().do_send(Sync)
         });
         ctx.run_interval(Duration::from_secs(60), |_, ctx| {
@@ -190,7 +188,7 @@ impl Handler<Sync> for QueueManager {
             async move { client.sync(true).await.unwrap() }
                 .into_actor(self)
                 .map(move |r, this, _| {
-                    log::debug!("syncing {:?}", r);
+                    log::debug!("sync requested {:?}", r);
                     this.request_info.insert(r, None);
                 }),
         ))
@@ -205,27 +203,20 @@ impl Handler<Drain> for QueueManager {
     type Result = AtomicResponse<Self, ()>;
 
     fn handle(&mut self, _msg: Drain, _ctx: &mut Self::Context) -> Self::Result {
-        // First pull the correct transactions
-        // Create batch and write it
-        let (id, batch) = self.make_batch();
-        // TODO: cleanup/retry procedures
-        //
-        if batch.is_empty() {
-            return AtomicResponse::new(Box::pin(async {}.into_actor(self)));
-        }
-
-        let client = self.succinct_client.clone();
-        // Not ssure this needs atomic
-        AtomicResponse::new(Box::pin(
-            async move { client.verify(batch, true).await.unwrap() }
+        AtomicResponse::new(if let Some((id, batch)) = self.make_batch() {
+            let client = self.succinct_client.clone();
+            let fut = async move { client.verify(batch, true).await.unwrap() }
                 // Then ask succinct to verify
                 .into_actor(self)
                 // Once verify proof id is returned, write the result to ourselves
                 .map(move |r, this, _| {
                     this.batches.get_mut(&id).unwrap().replace(r);
                     log::debug!("batch {id} done, batches: {:?}", this.batches);
-                }),
-        ))
+                });
+            Box::pin(fut)
+        } else {
+            Box::pin(async {}.into_actor(self))
+        })
     }
 }
 

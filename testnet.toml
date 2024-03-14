@@ -1,7 +1,7 @@
 catchup       = true
 host          = "0.0.0.0:3030"
 network       = "Testnet"
-starting_head = "Fjn8T3phCCSCXSdjtQ4DqHGV86yeS2MQ92qcufCEpwbf"
+starting_head = "EfFrYtjeTtpqmFkD3xdB2UJHtfr4dhxQkp6fFHtg6Yav"
 state_path    = "state.db"
 
 [succinct]

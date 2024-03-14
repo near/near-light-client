@@ -11,6 +11,7 @@ use plonky2x::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// TODO: update ABI when updating contract
 abigen!(
     NearX,
     "../../nearx/contract/abi.json",

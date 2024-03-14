@@ -101,6 +101,10 @@ impl Client {
             releases: Default::default(),
         };
         s.releases = s.fetch_releases(&chain_id).await?;
+        ensure!(
+            s.config.contract_address != Default::default(),
+            "invalid contract address",
+        );
 
         Ok(s)
     }
@@ -150,7 +154,6 @@ impl Client {
             .filter(|d| d.release_info.release.name.contains(&self.config.version))
             .filter(|d| d.chain_id == *chain_id)
             .filter_map(|mut d| {
-                log::trace!("matched deployment: {:?}", d);
                 if d.gateway == Default::default() {
                     get_gateway_address(*chain_id)
                         .and_then(|a| a.parse().ok())
@@ -159,6 +162,7 @@ impl Client {
                             d
                         })
                 } else {
+                    log::debug!("matched deployment: {:#?}", d);
                     Some(d)
                 }
             })
@@ -253,6 +257,10 @@ impl Client {
         circuit: &Circuit,
         req: BytesRequestData,
     ) -> anyhow::Result<ProofId> {
+        ensure!(
+            self.config.contract_address.0 != [0u8; 20],
+            "no contract address"
+        );
         let request_id = self
             .succinct_client
             .submit_request(
@@ -288,8 +296,9 @@ impl Client {
 
     // We wait for the proof to be submitted to the explorer so we can track them by
     // their proof id's
+    // TODO: change this to support request & proof id, for checking later
     async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
         let mut attempts = 0;
         loop {
             let proofs = self.fetch_proofs().await?;
@@ -301,13 +310,12 @@ impl Client {
                 }
             }) {
                 break Ok(ProofId(p.id));
-            } else {
-                attempts += 1;
-                if attempts > 10 {
-                    anyhow::bail!("{request_id} timed out waiting for proof id");
-                }
-                interval.tick().await;
             }
+            attempts += 1;
+            if attempts > 10 {
+                anyhow::bail!("{request_id} timed out waiting for proof id");
+            }
+            interval.tick().await;
         }
     }
     pub async fn request_proof(
