@@ -1,20 +1,36 @@
-use ethers::{abi::AbiEncode, contract::abigen, prelude::*};
+use alloy::{
+    primitives::*,
+    providers::network::Ethereum,
+    sol,
+    sol_types::{Selectors, SolCall, SolInterface},
+    transports::http::Http,
+};
+use futures::FutureExt;
 use near_light_client_primitives::pad_account_id;
 pub use near_light_client_rpc::TransactionOrReceiptId as TransactionOrReceiptIdPrimitive;
-use plonky2x::backend::{
+use near_light_clientx::plonky2x::backend::{
     circuit::DefaultParameters,
     function::{ProofRequest, ProofResult},
     prover::ProofId,
 };
+use reqwest_middleware::ClientWithMiddleware;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use NearX::TransactionOrReceiptId;
 
-// TODO: update ABI when updating contract
-abigen!(
+use self::NearX::NearXInstance;
+use crate::types::NearX::{syncCall, verifyCall};
+
+pub type NearXClient = NearXInstance<Ethereum, Http<reqwest::Client>, super::Provider>;
+
+sol!(
+    #[sol(abi, rpc)]
     NearX,
-    "../../nearx/contract/abi.json",
-    derives(serde::Deserialize, serde::Serialize),
+    "../../nearx/contract/abi.json"
 );
+
+// // TODO: update ABI when updating contract
+//abigen!(NearXClient, "../../nearx/contract/abi.json",);
 
 /// The circuits we support in this nearxclient
 pub enum Circuit {
@@ -22,19 +38,21 @@ pub enum Circuit {
     Verify,
 }
 impl Circuit {
-    pub fn as_function_selector(&self) -> Vec<u8> {
+    pub fn selector(&self) -> [u8; 4] {
         match self {
-            Circuit::Sync => SyncFunctionIdCall {}.encode(),
-            Circuit::Verify => VerifyFunctionIdCall {}.encode(),
+            Circuit::Sync => syncCall::SELECTOR,
+            Circuit::Verify => verifyCall::SELECTOR,
         }
     }
-    pub async fn function_id(&self, client: &NearX<Provider<Http>>) -> anyhow::Result<[u8; 32]> {
+    pub fn as_function_input(&self, input: &[u8]) -> Vec<u8> {
+        vec![&self.selector()[..], input].concat()
+    }
+    pub async fn function_id(&self, client: &NearXClient) -> anyhow::Result<[u8; 32]> {
         let id = match self {
-            Circuit::Sync => client.sync_function_id(),
-            Circuit::Verify => client.verify_function_id(),
-        }
-        .await?;
-        Ok(id)
+            Circuit::Sync => client.syncFunctionId().call().await.map(|x| x._0),
+            Circuit::Verify => client.verifyFunctionId().call().await.map(|x| x._0),
+        }?;
+        Ok(*id)
     }
     pub fn deployment(&self, releases: &[Deployment]) -> Deployment {
         log::debug!("finding deployment in {:?}", releases);
@@ -43,9 +61,7 @@ impl Circuit {
             releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)
-                .expect(&format!(
-                    "could not find release for entrypoint {entrypoint}"
-                ))
+                .unwrap_or_else(|| panic!("could not find release for entrypoint {entrypoint}"))
                 .to_owned()
         };
         match self {
@@ -71,7 +87,8 @@ pub struct ProofResponse {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProofEdges {
-    pub request: Option<Request>,
+    #[serde(default)]
+    pub requests: Vec<Request>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +108,7 @@ pub struct Deployment {
     pub function_id: String,
     pub owner: Address,
     pub gateway: Address,
-    pub tx_hash: H256,
+    pub tx_hash: TxHash,
     #[serde(rename = "edges")]
     pub release_info: DeploymentEdges,
 }
@@ -129,9 +146,9 @@ impl From<TransactionOrReceiptIdPrimitive> for TransactionOrReceiptId {
             } => (receipt_id, receiver_id, false),
         };
         TransactionOrReceiptId {
-            id: id.0,
+            id: id.0.into(),
             account: pad_account_id(&account).into(),
-            is_transaction,
+            isTransaction: is_transaction,
         }
     }
 }
@@ -148,10 +165,10 @@ mod tests {
     }
     #[test]
     fn test_deserialise_sync_proof() {
-        let proof = fixture::<ProofResponse>("sync_proof.json");
+        let _proof = fixture::<ProofResponse>("sync_proof.json");
     }
     #[test]
     fn test_deserialise_verify_proof() {
-        let proof = fixture::<ProofResponse>("verify_proof.json");
+        let _proof = fixture::<ProofResponse>("verify_proof.json");
     }
 }

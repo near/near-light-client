@@ -6,14 +6,17 @@ use near_light_client_primitives::{
 use near_light_client_protocol::{
     prelude::{AccountId, CryptoHash, Header, Itertools},
     BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
-    StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
+    StakeInfo, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
 };
 use near_light_client_rpc::prelude::GetProof;
 use plonky2x::{
     frontend::{
         curta::ec::point::{CompressedEdwardsY, CompressedEdwardsYVariable},
-        ecc::curve25519::ed25519::eddsa::{EDDSASignatureVariable, EDDSASignatureVariableValue},
+        ecc::curve25519::ed25519::eddsa::{
+            EDDSASignatureVariable, EDDSASignatureVariableValue, DUMMY_PUBLIC_KEY, DUMMY_SIGNATURE,
+        },
         hint::simple::hint::Hint,
+        uint::Uint,
         vars::EvmVariable,
     },
     prelude::*,
@@ -27,6 +30,7 @@ use crate::merkle::MerklePathVariable;
 
 /// Type for omitting the size across the codebase for arrays that are the same
 /// size as BPS
+pub(crate) type Validators<const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ValidatorsVariable<A>;
 pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
@@ -161,7 +165,6 @@ impl HeaderInnerVariable {
         &self,
         b: &mut CircuitBuilder<L, D>,
     ) -> BytesVariable<INNER_ENCODED_LEN> {
-        // TODO: doubt we can abi encode this
         let mut input_stream = VariableStream::new();
         input_stream.write(&self.height);
         input_stream.write(&self.epoch_id);
@@ -184,6 +187,7 @@ impl HeaderInnerVariable {
         b.curta_sha256(&bytes.0)
     }
 }
+
 impl EvmVariable for HeaderInnerVariable {
     fn encode<L: PlonkParameters<D>, const D: usize>(
         &self,
@@ -309,17 +313,16 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for EncodeInner {
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
-pub struct BlockVariable {
+pub struct BlockVariable<const LEN: usize> {
     pub header: HeaderVariable,
     pub next_block_inner_hash: CryptoHashVariable,
-    pub next_bps: BpsArr<ValidatorStakeVariable>,
-    pub approvals_after_next: BpsApprovals<NUM_BLOCK_PRODUCER_SEATS>,
+    pub next_bps: Validators<LEN>,
+    pub approvals_after_next: BpsApprovals<LEN>,
     pub next_bps_hash: CryptoHashVariable,
 }
 
-impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
+impl<F: RichField, const LEN: usize> From<LightClientBlockView> for BlockVariableValue<LEN, F> {
     fn from(block: LightClientBlockView) -> Self {
-        // TODO[Optimisation]: Constrain these in-circuit
         let next_bps_hash = block
             .next_bps
             .as_ref()
@@ -331,19 +334,16 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
         let variable = Self {
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
             header: block.clone().into(),
-            next_bps: bps_to_variable(block.next_bps),
+            next_bps: block
+                .next_bps
+                .map(|bps| bps.into_iter().collect())
+                .unwrap_or_default(),
             approvals_after_next: block.approvals_after_next.into(),
             next_bps_hash,
         };
-        assert_eq!(variable.next_bps.len(), NUM_BLOCK_PRODUCER_SEATS);
-        assert_eq!(
-            variable.approvals_after_next.is_active.len(),
-            NUM_BLOCK_PRODUCER_SEATS
-        );
-        assert_eq!(
-            variable.approvals_after_next.signatures.len(),
-            NUM_BLOCK_PRODUCER_SEATS
-        );
+        assert_eq!(variable.next_bps.inner.len(), LEN);
+        assert_eq!(variable.approvals_after_next.is_active.len(), LEN);
+        assert_eq!(variable.approvals_after_next.signatures.len(), LEN);
         variable
     }
 }
@@ -377,25 +377,9 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
     }
 }
 
-pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
-    next_bps: Option<Vec<T>>,
-) -> Vec<ValidatorStakeVariableValue<F>> {
-    next_bps
-        .map(|next_bps| {
-            let mut bps = next_bps
-                .into_iter()
-                .take(NUM_BLOCK_PRODUCER_SEATS)
-                .map(Into::<ValidatorStake>::into)
-                .map(Into::<ValidatorStakeVariableValue<F>>::into)
-                .collect_vec();
-            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
-            bps
-        })
-        .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
-}
-
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ValidatorStakeVariable {
+    // TODO[optimisation]: can optimise this out by witnessing the hash
     pub account_id: AccountIdVariable,
     pub public_key: PublicKeyVariable,
     pub stake: BalanceVariable,
@@ -414,6 +398,60 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     }
 }
 
+impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
+    fn from(val: ValidatorStakeVariableValue<F>) -> Self {
+        let public_key = PublicKey::ED25519(ED25519PublicKey(val.public_key.0));
+        let account_id = normalise_account_id::<F>(&val.account_id);
+        ValidatorStakeView::V1(ValidatorStakeViewV1 {
+            account_id,
+            public_key,
+            stake: val.stake.as_u128(),
+        })
+    }
+}
+
+#[derive(CircuitVariable, Clone, Debug)]
+pub struct ValidatorsVariable<const N: usize> {
+    pub(crate) inner: BpsArr<ValidatorStakeVariable, N>,
+}
+
+impl<F: RichField, I: Into<ValidatorStakeView>, const N: usize> FromIterator<I>
+    for ValidatorsVariableValue<N, F>
+{
+    fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+        let mut bps = iter
+            .into_iter()
+            .take(N)
+            .map(Into::<ValidatorStakeView>::into)
+            .map(Into::<ValidatorStake>::into)
+            .map(Into::<ValidatorStakeVariableValue<F>>::into)
+            .collect_vec();
+        bps.resize(N, Default::default());
+        Self { inner: bps }
+    }
+}
+
+impl<F: RichField, const N: usize> Default for ValidatorsVariableValue<N, F> {
+    fn default() -> Self {
+        Self {
+            inner: vec![Default::default(); N],
+        }
+    }
+}
+
+impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
+    fn default() -> Self {
+        let account_id: [u8; AccountId::MAX_LEN] = [ACCOUNT_DATA_SEPARATOR; AccountId::MAX_LEN];
+        let public_key = CompressedEdwardsY(DUMMY_PUBLIC_KEY);
+
+        Self {
+            account_id,
+            public_key,
+            stake: u128::default().into(),
+        }
+    }
+}
+
 pub(crate) fn normalise_account_id<F: RichField>(
     account_id: &AccountIdVariableValue<F>,
 ) -> AccountId {
@@ -423,31 +461,6 @@ pub(crate) fn normalise_account_id<F: RichField>(
     let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
     trace!("account id: {}", account_str);
     account_str.parse().expect("invalid account id")
-}
-
-impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
-    fn from(val: ValidatorStakeVariableValue<F>) -> Self {
-        let account_id = normalise_account_id::<F>(&val.account_id);
-        let public_key = PublicKey::ED25519(ED25519PublicKey(val.public_key.0));
-        ValidatorStakeView::V1(ValidatorStakeViewV1 {
-            account_id,
-            public_key,
-            stake: val.stake.as_u128(),
-        })
-    }
-}
-
-impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
-    fn default() -> Self {
-        let account_id: [u8; AccountId::MAX_LEN] = [0u8; AccountId::MAX_LEN];
-        let public_key = CompressedEdwardsY::default();
-
-        Self {
-            account_id,
-            public_key,
-            stake: u128::default().into(),
-        }
-    }
 }
 
 pub type PublicKeyVariable = CompressedEdwardsYVariable;
@@ -460,30 +473,27 @@ pub struct SignatureVariable {
 impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
     fn from(sig: Option<Box<Signature>>) -> Self {
         sig.and_then(|s| match *s {
-            Signature::ED25519(s) => Some(Self {
-                signature: EDDSASignatureVariableValue {
-                    r: CompressedEdwardsY(*s.r_bytes()),
-                    s: U256::from_little_endian(s.s_bytes()),
-                },
-            }),
+            Signature::ED25519(s) => {
+                let r = *s.r_bytes();
+                Some(Self {
+                    signature: EDDSASignatureVariableValue {
+                        r: CompressedEdwardsY(r),
+                        s: U256::from_little_endian(s.s_bytes()),
+                    },
+                })
+            }
             // Silently ignores invalid signatures (ECDSA)
             // The reasoning being that ECDSA is being phased out and almost all validators
             // use EDDSA.
             // If we still need this, we should implement ECDSA.
             _ => None,
         })
-        .unwrap_or_default()
-    }
-}
-
-impl<F: RichField> Default for SignatureVariableValue<F> {
-    fn default() -> Self {
-        Self {
+        .unwrap_or(Self {
             signature: EDDSASignatureVariableValue {
-                r: CompressedEdwardsY::default(),
-                s: Default::default(),
+                r: CompressedEdwardsY(DUMMY_SIGNATURE[0..32].try_into().unwrap()),
+                s: U256::from_little_endian(&DUMMY_SIGNATURE[32..]),
             },
-        }
+        })
     }
 }
 
@@ -559,52 +569,25 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
     }
 }
 
-#[derive(CircuitVariable, Clone, Debug)]
-pub struct SyncedVariable {
-    pub new_head: HeaderVariable,
-    pub next_bps_epoch: CryptoHashVariable,
-    pub next_bps: BpsArr<ValidatorStakeVariable>,
-}
-
-impl<F> From<Synced> for SyncedVariableValue<F>
-where
-    F: RichField,
-{
-    fn from(value: Synced) -> Self {
-        let default_bps = vec![ValidatorStakeVariableValue::default(); NUM_BLOCK_PRODUCER_SEATS];
-        Self {
-            new_head: value.new_head.into(),
-            next_bps_epoch: value
-                .next_bps
-                .as_ref()
-                .map(|v| v.0 .0 .0.into())
-                .unwrap_or_default(),
-            next_bps: value
-                .next_bps
-                .map(|v| v.1.into_iter().map(Into::into).collect_vec())
-                .unwrap_or(default_bps),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HashBpsInputs;
 
 impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
-        let bps = input_stream.read_value::<BpsArr<ValidatorStakeVariable>>();
+        let bps = input_stream.read_value::<Validators>();
         // TODO: if we use a bitmask we wont need default checks
         let default_validator =
             ValidatorStakeVariableValue::<<L as PlonkParameters<D>>::Field>::default();
 
         let bps = bps
+            .inner
             .into_iter()
             .filter(|x| x.account_id != default_validator.account_id)
             .map(Into::<ValidatorStakeView>::into)
             .collect_vec();
         trace!("Bps to hash: {:#?}", bps);
         let hash = CryptoHash::hash_borsh(bps);
-        debug!("Hash: {:#?}", hash);
+        debug!("Bps hash: {:#?}", hash);
 
         // TODO: figure out how to hash this in circuit
         // It's non trivial because the account id is padded to the max len
@@ -616,10 +599,10 @@ impl HashBpsInputs {
     pub fn hash<L: PlonkParameters<D>, const D: usize>(
         self,
         b: &mut CircuitBuilder<L, D>,
-        bps: &BpsArr<ValidatorStakeVariable>,
+        bps: &Validators,
     ) -> CryptoHashVariable {
         let mut input_stream = VariableStream::new();
-        input_stream.write::<BpsArr<ValidatorStakeVariable>>(bps);
+        input_stream.write::<Validators>(bps);
 
         let output_stream = b.hint(input_stream, self);
         output_stream.read::<CryptoHashVariable>(b)
@@ -701,6 +684,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
             account: AccountIdVariable::decode(builder, &bytes[33..33 + AccountId::MAX_LEN]),
         }
     }
+
     fn encode_value<F: RichField>(value: Self::ValueType<F>) -> Vec<u8> {
         let mut bytes = vec![value.is_transaction as u8];
         bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.id));
@@ -709,6 +693,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
         )));
         bytes
     }
+
     fn decode_value<F: RichField>(bytes: &[u8]) -> Self::ValueType<F> {
         assert_eq!(bytes.len(), 1 + 32 + AccountId::MAX_LEN);
 
@@ -719,6 +704,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -769,8 +755,8 @@ mod tests {
             b.evm_write::<TransactionOrReceiptIdVariable>(tx);
         };
         let writer = |input: &mut PI| {
-            input.evm_write::<TransactionOrReceiptIdVariable>(txs[0].clone().into());
-            input.evm_write::<TransactionOrReceiptIdVariable>(txs[1].clone().into());
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[0].clone());
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[1].clone());
         };
         let assertions = |mut output: PO| {
             println!("{:#?}", output.evm_read::<TransactionOrReceiptIdVariable>());

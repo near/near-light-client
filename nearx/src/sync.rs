@@ -45,9 +45,9 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
             .fetch(b, &trusted_header_hash)
             .expect("Failed to fetch next block");
 
-        let synced = b.sync(&header, &bps, &next_block);
-        let synced_hash = synced.new_head.hash(b);
-        b.evm_write::<CryptoHashVariable>(synced_hash);
+        let new_head = b.sync(&header, &bps, &next_block);
+        let new_hash = new_head.hash(b);
+        b.evm_write::<CryptoHashVariable>(new_hash);
     }
 
     fn register_generators<L: PlonkParameters<D>, const D: usize>(registry: &mut HintRegistry<L, D>)
@@ -76,6 +76,8 @@ mod beefy_tests {
     fn sync_e2e() {
         let (header, _, _) = testnet_state();
         let header = header.hash().0;
+        let header =
+            bytes32!("0xeff7dccf304315aa520ad7e704062a8b8deadc5c0906e7e16d7305067a72a57e").0;
 
         let define = |b: &mut B| {
             SyncCircuit::<NETWORK>::define(b);

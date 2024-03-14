@@ -26,6 +26,7 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
     {}
 
     uint32 public constant DEFAULT_GAS_LIMIT = 1000000;
+    uint32 public constant SYNC_GAS_LIMIT = 400000;
 
     /// @notice The address of the gateway contract.
     address public gateway;
@@ -78,7 +79,7 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
             abi.encodePacked(latestHeader),
             context,
             NearX.handleSync.selector,
-            DEFAULT_GAS_LIMIT
+            SYNC_GAS_LIMIT
         );
 
         emit SyncRequested(latestHeader);
@@ -88,11 +89,25 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
-        // TODO: this does mean we trust the gateway, potentially we add a check here and also store heights
+        // TODO: this does mean we trust the gateway, potentially we add a check here and also store heights of last N headers
+        handleSyncOutput(_output);
+    }
 
+    /// Fetches the proof result from the gateway and updates our head
+    function sync(bytes32 trustedHeader) external {
+        // TODO: do we need to ensure gateway here?
+        ensureInitialized();
+
+        bytes memory output = ISuccinctGateway(gateway).verifiedCall(
+            syncFunctionId,
+            abi.encodePacked(trustedHeader)
+        );
+        handleSyncOutput(output);
+    }
+
+    function handleSyncOutput(bytes memory _output) internal {
         bytes32 targetHeader = abi.decode(_output, (bytes32));
 
-        // TODO: store block height of last N packed
         latestHeader = targetHeader;
 
         emit HeadUpdate(targetHeader);
@@ -124,6 +139,19 @@ contract NearX is INearX, Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (msg.sender != gateway || !ISuccinctGateway(gateway).isCallback()) {
             revert NotFromSuccinctGateway(msg.sender);
         }
+        handleVerifyOutput(_output);
+    }
+
+    function verify(bytes32 trustedHeader, bytes calldata _ids) external {
+        ensureInitialized();
+        bytes memory output = ISuccinctGateway(gateway).verifiedCall(
+            verifyFunctionId,
+            abi.encodePacked(trustedHeader, _ids)
+        );
+        handleVerifyOutput(output);
+    }
+
+    function handleVerifyOutput(bytes memory _output) internal {
         emit VerifyResult(_output);
     }
 

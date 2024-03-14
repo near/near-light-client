@@ -262,7 +262,11 @@ impl Protocol {
 
                 let approved_stake = match Self::validate_signature(approval_message, sig, pk) {
                     Ok(_) => approved_stake + stake,
-                    Err(Error::SignatureInvalid) | Err(Error::ValidatorNotSigned) => approved_stake,
+                    Err(Error::SignatureInvalid) => {
+                        log::debug!("invalid signature: pk: {} sig: {:?}", pk, sig);
+                        approved_stake
+                    }
+                    Err(Error::ValidatorNotSigned) => approved_stake,
                     Err(_) => approved_stake,
                 };
 

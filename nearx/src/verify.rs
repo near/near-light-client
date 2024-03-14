@@ -251,7 +251,7 @@ mod beefy_tests {
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.hash().0.into());
             for tx in txs {
-                input.evm_write::<TransactionOrReceiptIdVariable>(tx.into());
+                input.evm_write::<TransactionOrReceiptIdVariable>(tx);
             }
         };
         let assertions = |mut output: PO| {
@@ -294,7 +294,7 @@ mod beefy_tests {
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.hash().0.into());
             for tx in txs {
-                input.evm_write::<TransactionOrReceiptIdVariable>(tx.into());
+                input.evm_write::<TransactionOrReceiptIdVariable>(tx);
             }
         };
         let assertions = |mut output: PO| {

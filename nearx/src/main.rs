@@ -13,7 +13,7 @@ fn main() {
             use near_light_clientx::SyncCircuit;
             SyncCircuit::<NETWORK>::entrypoint();
         } else if #[cfg(feature = "verify")] {
-            const PROOF_AMT: usize = 128;
+            const PROOF_AMT: usize = 64;
             const PROOF_BATCH_SIZE: usize = 4;
 
             assert!(PROOF_AMT % PROOF_BATCH_SIZE == 0);
