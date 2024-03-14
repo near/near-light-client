@@ -3591,6 +3591,7 @@ dependencies = [
 name = "near-light-client"
 version = "0.3.0"
 dependencies = [
+ "actix",
  "anyhow",
  "async-trait",
  "axum",

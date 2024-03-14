@@ -5,6 +5,7 @@ name              = "near-light-client"
 version.workspace = true
 
 [dependencies]
+actix                       = "*"
 anyhow.workspace            = true
 async-trait.workspace       = true
 axum.workspace              = true

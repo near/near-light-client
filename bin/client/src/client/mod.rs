@@ -12,6 +12,7 @@ use crate::{
     prelude::*,
 };
 
+pub mod acto;
 pub mod actor;
 mod store;
 
