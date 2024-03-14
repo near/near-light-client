@@ -769,8 +769,8 @@ mod tests {
             b.evm_write::<TransactionOrReceiptIdVariable>(tx);
         };
         let writer = |input: &mut PI| {
-            input.evm_write::<TransactionOrReceiptIdVariable>(txs[0].clone().into());
-            input.evm_write::<TransactionOrReceiptIdVariable>(txs[1].clone().into());
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[0].clone());
+            input.evm_write::<TransactionOrReceiptIdVariable>(txs[1].clone());
         };
         let assertions = |mut output: PO| {
             println!("{:#?}", output.evm_read::<TransactionOrReceiptIdVariable>());

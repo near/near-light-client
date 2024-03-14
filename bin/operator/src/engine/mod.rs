@@ -5,7 +5,6 @@ use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
-use plonky2x::backend::prover::ProofId;
 use priority_queue::PriorityQueue;
 pub use types::RegistryInfo;
 
@@ -14,6 +13,7 @@ use crate::{
     succinct::{
         self,
         types::{ProofResponse, ProofStatus},
+        ProofId,
     },
     VERIFY_ID_AMT,
 };
@@ -25,7 +25,6 @@ mod types;
 // Collision <> receipt & tx?
 type Queue = PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>;
 
-/// An in memory queue as a placeholder until we decide on the flow
 pub struct Engine {
     registry: HashMap<usize, RegistryInfo>,
     succinct_client: Arc<succinct::Client>,
@@ -254,11 +253,10 @@ impl Handler<Cleanup> for Engine {
 mod tests {
 
     use near_light_client_rpc::TransactionOrReceiptId;
-    use plonky2x::backend::prover::ProofId;
     use test_utils::fixture;
 
     use super::*;
-    use crate::{succinct::tests::mocks, tests::Stubs};
+    use crate::succinct::tests::mocks;
 
     async fn manager() -> Engine {
         let client = mocks().await;

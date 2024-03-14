@@ -1,4 +1,8 @@
-catchup       = false
-network       = "Testnet"
-starting_head = "4zwZQzjQDpimeLK3tX39nzok6UjDU9edS57EFhkAa4Sk"
 state_path    = "state.db"
+catchup       = false
+
+[rpc]
+network       = "Testnet"
+
+[protocol]
+genesis = "4zwZQzjQDpimeLK3tX39nzok6UjDU9edS57EFhkAa4Sk"

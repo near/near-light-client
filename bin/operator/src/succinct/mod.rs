@@ -4,11 +4,11 @@ use anyhow::ensure;
 use ethers::prelude::*;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use near_light_client_rpc::prelude::{CryptoHash, Itertools};
-use plonky2x::{
+pub use near_light_clientx::plonky2x::backend::prover::ProofId;
+use near_light_clientx::plonky2x::{
     backend::{
         circuit::DefaultParameters,
         function::{BytesRequestData, ProofRequest, ProofRequestBase},
-        prover::ProofId,
     },
     utils::hex,
 };
@@ -58,6 +58,7 @@ fn default_organisation() -> String {
 fn default_project() -> String {
     "near-light-client".into()
 }
+
 fn default_max_retries() -> u32 {
     3
 }
@@ -173,9 +174,7 @@ impl Client {
             self.releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)
-                .expect(&format!(
-                    "could not find release for entrypoint {entrypoint}"
-                ))
+                .unwrap_or_else(|| panic!("could not find release for entrypoint {entrypoint}"))
                 .to_owned()
         };
 
@@ -270,7 +269,7 @@ impl Client {
             )
             .await
             .inspect(|d| log::debug!("requested relay proof: {:?}", d))?;
-        Ok(self.wait_for_proof(&request_id).await?)
+        self.wait_for_proof(&request_id).await
     }
 
     pub async fn fetch_proofs(&self) -> anyhow::Result<Vec<ProofResponse>> {
@@ -447,7 +446,7 @@ pub mod tests {
             .and(path("/"))
             .and(body_partial_json(json!({"method":"eth_chainId"})))
             .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({"jsonrpc":"2.0","id":1,"result":hex::encode((Stubs::chain_id() as u32).to_be_bytes())}),
+                json!({"jsonrpc":"2.0","id":1,"result":hex::encode(Stubs::chain_id().to_be_bytes())}),
             ))
             .mount(&server)
             .await;
@@ -504,8 +503,7 @@ pub mod tests {
             .mount(&server)
             .await;
 
-        let client = Client::new(&config).await.unwrap();
-        client
+        Client::new(&config).await.unwrap()
     }
 
     #[tokio::test]

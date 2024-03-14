@@ -10,6 +10,7 @@ version.workspace = true
 actix                       = { version = "*", features = [ "macros" ] }
 anyhow.workspace            = true
 config.workspace            = true
+http-cache-reqwest = "0.13.0"
 ethers                      = { version = "2.0" }
 futures.workspace           = true
 hashbrown                   = "*"
@@ -31,9 +32,8 @@ uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] 
 near-light-client-primitives.workspace = true
 near-light-client-protocol.workspace   = true
 near-light-client-rpc.workspace        = true
+near-light-clientx.workspace           = true
 
-http-cache-reqwest = "0.13.0"
-plonky2x           = { git = "https://github.com/succinctlabs/succinctx.git" }
 succinct-client    = { git = "https://github.com/succinctlabs/succinctx.git" }
 
 [dev-dependencies]

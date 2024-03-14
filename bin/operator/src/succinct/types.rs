@@ -1,7 +1,7 @@
 use ethers::{abi::AbiEncode, contract::abigen, prelude::*};
 use near_light_client_primitives::pad_account_id;
 pub use near_light_client_rpc::TransactionOrReceiptId as TransactionOrReceiptIdPrimitive;
-use plonky2x::backend::{
+use near_light_clientx::plonky2x::backend::{
     circuit::DefaultParameters,
     function::{ProofRequest, ProofResult},
     prover::ProofId,
@@ -43,9 +43,7 @@ impl Circuit {
             releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)
-                .expect(&format!(
-                    "could not find release for entrypoint {entrypoint}"
-                ))
+                .unwrap_or_else(|| panic!("could not find release for entrypoint {entrypoint}"))
                 .to_owned()
         };
         match self {

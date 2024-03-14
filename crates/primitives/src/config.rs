@@ -46,8 +46,8 @@ where
             .add_source(Environment::with_prefix(env_prefix).try_parsing(true))
             .build()?;
 
-        let r = s.try_deserialize();
-        r
+        
+        s.try_deserialize()
     }
 
     fn test_config() -> T {
