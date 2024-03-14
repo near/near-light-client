@@ -2,6 +2,7 @@ use coerce::actor::message::Message;
 use near_primitives::types::TransactionOrReceiptId;
 use protocol::{experimental::Proof as ExperimentalProof, Proof};
 
+// TODO: convert to actix
 use crate::prelude::*;
 
 pub struct Shutdown;

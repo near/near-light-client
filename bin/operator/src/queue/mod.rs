@@ -360,16 +360,15 @@ mod tests {
 
         let (tx, w) = m.proving_queue.pop().unwrap();
         // Make empty batch, since theres not enough to fill
-        let (id, batch) = m.make_batch();
-        assert_eq!(id, 0);
-        assert!(batch.is_empty());
+        let batch = m.make_batch();
+        assert!(batch.is_none());
 
         // Put the tx we took back
         m.prove(Some(w as usize), tx.0).unwrap();
         m.prove(None, fixture.last().unwrap().clone()).unwrap();
         println!("{}", m.proving_queue.len());
 
-        let (id, batch) = m.make_batch();
+        let (id, batch) = m.make_batch().unwrap();
         assert_eq!(id, 0);
         assert!(!batch.is_empty());
     }

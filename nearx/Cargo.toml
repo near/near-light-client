@@ -19,8 +19,9 @@ serde.workspace       = true
 plonky2  = { git = "https://github.com/mir-protocol/plonky2.git" }
 plonky2x = { git = "https://github.com/succinctlabs/succinctx.git" }
 
-near-light-client-protocol.workspace = true
-near-light-client-rpc.workspace      = true
+near-light-client-primitives.workspace = true
+near-light-client-protocol.workspace   = true
+near-light-client-rpc.workspace        = true
 
 [dev-dependencies]
 borsh.workspace             = true

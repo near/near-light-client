@@ -1,7 +1,7 @@
-use config::NUM_BLOCK_PRODUCER_SEATS;
 use error::Error;
 pub use merkle_util::*;
 pub use near_crypto::{ED25519PublicKey, PublicKey, Signature};
+use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 pub use near_primitives::{
     account::id as near_account_id,
     block_header::{ApprovalInner, BlockHeaderInnerLite},

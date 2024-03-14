@@ -1,7 +1,6 @@
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
-use config::{Config as ConfigTrait, ConfigError, Environment, File};
-use rpc::Network;
+use near_light_client_primitives::{config::default_host, prelude::Configurable};
 
 use crate::prelude::*;
 
@@ -9,52 +8,27 @@ use crate::prelude::*;
 pub struct Config {
     #[serde(default = "default_db_path")]
     pub state_path: PathBuf,
-    pub starting_head: String,
-    pub network: Network,
     #[serde(default = "default_host")]
     pub host: String,
     pub catchup: bool,
+    pub rpc: rpc::Config,
+    pub protocol: protocol::config::Config,
 }
+
+impl Configurable for Config {}
 
 fn default_db_path() -> PathBuf {
     "state.db".into()
 }
 
-fn default_host() -> String {
-    "0.0.0.0:3000".into()
-}
-
-impl Config {
-    pub fn new() -> Result<Self, ConfigError> {
-        let run_mode = env::var("NEAR_LIGHT_CLIENT_NETWORK")
-            .unwrap_or_else(|_| "testnet".into())
-            .to_lowercase();
-        log::debug!("Run mode {run_mode}");
-
-        let default_path =
-            env::var("NEAR_LIGHT_CLIENT_CONFIG_FILE").unwrap_or_else(|_| "default".to_string());
-
-        let s = ConfigTrait::builder()
-            .add_source(File::with_name(&default_path).required(false))
-            .add_source(File::with_name(&run_mode).required(false))
-            // This file shouldn't be checked in to git
-            .add_source(File::with_name("local").required(false))
-            .add_source(Environment::with_prefix("NEAR_LIGHT_CLIENT"))
-            .build()?;
-
-        let r = s.try_deserialize();
-
-        log::debug!("Config: {:#?}", r);
-        r
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use near_light_client_primitives::config::BaseConfig;
+
     use super::*;
 
     #[test]
-    fn test_new() {
-        Config::new().unwrap();
+    fn test_read_config() {
+        Config::test_config();
     }
 }

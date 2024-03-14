@@ -1,4 +1,5 @@
-use near_light_client_protocol::{config::NUM_BLOCK_PRODUCER_SEATS, prelude::Itertools};
+use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
+use near_light_client_protocol::prelude::Itertools;
 use plonky2x::prelude::*;
 use pretty_assertions::assert_eq;
 

@@ -1,24 +1,28 @@
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
 use nearx_operator::{
     config::Config, rpc::VERIFY_ID_AMT, succinct::*, types::TransactionOrReceiptIdPrimitive,
+    BaseConfig,
 };
-use test_utils::{fixture, testnet_state};
+use test_utils::fixture;
 
 async fn client() -> Client {
     pretty_env_logger::try_init().ok();
     Client::new(&Config::test_config()).await.unwrap()
 }
 
+#[tokio::test]
 async fn test_sync() {
     let s = client().await.sync(false).await.unwrap();
     println!("synced with {:?}", s);
 }
 
+#[tokio::test]
 async fn test_sync_relay() {
     let s = client().await.sync(true).await.unwrap();
     println!("synced with {:?}", s);
 }
 
+#[tokio::test]
 async fn test_verify() {
     let client = client().await;
 
@@ -31,6 +35,7 @@ async fn test_verify() {
     println!("verify with {:?}", s);
 }
 
+#[tokio::test]
 async fn test_verify_relay() {
     let client: Client = client().await;
 
@@ -43,6 +48,7 @@ async fn test_verify_relay() {
     println!("verify with {:?}", s);
 }
 
+#[tokio::test]
 async fn test_check_proof() {
     let c = client().await;
     let proofs = c.fetch_proofs().await.unwrap();
