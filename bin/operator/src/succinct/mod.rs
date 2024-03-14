@@ -607,6 +607,6 @@ pub mod tests {
     #[tokio::test]
     async fn test_check_proof() {
         let client = mocks().await;
-        let proofs = client.fetch_proofs().await.unwrap();
+        let _proofs = client.fetch_proofs().await.unwrap();
     }
 }

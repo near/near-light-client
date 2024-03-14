@@ -1,4 +1,4 @@
-use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use near_light_client_rpc::{prelude::Itertools};
 use nearx_operator::{
     config::Config, rpc::VERIFY_ID_AMT, succinct::*, types::TransactionOrReceiptIdPrimitive,
     BaseConfig,

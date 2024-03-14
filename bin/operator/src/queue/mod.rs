@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use actix::{prelude::*, Addr};
+use actix::{prelude::*};
 use anyhow::{anyhow, ensure, Result};
-use futures::{FutureExt, TryFutureExt};
+use futures::{FutureExt};
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
 use plonky2x::backend::prover::ProofId;
@@ -154,7 +154,7 @@ impl From<ProofId> for CheckProof {
 impl Handler<CheckProof> for QueueManager {
     type Result = ResponseFuture<Result<ProofResponse>>;
 
-    fn handle(&mut self, msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
         // // This feels like a succinct client job, keep checking queues
         // let fut = self.check_proof(msg.0);
         // Box::pin(fut)
@@ -310,7 +310,7 @@ mod tests {
     async fn test_check_proof() {
         let m = manager().await;
 
-        let r = m
+        let _r = m
             .check_proof(ProofId(Stubs::verify_pid()).into())
             .await
             .unwrap();

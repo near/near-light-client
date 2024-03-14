@@ -1,7 +1,7 @@
 use coerce::actor::{system::ActorSystem, IntoActor};
 use near_light_client_primitives::config::BaseConfig;
 
-use crate::client::{message::Shutdown, LightClient};
+use crate::client::{actor::Shutdown, LightClient};
 
 mod client;
 mod config;
