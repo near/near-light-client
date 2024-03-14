@@ -850,42 +850,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cached"
-version = "0.49.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f251fd1e72720ca07bf5d8e310f54a193fd053479a1f6342c6663ee4fa01cf96"
-dependencies = [
- "ahash 0.8.8",
- "async-trait",
- "cached_proc_macro",
- "cached_proc_macro_types",
- "futures",
- "hashbrown 0.14.3",
- "instant",
- "once_cell",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "cached_proc_macro"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad9f16c0d84de31a2ab7fdf5f7783c14631f7075cf464eb3bb43119f61c9cb2a"
-dependencies = [
- "darling 0.14.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "cached_proc_macro_types"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ade8366b8bd5ba243f0a58f036cc0ca8a2f069cff1a2351ef1cac6b083e16fc0"
-
-[[package]]
 name = "camino"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1323,36 +1287,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b750cb3417fd1b327431a470f388520309479ab0bf5e323505daf0290cd3850"
-dependencies = [
- "darling_core 0.14.4",
- "darling_macro 0.14.4",
-]
-
-[[package]]
-name = "darling"
 version = "0.20.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c376d08ea6aa96aafe61237c7200d1241cb177b7d3a542d791f2d118e9cbb955"
 dependencies = [
- "darling_core 0.20.6",
- "darling_macro 0.20.6",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "109c1ca6e6b7f82cc233a97004ea8ed7ca123a9af07a8230878fcfda9b158bf0"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.10.0",
- "syn 1.0.109",
+ "darling_core",
+ "darling_macro",
 ]
 
 [[package]]
@@ -1371,22 +1311,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4aab4dbc9f7611d8b55048a3a16d2d010c2c8334e46304b40ac1cc14bf3b48e"
-dependencies = [
- "darling_core 0.14.4",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_macro"
 version = "0.20.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5a91391accf613803c2a9bf9abccdbaa07c54b4244a5b64883f9c3c137c86be"
 dependencies = [
- "darling_core 0.20.6",
+ "darling_core",
  "quote",
  "syn 2.0.49",
 ]
@@ -2182,18 +2111,6 @@ checksum = "46303f565772937ffe1d394a4fac6f411c6013172fadde9dcdb1e147a086940e"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
-]
-
-[[package]]
-name = "flume"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
-dependencies = [
- "futures-core",
- "futures-sink",
- "nanorand",
- "spin 0.9.8",
 ]
 
 [[package]]
@@ -3445,15 +3362,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom 0.2.12",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3597,26 +3505,16 @@ dependencies = [
  "borsh",
  "coerce",
  "config",
- "either",
- "futures",
- "hex",
  "itertools 0.12.1",
  "log",
- "near-crypto",
- "near-jsonrpc-client",
  "near-light-client-primitives",
  "near-light-client-protocol",
  "near-light-client-rpc",
  "near-primitives",
- "near-primitives-core",
  "pretty_env_logger",
- "protobuf 3.2.0",
  "rand 0.8.5",
- "reqwest",
  "serde",
- "serde_json",
  "sled",
- "thiserror",
  "tokio",
 ]
 
@@ -3660,12 +3558,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "borsh",
- "either",
  "futures",
  "hex",
  "itertools 0.12.1",
  "log",
- "near-crypto",
  "near-jsonrpc-client",
  "near-jsonrpc-primitives",
  "near-primitives",
@@ -3674,7 +3570,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "thiserror",
  "tokio",
 ]
 
@@ -3686,7 +3581,6 @@ dependencies = [
  "borsh",
  "cfg-if",
  "ethers",
- "hex",
  "log",
  "near-light-client-primitives",
  "near-light-client-protocol",
@@ -3879,10 +3773,8 @@ version = "0.3.0"
 dependencies = [
  "actix",
  "anyhow",
- "cached",
  "config",
  "ethers",
- "flume",
  "futures",
  "hashbrown 0.14.3",
  "hex",
@@ -5895,7 +5787,7 @@ version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "865f9743393e638991566a8b7a479043c2c8da94a33e0a31f18214c9cae0a64d"
 dependencies = [
- "darling 0.20.6",
+ "darling",
  "proc-macro2",
  "quote",
  "syn 2.0.49",
@@ -6162,9 +6054,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spki"
@@ -6452,24 +6341,14 @@ dependencies = [
 name = "test-utils"
 version = "0.3.0"
 dependencies = [
- "anyhow",
- "borsh",
  "derive_more",
- "either",
- "hex",
- "itertools 0.12.1",
  "log",
- "near-crypto",
- "near-jsonrpc-primitives",
  "near-light-client-protocol",
  "near-primitives",
- "near-primitives-core",
  "pretty_assertions",
  "pretty_env_logger",
- "rand 0.8.5",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]

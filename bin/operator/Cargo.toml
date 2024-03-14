@@ -9,10 +9,8 @@ version.workspace = true
 [dependencies]
 actix                       = { version = "*", features = [ "macros" ] }
 anyhow.workspace            = true
-cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
 config.workspace            = true
 ethers                      = { version = "2.0" }
-flume                       = "*"
 futures.workspace           = true
 hashbrown                   = "*"
 hex.workspace               = true
