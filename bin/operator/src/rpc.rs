@@ -14,22 +14,19 @@ use tokio::task::JoinHandle;
 
 use crate::{
     config::Config,
-    queue::{ProveTransaction, QueueManager, Register, RegistryInfo},
+    engine::{Engine, ProveTransaction, Register, RegistryInfo},
     succinct,
 };
-
-// TODO: share this with the circuit OR just make them dynamic with a max bound
-pub const VERIFY_ID_AMT: usize = 128;
 
 type Result<T> = core::result::Result<T, ErrorObjectOwned>;
 
 pub struct RpcServerImpl {
     succinct_client: Arc<succinct::Client>,
-    queue: Addr<QueueManager>,
+    queue: Addr<Engine>,
 }
 
 impl RpcServerImpl {
-    pub fn new(succinct_client: Arc<succinct::Client>, queue: Addr<QueueManager>) -> Self {
+    pub fn new(succinct_client: Arc<succinct::Client>, queue: Addr<Engine>) -> Self {
         log::info!("starting rpc server");
         Self {
             succinct_client,

@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use actix::{prelude::*, Addr};
-use anyhow::{anyhow, ensure, Result};
-use futures::{FutureExt, TryFutureExt};
+use actix::prelude::*;
+use anyhow::{anyhow, Result};
+use futures::FutureExt;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
 use plonky2x::backend::prover::ProofId;
@@ -11,11 +11,11 @@ pub use types::RegistryInfo;
 
 use self::types::{PriorityWeight, TransactionOrReceiptIdNewtype};
 use crate::{
-    rpc::VERIFY_ID_AMT,
     succinct::{
         self,
         types::{ProofResponse, ProofStatus},
     },
+    VERIFY_ID_AMT,
 };
 
 mod types;
@@ -26,7 +26,7 @@ mod types;
 type Queue = PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>;
 
 /// An in memory queue as a placeholder until we decide on the flow
-pub struct QueueManager {
+pub struct Engine {
     registry: HashMap<usize, RegistryInfo>,
     succinct_client: Arc<succinct::Client>,
     // TODO: persist me
@@ -35,7 +35,7 @@ pub struct QueueManager {
     request_info: HashMap<ProofId, Option<ProofStatus>>,
 }
 
-impl QueueManager {
+impl Engine {
     pub fn new(
         registry: HashMap<usize, RegistryInfo>,
         succinct_client: Arc<succinct::Client>,
@@ -70,28 +70,6 @@ impl QueueManager {
         Ok(())
     }
 
-    async fn check_proof(&self, msg: ProofId) -> <CheckProof as Message>::Result {
-        let mut poll_count = 0;
-        // TODO: configure
-        let sleep = tokio::time::sleep(Duration::from_secs(60));
-        tokio::pin!(sleep);
-
-        loop {
-            if let Ok(proof) = self.succinct_client.get_proof(msg.clone()).await {
-                match proof.status {
-                    ProofStatus::Success => {
-                        break Ok(proof);
-                    }
-                    ProofStatus::Failure => break Ok(proof),
-                    _ => {}
-                }
-            }
-            poll_count += 1;
-            ensure!(poll_count < 10, "failed to get proof");
-            sleep.as_mut().await;
-        }
-    }
-
     fn make_batch(&mut self) -> Option<(u32, Vec<TransactionOrReceiptId>)> {
         if self.proving_queue.len() >= VERIFY_ID_AMT {
             let id = self.batches.len() as u32;
@@ -108,7 +86,7 @@ impl QueueManager {
     }
 }
 
-impl Actor for QueueManager {
+impl Actor for Engine {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
@@ -131,7 +109,7 @@ pub struct ProveTransaction {
     pub tx: TransactionOrReceiptId,
 }
 
-impl Handler<ProveTransaction> for QueueManager {
+impl Handler<ProveTransaction> for Engine {
     type Result = Result<()>;
 
     fn handle(&mut self, msg: ProveTransaction, _ctx: &mut Self::Context) -> Self::Result {
@@ -151,10 +129,10 @@ impl From<ProofId> for CheckProof {
 }
 
 // TODO: change to periodic job to check proofs for all batches and clean up
-impl Handler<CheckProof> for QueueManager {
+impl Handler<CheckProof> for Engine {
     type Result = ResponseFuture<Result<ProofResponse>>;
 
-    fn handle(&mut self, msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
         // // This feels like a succinct client job, keep checking queues
         // let fut = self.check_proof(msg.0);
         // Box::pin(fut)
@@ -166,7 +144,7 @@ impl Handler<CheckProof> for QueueManager {
 #[rtype(result = "()")]
 pub struct Register(pub RegistryInfo);
 
-impl Handler<Register> for QueueManager {
+impl Handler<Register> for Engine {
     type Result = ();
 
     fn handle(&mut self, msg: Register, _ctx: &mut Self::Context) -> Self::Result {
@@ -178,7 +156,7 @@ impl Handler<Register> for QueueManager {
 #[rtype(result = "()")]
 pub struct Sync;
 
-impl Handler<Sync> for QueueManager {
+impl Handler<Sync> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
     fn handle(&mut self, _msg: Sync, _ctx: &mut Self::Context) -> Self::Result {
@@ -199,7 +177,7 @@ impl Handler<Sync> for QueueManager {
 #[rtype(result = "()")]
 pub struct Drain;
 
-impl Handler<Drain> for QueueManager {
+impl Handler<Drain> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
     fn handle(&mut self, _msg: Drain, _ctx: &mut Self::Context) -> Self::Result {
@@ -224,7 +202,7 @@ impl Handler<Drain> for QueueManager {
 #[rtype(result = "()")]
 pub struct Cleanup;
 
-impl Handler<Cleanup> for QueueManager {
+impl Handler<Cleanup> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
     fn handle(&mut self, _msg: Cleanup, _ctx: &mut Self::Context) -> Self::Result {
@@ -282,9 +260,9 @@ mod tests {
     use super::*;
     use crate::{succinct::tests::mocks, tests::Stubs};
 
-    async fn manager() -> QueueManager {
+    async fn manager() -> Engine {
         let client = mocks().await;
-        QueueManager::new(Default::default(), Arc::new(client))
+        Engine::new(Default::default(), Arc::new(client))
     }
 
     // TODO: move to integration tests
@@ -306,15 +284,15 @@ mod tests {
     //     QueueManager::try_drain(m.succinct_client, m.proving_queue).await;
     // }
 
-    #[tokio::test]
-    async fn test_check_proof() {
-        let m = manager().await;
-
-        let r = m
-            .check_proof(ProofId(Stubs::verify_pid()).into())
-            .await
-            .unwrap();
-    }
+    // #[tokio::test]
+    // async fn test_check_proof() {
+    //     let m = manager().await;
+    //
+    //     let _r = m
+    //         .check_proof(ProofId(Stubs::verify_pid()).into())
+    //         .await
+    //         .unwrap();
+    // }
 
     #[tokio::test]
     async fn test_weights() {

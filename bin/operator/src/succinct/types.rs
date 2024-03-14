@@ -148,10 +148,10 @@ mod tests {
     }
     #[test]
     fn test_deserialise_sync_proof() {
-        let proof = fixture::<ProofResponse>("sync_proof.json");
+        let _proof = fixture::<ProofResponse>("sync_proof.json");
     }
     #[test]
     fn test_deserialise_verify_proof() {
-        let proof = fixture::<ProofResponse>("verify_proof.json");
+        let _proof = fixture::<ProofResponse>("verify_proof.json");
     }
 }

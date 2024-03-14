@@ -15,11 +15,9 @@ pub async fn main() -> anyhow::Result<()> {
 
     let client = Arc::new(SuccinctClient::new(&config).await?);
 
-    let queue_actor = QueueManager::new(Default::default(), client.clone()).start();
+    let engine = Engine::new(Default::default(), client.clone()).start();
 
-    let server_handle = RpcServer::new(client, queue_actor.clone())
-        .run(&config)
-        .await?;
+    let server_handle = RpcServer::new(client, engine.clone()).run(&config).await?;
 
     if tokio::signal::ctrl_c().await.is_ok() {
         log::info!("Shutting down..");

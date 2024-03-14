@@ -22,9 +22,9 @@ use types::TransactionOrReceiptIdPrimitive;
 use self::types::{Circuit, Deployment, ProofResponse};
 use crate::{
     config,
-    rpc::VERIFY_ID_AMT,
     succinct::types::ProofRequestResponse,
     types::{NearX, TransactionOrReceiptId},
+    VERIFY_ID_AMT,
 };
 
 pub mod types;
@@ -406,7 +406,6 @@ pub mod tests {
     };
 
     use super::*;
-    use crate::rpc::VERIFY_ID_AMT;
 
     pub struct Stubs;
     impl Stubs {
@@ -607,6 +606,6 @@ pub mod tests {
     #[tokio::test]
     async fn test_check_proof() {
         let client = mocks().await;
-        let proofs = client.fetch_proofs().await.unwrap();
+        let _proofs = client.fetch_proofs().await.unwrap();
     }
 }

@@ -1,7 +1,6 @@
-use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use near_light_client_rpc::prelude::Itertools;
 use nearx_operator::{
-    config::Config, rpc::VERIFY_ID_AMT, succinct::*, types::TransactionOrReceiptIdPrimitive,
-    BaseConfig,
+    config::Config, succinct::*, types::TransactionOrReceiptIdPrimitive, BaseConfig, VERIFY_ID_AMT,
 };
 use test_utils::fixture;
 
