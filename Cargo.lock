@@ -3604,6 +3604,7 @@ dependencies = [
  "log",
  "near-crypto",
  "near-jsonrpc-client",
+ "near-light-client-primitives",
  "near-light-client-protocol",
  "near-light-client-rpc",
  "near-primitives",
@@ -3622,6 +3623,12 @@ dependencies = [
 [[package]]
 name = "near-light-client-primitives"
 version = "0.3.0"
+dependencies = [
+ "config",
+ "log",
+ "near-primitives-core",
+ "serde",
+]
 
 [[package]]
 name = "near-light-client-protocol"
@@ -3635,6 +3642,7 @@ dependencies = [
  "log",
  "near-crypto",
  "near-jsonrpc-primitives",
+ "near-light-client-primitives",
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
@@ -3680,6 +3688,7 @@ dependencies = [
  "ethers",
  "hex",
  "log",
+ "near-light-client-primitives",
  "near-light-client-protocol",
  "near-light-client-rpc",
  "near-primitives",
@@ -3881,6 +3890,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-core",
  "log",
+ "near-light-client-primitives",
  "near-light-client-protocol",
  "near-light-client-rpc",
  "near-light-clientx",

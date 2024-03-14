@@ -113,7 +113,7 @@ impl Handler<BatchGetProof> for LightClient {
 
 impl LightClient {
     pub fn new(config: &Config) -> Result<Self> {
-        let client = rpc::NearRpcClient::new(config.network);
+        let client = rpc::NearRpcClient::new(&config.rpc);
 
         // TODO: store selector in config
         let store = store::sled::init(config)?;
@@ -128,8 +128,7 @@ impl LightClient {
     async fn bootstrap_store(&mut self) -> Result<()> {
         let head = self.store.head().await;
         if head.is_err() {
-            let sync_from =
-                CryptoHash::from_str(&self.config.starting_head).map_err(anyhow::Error::msg)?;
+            let sync_from = self.config.protocol.genesis;
 
             let starting_head = self
                 .client

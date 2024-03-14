@@ -7,7 +7,7 @@ version.workspace = true
 [lib]
 
 [dependencies]
-actix                       = { version = "*", features = ["macros"] }
+actix                       = { version = "*", features = [ "macros" ] }
 anyhow.workspace            = true
 cached                      = { version = "*", features = [ "async", "async_tokio_rt_multi_thread" ] }
 config.workspace            = true
@@ -30,8 +30,9 @@ thiserror.workspace         = true
 tokio.workspace             = true
 uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] }
 
-near-light-client-protocol.workspace = true
-near-light-client-rpc.workspace      = true
+near-light-client-primitives.workspace = true
+near-light-client-protocol.workspace   = true
+near-light-client-rpc.workspace        = true
 
 http-cache-reqwest = "0.13.0"
 plonky2x           = { git = "https://github.com/succinctlabs/succinctx.git" }

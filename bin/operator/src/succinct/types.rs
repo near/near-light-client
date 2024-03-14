@@ -1,12 +1,10 @@
 use ethers::{abi::AbiEncode, contract::abigen, prelude::*};
+use near_light_client_primitives::pad_account_id;
 pub use near_light_client_rpc::TransactionOrReceiptId as TransactionOrReceiptIdPrimitive;
-use plonky2x::{
-    backend::{
-        circuit::DefaultParameters,
-        function::{ProofRequest, ProofResult},
-        prover::ProofId,
-    },
-    utils::serde::{deserialize_hex, serialize_hex},
+use plonky2x::backend::{
+    circuit::DefaultParameters,
+    function::{ProofRequest, ProofResult},
+    prover::ProofId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -132,7 +130,7 @@ impl From<TransactionOrReceiptIdPrimitive> for TransactionOrReceiptId {
         };
         TransactionOrReceiptId {
             id: id.0,
-            account: near_light_client_protocol::config::pad_account_id(&account).into(),
+            account: pad_account_id(&account).into(),
             is_transaction,
         }
     }

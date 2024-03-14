@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use log::LevelFilter;
-use nearx_operator::*;
+use nearx_operator::{config::Config, *};
 
 #[actix::main]
 pub async fn main() -> anyhow::Result<()> {
@@ -11,7 +11,7 @@ pub async fn main() -> anyhow::Result<()> {
         .filter_module("reqwest", LevelFilter::Info)
         .init();
 
-    let config = nearx_operator::config::Config::new()?;
+    let config = Config::default();
 
     let client = Arc::new(SuccinctClient::new(&config).await?);
 

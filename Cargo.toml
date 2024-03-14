@@ -41,10 +41,12 @@ near-jsonrpc-primitives = "0.20"
 near-primitives         = "0.20"
 near-primitives-core    = "0.20"
 
-near-light-client-protocol = { path = "crates/protocol" }
-near-light-client-rpc      = { path = "crates/rpc" }
-near-light-clientx         = { path = "nearx" }
-test-utils                 = { path = "crates/test-utils" }
+near-light-client-primitives = { path = "crates/primitives" }
+near-light-client-protocol   = { path = "crates/protocol" }
+near-light-client-rpc        = { path = "crates/rpc" }
+
+near-light-clientx = { path = "nearx" }
+test-utils         = { path = "crates/test-utils" }
 
 [patch."https://github.com/succinctlabs/starkyx.git"]
 starkyx = { git = "https://github.com/dndll/starkyx.git" }

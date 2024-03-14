@@ -22,7 +22,7 @@ impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchNextHeaderI
         input_stream: &mut ValueStream<L, D>,
         output_stream: &mut ValueStream<L, D>,
     ) {
-        let client = NearRpcClient::new(self.0);
+        let client = NearRpcClient::new(&self.0.into());
 
         let h = input_stream.read_value::<CryptoHashVariable>().0;
 
@@ -60,7 +60,7 @@ impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchHeaderInput
         input_stream: &mut ValueStream<L, D>,
         output_stream: &mut ValueStream<L, D>,
     ) {
-        let client = NearRpcClient::new(self.0);
+        let client = NearRpcClient::new(&self.0.into());
 
         let h = input_stream.read_value::<CryptoHashVariable>().0;
 
@@ -103,7 +103,7 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
         input_stream: &mut ValueStream<L, D>,
         output_stream: &mut ValueStream<L, D>,
     ) {
-        let client = NearRpcClient::new(self.0);
+        let client = NearRpcClient::new(&self.0.into());
         let block_merkle_root = input_stream.read_value::<CryptoHashVariable>().0;
         let last_verified = input_stream.read_value::<CryptoHashVariable>().0;
 

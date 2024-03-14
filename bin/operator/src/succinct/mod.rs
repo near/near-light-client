@@ -1,4 +1,4 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use anyhow::ensure;
 use ethers::prelude::*;
@@ -18,7 +18,6 @@ use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::Deserialize;
 use succinct_client::{request::SuccinctClient as SuccinctClientExt, utils::get_gateway_address};
 use types::TransactionOrReceiptIdPrimitive;
-use uuid::Uuid;
 
 use self::types::{Circuit, Deployment, ProofResponse};
 use crate::{
@@ -36,7 +35,6 @@ pub struct Config {
     #[serde(default = "default_rpc")]
     pub rpc_url: String,
     pub eth_rpc_url: String,
-    // TODO: ensure hex serialisation
     pub contract_address: Address,
     pub version: String,
     #[serde(default = "default_organisation")]
@@ -72,8 +70,8 @@ pub struct Client {
     config: Config,
     inner: ClientWithMiddleware,
     contract: NearX<Provider<Http>>,
-    succinct_client: SuccinctClientExt,
-    checkpoint_hash: CryptoHash,
+    ext: SuccinctClientExt,
+    genesis: CryptoHash,
     releases: Vec<Deployment>,
 }
 
@@ -96,8 +94,8 @@ impl Client {
             inner,
             contract,
             config: config.succinct.clone(),
-            succinct_client,
-            checkpoint_hash: config.checkpoint_head,
+            ext: succinct_client,
+            genesis: config.protocol.genesis,
             releases: Default::default(),
         };
         s.releases = s.fetch_releases(&chain_id).await?;
@@ -262,7 +260,7 @@ impl Client {
             "no contract address"
         );
         let request_id = self
-            .succinct_client
+            .ext
             .submit_request(
                 circuit.deployment(&self.releases).chain_id,
                 self.config.contract_address.0.into(),
@@ -388,7 +386,7 @@ impl Client {
         log::debug!("fetched trusted header hash {:?}", h);
         if h == CryptoHash::default() {
             log::info!("no trusted header found, using checkpoint hash");
-            h = self.checkpoint_hash;
+            h = self.genesis;
         }
         Ok(h)
     }
@@ -396,8 +394,12 @@ impl Client {
 
 #[cfg(test)]
 pub mod tests {
+    use std::str::FromStr;
+
+    use near_light_client_primitives::config::BaseConfig;
     use serde_json::json;
     use test_utils::{fixture, logger, testnet_state};
+    use uuid::Uuid;
     use wiremock::{
         matchers::{body_partial_json, method, path},
         Mock, MockServer, ResponseTemplate,
@@ -433,7 +435,7 @@ pub mod tests {
         logger();
         let deployments = fixture::<Vec<Deployment>>("deployments.json");
 
-        let mut config = crate::Config::test_config();
+        let mut config = crate::config::Config::test_config();
 
         let server = MockServer::start().await;
         config.succinct.version = Stubs::version();

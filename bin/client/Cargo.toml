@@ -5,16 +5,10 @@ name              = "near-light-client"
 version.workspace = true
 
 [dependencies]
-anyhow.workspace      = true
-async-trait.workspace = true
-axum.workspace        = true
-borsh.workspace       = true
-reqwest.workspace     = true
-serde.workspace       = true
-serde_json.workspace  = true
-sled.workspace        = true
-thiserror.workspace   = true
-tokio.workspace       = true
+anyhow.workspace            = true
+async-trait.workspace       = true
+axum.workspace              = true
+borsh.workspace             = true
 coerce.workspace            = true
 config.workspace            = true
 either.workspace            = true
@@ -24,11 +18,18 @@ itertools.workspace         = true
 log.workspace               = true
 pretty_env_logger.workspace = true
 protobuf.workspace          = true
+reqwest.workspace           = true
+serde.workspace             = true
+serde_json.workspace        = true
+sled.workspace              = true
+thiserror.workspace         = true
+tokio.workspace             = true
 
-near-crypto.workspace          = true
-near-jsonrpc-client.workspace  = true
-near-primitives-core.workspace = true
-near-primitives.workspace      = true
+near-crypto.workspace                  = true
+near-jsonrpc-client.workspace          = true
+near-light-client-primitives.workspace = true
+near-primitives-core.workspace         = true
+near-primitives.workspace              = true
 
 protocol = { path = "../../crates/protocol", package = "near-light-client-protocol" }
 rpc      = { path = "../../crates/rpc", package = "near-light-client-rpc" }

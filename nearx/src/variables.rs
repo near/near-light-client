@@ -1,7 +1,9 @@
 use ethers::types::U256;
 use log::{debug, trace};
+use near_light_client_primitives::{
+    pad_account_bytes, pad_account_id, ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS,
+};
 use near_light_client_protocol::{
-    config::{pad_account_bytes, pad_account_id, ACCOUNT_DATA_SEPARATOR, NUM_BLOCK_PRODUCER_SEATS},
     prelude::{AccountId, CryptoHash, Header, Itertools},
     BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
     StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
@@ -399,7 +401,6 @@ pub struct ValidatorStakeVariable {
     pub stake: BalanceVariable,
 }
 
-const ACCOUNT_ID_PADDING_BYTE: u8 = ACCOUNT_DATA_SEPARATOR;
 impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     fn from(vs: ValidatorStake) -> Self {
         let public_key = CompressedEdwardsY(vs.public_key().unwrap_as_ed25519().0);
@@ -417,7 +418,7 @@ pub(crate) fn normalise_account_id<F: RichField>(
     account_id: &AccountIdVariableValue<F>,
 ) -> AccountId {
     let unpadded_bytes = account_id
-        .split(|x| *x == ACCOUNT_ID_PADDING_BYTE)
+        .split(|x| *x == ACCOUNT_DATA_SEPARATOR)
         .collect_vec()[0];
     let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
     trace!("account id: {}", account_str);

@@ -87,9 +87,9 @@ impl std::fmt::Debug for NearRpcClient {
 }
 
 impl NearRpcClient {
-    pub fn new(network: Network) -> Self {
-        let client = JsonRpcClient::connect(network.to_endpoint());
-        let archive = JsonRpcClient::connect(network.archive_endpoint());
+    pub fn new(config: &Config) -> Self {
+        let client = JsonRpcClient::connect(config.network.to_endpoint());
+        let archive = JsonRpcClient::connect(config.network.archive_endpoint());
 
         NearRpcClient { client, archive }
     }
@@ -222,6 +222,16 @@ impl LightClientRpc for NearRpcClient {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct Config {
+    pub network: Network,
+}
+impl From<Network> for Config {
+    fn from(network: Network) -> Self {
+        Config { network }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -299,7 +309,7 @@ mod tests {
     // this is committed in the repo, only needed for gathering data
     #[allow(dead_code)]
     async fn test_get_ids() {
-        let client = NearRpcClient::new(Network::Testnet);
+        let client = NearRpcClient::new(&(Network::Testnet.into()));
 
         let first_block = fetch_block(
             &client,
