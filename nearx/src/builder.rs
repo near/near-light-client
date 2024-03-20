@@ -8,7 +8,7 @@ use crate::{
     variables::{
         ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,
         BuildEndorsement, CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable,
-        SyncedVariable, ValidatorStakeVariable,
+        ValidatorStakeVariable,
     },
 };
 
@@ -239,7 +239,7 @@ pub trait Sync<L: PlonkParameters<D>, const D: usize> {
         head: &HeaderVariable,
         epoch_bps: &BpsArr<ValidatorStakeVariable>,
         next_block: &BlockVariable,
-    ) -> SyncedVariable;
+    ) -> HeaderVariable;
 
     fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage;
 }
@@ -250,40 +250,44 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
         head: &HeaderVariable,
         epoch_bps: &BpsArr<ValidatorStakeVariable>,
         next_block: &BlockVariable,
-    ) -> SyncedVariable {
-        let a = self.ensure_not_already_verified(head, &next_block.header.inner_lite.height);
-        self.assertx(a);
+    ) -> HeaderVariable {
+        let not_verified =
+            self.ensure_not_already_verified(head, &next_block.header.inner_lite.height);
+        self.watch(&not_verified, "ensure_not_already_verified");
 
-        let b = self.ensure_epoch_is_current_or_next(head, &next_block.header.inner_lite.epoch_id);
-        self.assertx(b);
+        let valid_epoch =
+            self.ensure_epoch_is_current_or_next(head, &next_block.header.inner_lite.epoch_id);
+        self.watch(&valid_epoch, "ensure_epoch_is_current_or_next");
 
-        let c = self.ensure_if_next_epoch_contains_next_bps(
+        let has_bps = self.ensure_if_next_epoch_contains_next_bps(
             head,
             &next_block.header.inner_lite.epoch_id,
             &next_block.next_bps,
         );
-        self.assertx(c);
+        self.watch(&has_bps, "ensure_if_next_epoch_contains_next_bps");
 
         let approval = self.reconstruct_approval_message(next_block);
+        self.watch(&approval, "reconstruct_approval_message");
         let stake = self.validate_signatures(&next_block.approvals_after_next, epoch_bps, approval);
-        let d = self.ensure_stake_is_sufficient(&stake);
-        self.assertx(d);
+        self.watch(&stake, "validate_signatures");
+        let enough_stake = self.ensure_stake_is_sufficient(&stake);
+        self.watch(&enough_stake, "ensure_stake_is_sufficient");
+
+        let x = self.and(not_verified, valid_epoch);
+        let y = self.and(has_bps, enough_stake);
+        let all = self.and(x, y);
+        self.watch(&all, "all");
+        self.assertx(all);
 
         if next_block.next_bps.len() > 0 {
-            // TODO: hashing bps in circut
-            let e = self.ensure_next_bps_is_valid(
+            let bps_valid = self.ensure_next_bps_is_valid(
                 &next_block.header.inner_lite.next_bp_hash,
                 Some(&next_block.next_bps_hash),
             );
-            self.assertx(e);
+            self.assertx(bps_valid);
             assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
         }
-        // FIXME: remove this, return the new head
-        SyncedVariable {
-            new_head: next_block.header.to_owned(),
-            next_bps_epoch: next_block.header.inner_lite.next_epoch_id,
-            next_bps: next_block.next_bps.to_owned(),
-        }
+        next_block.header.to_owned()
     }
 
     fn reconstruct_approval_message(&mut self, next_block: &BlockVariable) -> ApprovalMessage {
@@ -646,7 +650,7 @@ mod beefy_tests {
             let bps = builder.read::<BpsArr<ValidatorStakeVariable>>();
             let next_block = builder.read::<BlockVariable>();
             let synced = builder.sync(&head, &bps, &next_block);
-            builder.write::<SyncedVariable>(synced);
+            builder.write::<HeaderVariable>(synced);
         };
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(head.into());
@@ -654,8 +658,9 @@ mod beefy_tests {
             input.write::<BlockVariable>(next_block.clone().into());
         };
         let assertions = |mut output: PO| {
-            let header = output.read::<SyncedVariable>();
+            let header = output.read::<HeaderVariable>();
             println!("header: {:?}", header);
+            // TODO: assert
         };
         builder_suite(define, writer, assertions);
     }

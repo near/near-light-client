@@ -1,15 +1,18 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
 use async_trait::async_trait;
 use log::debug;
 use near_light_client_protocol::{prelude::CryptoHash, Proof};
 use near_light_client_rpc::{prelude::GetProof, LightClientRpc, NearRpcClient, Network};
-use plonky2x::{frontend::hint::asynchronous::hint::AsyncHint, prelude::*};
+use plonky2x::{
+    frontend::hint::asynchronous::hint::AsyncHint,
+    prelude::{plonky2::field::types::PrimeField64, *},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::variables::{
-    normalise_account_id, BlockVariable, CryptoHashVariable, HeaderVariable, ProofVariable,
-    TransactionOrReceiptIdVariable,
+    bps_to_variable, normalise_account_id, BlockVariable, BpsArr, CryptoHashVariable,
+    HeaderVariable, ProofVariable, TransactionOrReceiptIdVariable, ValidatorStakeVariable,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -90,6 +93,127 @@ impl FetchHeaderInputs {
         untrusted
     }
 }
+
+pub enum Fetch {
+    Sync {
+        untrusted_header_hash: CryptoHashVariable,
+    },
+}
+
+pub enum Inputs {
+    Sync {
+        header: HeaderVariable,
+        bps: BpsArr<ValidatorStakeVariable>,
+        next_block: BlockVariable,
+    },
+}
+
+impl Inputs {
+    fn validate<L: PlonkParameters<D>, const D: usize>(&self, b: &mut CircuitBuilder<L, D>) {}
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InputFetcher<L: PlonkParameters<D>, const D: usize, const NETWORK: usize>(
+    PhantomData<L>,
+);
+
+#[async_trait]
+impl<L: PlonkParameters<D>, const D: usize, const NETWORK: usize> AsyncHint<L, D>
+    for InputFetcher<L, D, NETWORK>
+{
+    async fn hint(
+        &self,
+        input_stream: &mut ValueStream<L, D>,
+        output_stream: &mut ValueStream<L, D>,
+    ) {
+        let network: Network = NETWORK.into();
+        let client = NearRpcClient::new(&network.into());
+
+        let marker: L::Field = input_stream.read_value::<Variable>();
+        let marker = marker.to_canonical_u64();
+        match marker {
+            0 => {
+                let current_hash = input_stream.read_value::<CryptoHashVariable>().0;
+
+                let header = client
+                    .fetch_header(&CryptoHash(current_hash))
+                    .await
+                    .expect("Failed to fetch header");
+
+                let bps = client
+                    .fetch_latest_header(&header.inner_lite.next_epoch_id)
+                    .await
+                    .expect("Failed to fetch bps")
+                    .expect("Expected a header")
+                    .next_bps;
+
+                let next_block = client
+                    .fetch_latest_header(&CryptoHash(current_hash))
+                    .await
+                    .expect("Failed to fetch header")
+                    .expect("Expected a header");
+
+                output_stream.write_value::<HeaderVariable>(header.into());
+                output_stream.write_value::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(bps));
+                output_stream.write_value::<BlockVariable>(next_block.into());
+            }
+            _ => panic!("Invalid marker"),
+        }
+    }
+}
+
+impl<L: PlonkParameters<D>, const D: usize, const NETWORK: usize> InputFetcher<L, D, NETWORK> {
+    pub fn fetch(&self, b: &mut CircuitBuilder<L, D>, args: &Fetch) -> Inputs {
+        let mut input_stream = VariableStream::new();
+        match args {
+            Fetch::Sync {
+                untrusted_header_hash,
+            } => {
+                input_stream.write::<Variable>(&b.constant(L::Field::from_canonical_u64(0)));
+                input_stream.write::<CryptoHashVariable>(untrusted_header_hash);
+            }
+        }
+        let output_stream = b.async_hint(input_stream, self.clone());
+
+        match args {
+            Fetch::Sync { .. } => {
+                let header = output_stream.read::<HeaderVariable>(b);
+                let bps = output_stream.read::<BpsArr<ValidatorStakeVariable>>(b);
+                let next_block = output_stream.read::<BlockVariable>(b);
+                Inputs::Sync {
+                    header,
+                    bps,
+                    next_block,
+                }
+            }
+        }
+    }
+    pub fn fetch_sync_inputs(
+        &self,
+        b: &mut CircuitBuilder<L, D>,
+        untrusted_header_hash: &CryptoHashVariable,
+    ) -> (
+        HeaderVariable,
+        BpsArr<ValidatorStakeVariable>,
+        BlockVariable,
+    ) {
+        let fetch_header = FetchHeaderInputs(NETWORK.into());
+        let fetch_next_header = FetchNextHeaderInputs(NETWORK.into());
+
+        let header = fetch_header.fetch(b, &untrusted_header_hash);
+        let bps = fetch_next_header
+            .fetch(b, &header.inner_lite.next_epoch_id)
+            .unwrap()
+            .next_bps;
+
+        let next_block = fetch_next_header
+            .fetch(b, &untrusted_header_hash)
+            .expect("Failed to fetch next block");
+
+        (header, bps, next_block)
+    }
+}
+
 // TODO: refactor into some client-like carrier for all hints that is serdeable
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FetchProofInputs<const B: usize>(pub Network);
@@ -187,30 +311,67 @@ pub struct ProofInputVariable {
 
 #[cfg(test)]
 mod tests {
+    use near_light_client_rpc::Network;
+
     use super::*;
     use crate::{
-        test_utils::{builder_suite, test_state, B, PI, PO},
+        builder::Sync,
+        test_utils::{builder_suite, test_state, testnet_state, B, PI, PO},
         variables::{BlockVariableValue, HeaderVariable},
     };
 
     #[test]
     fn test_fetch_header() {
-        let (header, _, nb) = test_state();
+        let (main_h, _, main_nb) = test_state();
+        let (test_h, _, test_nb) = testnet_state();
 
         let define = |b: &mut B| {
             let header = b.read::<HeaderVariable>();
             let hash = header.hash(b);
-            let next_block =
-                FetchNextHeaderInputs(near_light_client_rpc::Network::Mainnet).fetch(b, &hash);
+            let next_block = FetchNextHeaderInputs(Network::Mainnet).fetch(b, &hash);
+            b.write::<BlockVariable>(next_block.unwrap());
+
+            let header = b.read::<HeaderVariable>();
+            let hash = header.hash(b);
+            let next_block = FetchNextHeaderInputs(Network::Testnet).fetch(b, &hash);
             b.write::<BlockVariable>(next_block.unwrap());
         };
         let writer = |input: &mut PI| {
-            input.write::<HeaderVariable>(header.into());
+            input.write::<HeaderVariable>(main_h.into());
+            input.write::<HeaderVariable>(test_h.into());
         };
         let assertions = |mut output: PO| {
             let inputs = output.read::<BlockVariable>();
-            let nbh: BlockVariableValue<GoldilocksField> = nb.into();
+            let nbh: BlockVariableValue<GoldilocksField> = main_nb.into();
             pretty_assertions::assert_eq!(format!("{:#?}", inputs), format!("{:#?}", nbh));
+
+            let inputs = output.read::<BlockVariable>();
+            let nbh: BlockVariableValue<GoldilocksField> = test_nb.into();
+            pretty_assertions::assert_eq!(format!("{:#?}", inputs), format!("{:#?}", nbh));
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    fn test_problem_header() {
+        let problem_hash =
+            bytes32!("0xeff7dccf304315aa520ad7e704062a8b8deadc5c0906e7e16d7305067a72a57e");
+        let fetcher = InputFetcher::<DefaultParameters, 2, 1>(Default::default());
+
+        let define = |b: &mut B| {
+            let trusted_header_hash = b.read::<CryptoHashVariable>();
+
+            let (header, bps, nb) = fetcher.fetch_sync_inputs(b, &trusted_header_hash);
+            // Seems like signatures issue
+            b.sync(&header, &bps, &nb);
+
+            b.write::<BlockVariable>(nb);
+        };
+        let writer = |input: &mut PI| {
+            input.write::<CryptoHashVariable>(problem_hash.into());
+        };
+        let assertions = |mut output: PO| {
+            let output = output.read::<BlockVariable>();
         };
         builder_suite(define, writer, assertions);
     }

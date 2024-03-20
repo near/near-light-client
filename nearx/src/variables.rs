@@ -6,7 +6,7 @@ use near_light_client_primitives::{
 use near_light_client_protocol::{
     prelude::{AccountId, CryptoHash, Header, Itertools},
     BlockHeaderInnerLiteView, ED25519PublicKey, LightClientBlockView, Proof, PublicKey, Signature,
-    StakeInfo, Synced, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
+    StakeInfo, ValidatorStake, ValidatorStakeView, ValidatorStakeViewV1,
 };
 use near_light_client_rpc::prelude::GetProof;
 use plonky2x::{
@@ -161,7 +161,6 @@ impl HeaderInnerVariable {
         &self,
         b: &mut CircuitBuilder<L, D>,
     ) -> BytesVariable<INNER_ENCODED_LEN> {
-        // TODO: doubt we can abi encode this
         let mut input_stream = VariableStream::new();
         input_stream.write(&self.height);
         input_stream.write(&self.epoch_id);
@@ -184,6 +183,7 @@ impl HeaderInnerVariable {
         b.curta_sha256(&bytes.0)
     }
 }
+
 impl EvmVariable for HeaderInnerVariable {
     fn encode<L: PlonkParameters<D>, const D: usize>(
         &self,
@@ -319,7 +319,6 @@ pub struct BlockVariable {
 
 impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
     fn from(block: LightClientBlockView) -> Self {
-        // TODO[Optimisation]: Constrain these in-circuit
         let next_bps_hash = block
             .next_bps
             .as_ref()
@@ -377,6 +376,7 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
     }
 }
 
+// TODO: tie this in with the From implementation and newtype it
 pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
     next_bps: Option<Vec<T>>,
 ) -> Vec<ValidatorStakeVariableValue<F>> {
@@ -559,34 +559,6 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
     }
 }
 
-#[derive(CircuitVariable, Clone, Debug)]
-pub struct SyncedVariable {
-    pub new_head: HeaderVariable,
-    pub next_bps_epoch: CryptoHashVariable,
-    pub next_bps: BpsArr<ValidatorStakeVariable>,
-}
-
-impl<F> From<Synced> for SyncedVariableValue<F>
-where
-    F: RichField,
-{
-    fn from(value: Synced) -> Self {
-        let default_bps = vec![ValidatorStakeVariableValue::default(); NUM_BLOCK_PRODUCER_SEATS];
-        Self {
-            new_head: value.new_head.into(),
-            next_bps_epoch: value
-                .next_bps
-                .as_ref()
-                .map(|v| v.0 .0 .0.into())
-                .unwrap_or_default(),
-            next_bps: value
-                .next_bps
-                .map(|v| v.1.into_iter().map(Into::into).collect_vec())
-                .unwrap_or(default_bps),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HashBpsInputs;
 
@@ -604,7 +576,7 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
             .collect_vec();
         trace!("Bps to hash: {:#?}", bps);
         let hash = CryptoHash::hash_borsh(bps);
-        debug!("Hash: {:#?}", hash);
+        debug!("Bps hash: {:#?}", hash);
 
         // TODO: figure out how to hash this in circuit
         // It's non trivial because the account id is padded to the max len
@@ -701,6 +673,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
             account: AccountIdVariable::decode(builder, &bytes[33..33 + AccountId::MAX_LEN]),
         }
     }
+
     fn encode_value<F: RichField>(value: Self::ValueType<F>) -> Vec<u8> {
         let mut bytes = vec![value.is_transaction as u8];
         bytes.extend_from_slice(&CryptoHashVariable::encode_value::<F>(value.id));
@@ -709,6 +682,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
         )));
         bytes
     }
+
     fn decode_value<F: RichField>(bytes: &[u8]) -> Self::ValueType<F> {
         assert_eq!(bytes.len(), 1 + 32 + AccountId::MAX_LEN);
 
@@ -719,6 +693,7 @@ impl EvmVariable for TransactionOrReceiptIdVariable {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
