@@ -10,12 +10,15 @@ use anyhow::{ensure, Context};
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use near_light_client_rpc::prelude::{CryptoHash, Itertools};
 pub use near_light_clientx::plonky2x::backend::prover::ProofId;
-use near_light_clientx::plonky2x::{
-    backend::{
-        circuit::DefaultParameters,
-        function::{BytesRequestData, ProofRequest, ProofRequestBase},
+use near_light_clientx::{
+    plonky2x::{
+        backend::{
+            circuit::DefaultParameters,
+            function::{BytesRequestData, ProofRequest, ProofRequestBase},
+        },
+        utils::hex,
     },
-    utils::hex,
+    VERIFY_AMT,
 };
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
@@ -28,10 +31,7 @@ use succinct_client::{request::SuccinctClient as SuccinctClientExt, utils::get_g
 use types::TransactionOrReceiptIdPrimitive;
 
 use self::types::{Circuit, Deployment, NearX::NearXInstance, NearXClient, ProofResponse};
-use crate::{
-    config, succinct::types::ProofRequestResponse, types::NearX::TransactionOrReceiptId,
-    VERIFY_ID_AMT,
-};
+use crate::{config, succinct::types::ProofRequestResponse, types::NearX::TransactionOrReceiptId};
 
 pub mod types;
 
@@ -390,7 +390,7 @@ impl Client {
     ) -> anyhow::Result<ProofId> {
         log::trace!("verifying {} ids", ids.len());
         ensure!(
-            ids.len() == VERIFY_ID_AMT,
+            ids.len() == VERIFY_AMT,
             "wrong number of transactions for verify"
         );
         let circuit = Circuit::Verify;
@@ -631,7 +631,7 @@ pub mod tests {
 
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
             .into_iter()
-            .take(VERIFY_ID_AMT)
+            .take(VERIFY_AMT)
             .collect_vec();
 
         let req = client.build_verify_request(hash, txs);
@@ -658,7 +658,7 @@ pub mod tests {
         let client = mocks().await;
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
             .into_iter()
-            .take(VERIFY_ID_AMT)
+            .take(VERIFY_AMT)
             .collect_vec();
 
         let s = client.verify(txs, false).await.unwrap();
@@ -670,7 +670,7 @@ pub mod tests {
         let client = mocks().await;
         let txs = fixture::<Vec<TransactionOrReceiptIdPrimitive>>("ids.json")
             .into_iter()
-            .take(VERIFY_ID_AMT)
+            .take(VERIFY_AMT)
             .collect_vec();
 
         let s = client.verify(txs, true).await.unwrap();
