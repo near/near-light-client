@@ -30,6 +30,7 @@ use crate::merkle::MerklePathVariable;
 
 /// Type for omitting the size across the codebase for arrays that are the same
 /// size as BPS
+pub(crate) type Validators<const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ValidatorsVariable<A>;
 pub(crate) type BpsArr<T, const A: usize = NUM_BLOCK_PRODUCER_SEATS> = ArrayVariable<T, A>;
 
 pub type CryptoHashVariable = Bytes32Variable;
@@ -312,15 +313,15 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for EncodeInner {
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
-pub struct BlockVariable {
+pub struct BlockVariable<const LEN: usize> {
     pub header: HeaderVariable,
     pub next_block_inner_hash: CryptoHashVariable,
-    pub next_bps: BpsArr<ValidatorStakeVariable>,
-    pub approvals_after_next: BpsApprovals<NUM_BLOCK_PRODUCER_SEATS>,
+    pub next_bps: Validators<LEN>,
+    pub approvals_after_next: BpsApprovals<LEN>,
     pub next_bps_hash: CryptoHashVariable,
 }
 
-impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
+impl<F: RichField, const LEN: usize> From<LightClientBlockView> for BlockVariableValue<LEN, F> {
     fn from(block: LightClientBlockView) -> Self {
         let next_bps_hash = block
             .next_bps
@@ -333,19 +334,16 @@ impl<F: RichField> From<LightClientBlockView> for BlockVariableValue<F> {
         let variable = Self {
             next_block_inner_hash: block.next_block_inner_hash.0.into(),
             header: block.clone().into(),
-            next_bps: bps_to_variable(block.next_bps),
+            next_bps: block
+                .next_bps
+                .map(|bps| bps.into_iter().collect())
+                .unwrap_or_default(),
             approvals_after_next: block.approvals_after_next.into(),
             next_bps_hash,
         };
-        assert_eq!(variable.next_bps.len(), NUM_BLOCK_PRODUCER_SEATS);
-        assert_eq!(
-            variable.approvals_after_next.is_active.len(),
-            NUM_BLOCK_PRODUCER_SEATS
-        );
-        assert_eq!(
-            variable.approvals_after_next.signatures.len(),
-            NUM_BLOCK_PRODUCER_SEATS
-        );
+        assert_eq!(variable.next_bps.inner.len(), LEN);
+        assert_eq!(variable.approvals_after_next.is_active.len(), LEN);
+        assert_eq!(variable.approvals_after_next.signatures.len(), LEN);
         variable
     }
 }
@@ -365,7 +363,6 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
             .into_iter()
             .take(AMT)
             .map(|s| {
-                // FIXME: heres the problem, active signature, no bps
                 let is_active = s.is_some();
                 let s: SignatureVariableValue<F> = s.into();
 
@@ -378,24 +375,6 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
             signatures,
         }
     }
-}
-
-// TODO: tie this in with the From implementation and newtype it
-pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
-    next_bps: Option<Vec<T>>,
-) -> Vec<ValidatorStakeVariableValue<F>> {
-    next_bps
-        .map(|next_bps| {
-            let mut bps = next_bps
-                .into_iter()
-                .take(NUM_BLOCK_PRODUCER_SEATS)
-                .map(Into::<ValidatorStake>::into)
-                .map(Into::<ValidatorStakeVariableValue<F>>::into)
-                .collect_vec();
-            bps.resize(NUM_BLOCK_PRODUCER_SEATS, Default::default());
-            bps
-        })
-        .unwrap_or_else(|| vec![Default::default(); NUM_BLOCK_PRODUCER_SEATS])
 }
 
 #[derive(CircuitVariable, Clone, Debug)]
@@ -421,13 +400,42 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
 
 impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
     fn from(val: ValidatorStakeVariableValue<F>) -> Self {
-        let account_id = normalise_account_id::<F>(&val.account_id);
         let public_key = PublicKey::ED25519(ED25519PublicKey(val.public_key.0));
+        let account_id = normalise_account_id::<F>(&val.account_id);
         ValidatorStakeView::V1(ValidatorStakeViewV1 {
             account_id,
             public_key,
             stake: val.stake.as_u128(),
         })
+    }
+}
+
+#[derive(CircuitVariable, Clone, Debug)]
+pub struct ValidatorsVariable<const N: usize> {
+    pub(crate) inner: BpsArr<ValidatorStakeVariable, N>,
+}
+
+impl<F: RichField, I: Into<ValidatorStakeView>, const N: usize> FromIterator<I>
+    for ValidatorsVariableValue<N, F>
+{
+    fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+        let mut bps = iter
+            .into_iter()
+            .take(N)
+            .map(Into::<ValidatorStakeView>::into)
+            .map(Into::<ValidatorStake>::into)
+            .map(Into::<ValidatorStakeVariableValue<F>>::into)
+            .collect_vec();
+        bps.resize(N, Default::default());
+        Self { inner: bps }
+    }
+}
+
+impl<F: RichField, const N: usize> Default for ValidatorsVariableValue<N, F> {
+    fn default() -> Self {
+        Self {
+            inner: vec![Default::default(); N],
+        }
     }
 }
 
@@ -566,12 +574,13 @@ pub struct HashBpsInputs;
 
 impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
-        let bps = input_stream.read_value::<BpsArr<ValidatorStakeVariable>>();
+        let bps = input_stream.read_value::<Validators>();
         // TODO: if we use a bitmask we wont need default checks
         let default_validator =
             ValidatorStakeVariableValue::<<L as PlonkParameters<D>>::Field>::default();
 
         let bps = bps
+            .inner
             .into_iter()
             .filter(|x| x.account_id != default_validator.account_id)
             .map(Into::<ValidatorStakeView>::into)
@@ -590,10 +599,10 @@ impl HashBpsInputs {
     pub fn hash<L: PlonkParameters<D>, const D: usize>(
         self,
         b: &mut CircuitBuilder<L, D>,
-        bps: &BpsArr<ValidatorStakeVariable>,
+        bps: &Validators,
     ) -> CryptoHashVariable {
         let mut input_stream = VariableStream::new();
-        input_stream.write::<BpsArr<ValidatorStakeVariable>>(bps);
+        input_stream.write::<Validators>(bps);
 
         let output_stream = b.hint(input_stream, self);
         output_stream.read::<CryptoHashVariable>(b)

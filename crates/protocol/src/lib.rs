@@ -264,17 +264,7 @@ impl Protocol {
                 let approved_stake = match Self::validate_signature(approval_message, sig, pk) {
                     Ok(_) => approved_stake + stake,
                     Err(Error::SignatureInvalid) => {
-                        log::debug!(
-                            "invalid signature: pk: {} sig: {:?}",
-                            hex::encode(pk.unwrap_as_ed25519().0),
-                            sig.clone().map(|s| {
-                                if let Signature::ED25519(s) = *s {
-                                    hex::encode(s.r_bytes())
-                                } else {
-                                    unreachable!()
-                                }
-                            })
-                        );
+                        log::debug!("invalid signature: pk: {} sig: {:?}", pk, sig);
                         approved_stake
                     }
                     Err(Error::ValidatorNotSigned) => approved_stake,
