@@ -1,14 +1,19 @@
 use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::Itertools;
-use plonky2x::prelude::*;
+use plonky2x::{
+    frontend::{
+        curta::ec::point::CompressedEdwardsY, ecc::curve25519::ed25519::eddsa::DUMMY_PUBLIC_KEY,
+    },
+    prelude::*,
+};
 use pretty_assertions::assert_eq;
 
 use crate::{
     merkle::{MerklePathVariable, NearMerkleTree},
     variables::{
         ApprovalMessage, BlockHeightVariable, BlockVariable, BpsApprovals, BpsArr,
-        BuildEndorsement, CryptoHashVariable, HeaderVariable, ProofVariable, StakeInfoVariable,
-        ValidatorStakeVariable,
+        BuildEndorsement, CryptoHashVariable, HeaderVariable, ProofVariable, PublicKeyVariable,
+        StakeInfoVariable, ValidatorStakeVariable,
     },
 };
 
@@ -44,7 +49,7 @@ pub trait Ensure<L: PlonkParameters<D>, const D: usize> {
     fn ensure_next_bps_is_valid(
         &mut self,
         expected_hash: &CryptoHashVariable,
-        next_bps_hash: Option<&CryptoHashVariable>,
+        next_bps_hash: &CryptoHashVariable,
     ) -> BoolVariable;
 
     fn ensure_block_hash_matches_outcome(
@@ -121,24 +126,32 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
 
         let messages = [approval_message; LEN];
 
+        let dummy_pk = self.constant::<PublicKeyVariable>(CompressedEdwardsY(DUMMY_PUBLIC_KEY));
+        let inactive = self._false();
+
         let mut pubkeys = vec![];
+        let mut active = vec![];
         let mut total_stake = self.zero();
         let mut approved_stake = self.zero();
 
         for i in 0..LEN {
             let vs = &epoch_bps.data[i];
 
-            pubkeys.push(vs.public_key.clone());
+            let is_dummy = self.is_equal(dummy_pk.clone(), vs.public_key.clone());
+            let sig_active = approvals_after_next.is_active[i];
+            let is_active = self.select(is_dummy, inactive, sig_active);
 
-            let maybe_add = self.add(approved_stake, vs.stake);
-            approved_stake =
-                self.select(approvals_after_next.is_active[i], maybe_add, approved_stake);
+            pubkeys.push(vs.public_key.clone());
+            active.push(is_active.clone());
+
+            let added_stake = self.add(approved_stake, vs.stake);
             total_stake = self.add(total_stake, vs.stake);
+            approved_stake = self.select(is_active, added_stake, approved_stake);
         }
 
         // TODO: what happens if a conditionally active signature fails?
         self.curta_eddsa_verify_sigs_conditional(
-            approvals_after_next.is_active.clone(),
+            ArrayVariable::new(active),
             None,
             ArrayVariable::new(messages.to_vec()),
             approvals_after_next.signatures.clone(),
@@ -164,13 +177,15 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
     fn ensure_next_bps_is_valid(
         &mut self,
         expected_hash: &CryptoHashVariable,
-        next_bps_hash: Option<&CryptoHashVariable>,
+        next_bps_hash: &CryptoHashVariable,
     ) -> BoolVariable {
-        if let Some(next_bps) = next_bps_hash {
-            self.is_equal(*next_bps, *expected_hash)
-        } else {
-            self._true()
-        }
+        let zeroed = self.constant::<CryptoHashVariable>([0u8; 32].into());
+
+        let is_empty = self.is_equal(*next_bps_hash, zeroed);
+        let is_valid = self.is_equal(*next_bps_hash, *expected_hash);
+        let ok_anyway = self._true();
+
+        self.select(is_empty, ok_anyway, is_valid)
     }
 
     fn ensure_block_hash_matches_outcome(
@@ -279,14 +294,14 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
         self.watch(&all, "all");
         self.assertx(all);
 
-        if next_block.next_bps.len() > 0 {
-            let bps_valid = self.ensure_next_bps_is_valid(
-                &next_block.header.inner_lite.next_bp_hash,
-                Some(&next_block.next_bps_hash),
-            );
-            self.assertx(bps_valid);
-            assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
-        }
+        // TODO: test me
+        let bps_valid = self.ensure_next_bps_is_valid(
+            &next_block.header.inner_lite.next_bp_hash,
+            &next_block.next_bps_hash,
+        );
+        self.assertx(bps_valid);
+        assert!(next_block.next_bps.len() == NUM_BLOCK_PRODUCER_SEATS);
+
         next_block.header.to_owned()
     }
 
@@ -484,8 +499,8 @@ mod tests {
             builder.write::<BoolVariable>(contains_next_bps);
 
             let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
-            let is_valid = builder
-                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            let is_valid =
+                builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, &next_bps_hash);
             builder.write::<BoolVariable>(is_valid);
         };
         let writer = |input: &mut PI| {
@@ -595,8 +610,8 @@ mod beefy_tests {
             builder.write::<BoolVariable>(contains_next_bps);
 
             let next_bps_hash = builder.constant::<CryptoHashVariable>(bps_hash.0.into());
-            let is_valid = builder
-                .ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, Some(&next_bps_hash));
+            let is_valid =
+                builder.ensure_next_bps_is_valid(&header.inner_lite.next_bp_hash, &next_bps_hash);
             builder.write::<BoolVariable>(is_valid);
         };
         let writer = |input: &mut PI| {

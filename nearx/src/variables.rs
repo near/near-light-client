@@ -12,8 +12,11 @@ use near_light_client_rpc::prelude::GetProof;
 use plonky2x::{
     frontend::{
         curta::ec::point::{CompressedEdwardsY, CompressedEdwardsYVariable},
-        ecc::curve25519::ed25519::eddsa::{EDDSASignatureVariable, EDDSASignatureVariableValue},
+        ecc::curve25519::ed25519::eddsa::{
+            EDDSASignatureVariable, EDDSASignatureVariableValue, DUMMY_PUBLIC_KEY, DUMMY_SIGNATURE,
+        },
         hint::simple::hint::Hint,
+        uint::Uint,
         vars::EvmVariable,
     },
     prelude::*,
@@ -362,6 +365,7 @@ impl<F: RichField, const AMT: usize> From<Vec<Option<Box<Signature>>>>
             .into_iter()
             .take(AMT)
             .map(|s| {
+                // FIXME: heres the problem, active signature, no bps
                 let is_active = s.is_some();
                 let s: SignatureVariableValue<F> = s.into();
 
@@ -396,6 +400,7 @@ pub(crate) fn bps_to_variable<F: RichField, T: Into<ValidatorStake>>(
 
 #[derive(CircuitVariable, Clone, Debug)]
 pub struct ValidatorStakeVariable {
+    // TODO[optimisation]: can optimise this out by witnessing the hash
     pub account_id: AccountIdVariable,
     pub public_key: PublicKeyVariable,
     pub stake: BalanceVariable,
@@ -414,17 +419,6 @@ impl<F: RichField> From<ValidatorStake> for ValidatorStakeVariableValue<F> {
     }
 }
 
-pub(crate) fn normalise_account_id<F: RichField>(
-    account_id: &AccountIdVariableValue<F>,
-) -> AccountId {
-    let unpadded_bytes = account_id
-        .split(|x| *x == ACCOUNT_DATA_SEPARATOR)
-        .collect_vec()[0];
-    let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
-    trace!("account id: {}", account_str);
-    account_str.parse().expect("invalid account id")
-}
-
 impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
     fn from(val: ValidatorStakeVariableValue<F>) -> Self {
         let account_id = normalise_account_id::<F>(&val.account_id);
@@ -439,8 +433,8 @@ impl<F: RichField> From<ValidatorStakeVariableValue<F>> for ValidatorStakeView {
 
 impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
     fn default() -> Self {
-        let account_id: [u8; AccountId::MAX_LEN] = [0u8; AccountId::MAX_LEN];
-        let public_key = CompressedEdwardsY::default();
+        let account_id: [u8; AccountId::MAX_LEN] = [ACCOUNT_DATA_SEPARATOR; AccountId::MAX_LEN];
+        let public_key = CompressedEdwardsY(DUMMY_PUBLIC_KEY);
 
         Self {
             account_id,
@@ -448,6 +442,17 @@ impl<F: RichField> Default for ValidatorStakeVariableValue<F> {
             stake: u128::default().into(),
         }
     }
+}
+
+pub(crate) fn normalise_account_id<F: RichField>(
+    account_id: &AccountIdVariableValue<F>,
+) -> AccountId {
+    let unpadded_bytes = account_id
+        .split(|x| *x == ACCOUNT_DATA_SEPARATOR)
+        .collect_vec()[0];
+    let account_str = String::from_utf8(unpadded_bytes.to_vec()).expect("invalid account bytes");
+    trace!("account id: {}", account_str);
+    account_str.parse().expect("invalid account id")
 }
 
 pub type PublicKeyVariable = CompressedEdwardsYVariable;
@@ -460,30 +465,27 @@ pub struct SignatureVariable {
 impl<F: RichField> From<Option<Box<Signature>>> for SignatureVariableValue<F> {
     fn from(sig: Option<Box<Signature>>) -> Self {
         sig.and_then(|s| match *s {
-            Signature::ED25519(s) => Some(Self {
-                signature: EDDSASignatureVariableValue {
-                    r: CompressedEdwardsY(*s.r_bytes()),
-                    s: U256::from_little_endian(s.s_bytes()),
-                },
-            }),
+            Signature::ED25519(s) => {
+                let r = *s.r_bytes();
+                Some(Self {
+                    signature: EDDSASignatureVariableValue {
+                        r: CompressedEdwardsY(r),
+                        s: U256::from_little_endian(s.s_bytes()),
+                    },
+                })
+            }
             // Silently ignores invalid signatures (ECDSA)
             // The reasoning being that ECDSA is being phased out and almost all validators
             // use EDDSA.
             // If we still need this, we should implement ECDSA.
             _ => None,
         })
-        .unwrap_or_default()
-    }
-}
-
-impl<F: RichField> Default for SignatureVariableValue<F> {
-    fn default() -> Self {
-        Self {
+        .unwrap_or(Self {
             signature: EDDSASignatureVariableValue {
-                r: CompressedEdwardsY::default(),
-                s: Default::default(),
+                r: CompressedEdwardsY(DUMMY_SIGNATURE[0..32].try_into().unwrap()),
+                s: U256::from_little_endian(&DUMMY_SIGNATURE[32..]),
             },
-        }
+        })
     }
 }
 

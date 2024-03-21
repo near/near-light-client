@@ -11,8 +11,9 @@ use plonky2x::{
 use serde::{Deserialize, Serialize};
 
 use crate::variables::{
-    bps_to_variable, normalise_account_id, BlockVariable, BpsArr, CryptoHashVariable,
-    HeaderVariable, ProofVariable, TransactionOrReceiptIdVariable, ValidatorStakeVariable,
+    bps_to_variable, normalise_account_id, BlockVariable, BlockVariableValue, BpsArr,
+    CryptoHashVariable, HeaderVariable, ProofVariable, TransactionOrReceiptIdVariable,
+    ValidatorStakeVariable,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -109,7 +110,9 @@ pub enum Inputs {
 }
 
 impl Inputs {
-    fn validate<L: PlonkParameters<D>, const D: usize>(&self, b: &mut CircuitBuilder<L, D>) {}
+    fn validate<L: PlonkParameters<D>, const D: usize>(&self, b: &mut CircuitBuilder<L, D>) {
+        // TODO: validate based on inputs
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -139,6 +142,7 @@ impl<L: PlonkParameters<D>, const D: usize, const NETWORK: usize> AsyncHint<L, D
                     .fetch_header(&CryptoHash(current_hash))
                     .await
                     .expect("Failed to fetch header");
+                log::debug!("Fetched header: {:#?}", header);
 
                 let bps = client
                     .fetch_latest_header(&header.inner_lite.next_epoch_id)
@@ -146,6 +150,7 @@ impl<L: PlonkParameters<D>, const D: usize, const NETWORK: usize> AsyncHint<L, D
                     .expect("Failed to fetch bps")
                     .expect("Expected a header")
                     .next_bps;
+                log::debug!("Fetched next epoch bps: {:?}", bps);
 
                 let next_block = client
                     .fetch_latest_header(&CryptoHash(current_hash))
@@ -156,6 +161,30 @@ impl<L: PlonkParameters<D>, const D: usize, const NETWORK: usize> AsyncHint<L, D
                 output_stream.write_value::<HeaderVariable>(header.into());
                 output_stream.write_value::<BpsArr<ValidatorStakeVariable>>(bps_to_variable(bps));
                 output_stream.write_value::<BlockVariable>(next_block.into());
+
+                let header_var = header.into();
+                let bps_var = bps_to_variable(bps);
+                let next_block_var: BlockVariableValue<_> = next_block.into();
+
+                use ethers::utils::hex;
+                next_block_var
+                    .approvals_after_next
+                    .is_active
+                    .iter()
+                    .zip(next_block_var.approvals_after_next.signatures.iter())
+                    .enumerate()
+                    .for_each(|(i, (x, y))| {
+                        log::debug!(
+                            "bps({i}): {:?} sig: {:?} active: {:?}",
+                            hex::encode(bps_var[i].public_key.0),
+                            hex::encode(y.r.0),
+                            x
+                        );
+                    });
+
+                output_stream.write_value::<HeaderVariable>(header_var);
+                output_stream.write_value::<BpsArr<ValidatorStakeVariable>>(bps_var);
+                output_stream.write_value::<BlockVariable>(next_block_var);
             }
             _ => panic!("Invalid marker"),
         }
@@ -311,13 +340,16 @@ pub struct ProofInputVariable {
 
 #[cfg(test)]
 mod tests {
-    use near_light_client_rpc::Network;
+    use near_light_client_protocol::{LightClientBlockLiteView, ValidatorStake};
+    use near_light_client_rpc::{
+        prelude::Itertools, LightClientBlockView, Network, ValidatorStakeView,
+    };
 
     use super::*;
     use crate::{
-        builder::Sync,
+        builder::{Ensure, Sync},
         test_utils::{builder_suite, test_state, testnet_state, B, PI, PO},
-        variables::{BlockVariableValue, HeaderVariable},
+        variables::{BlockVariableValue, BpsApprovals, HeaderVariable},
     };
 
     #[test]
@@ -356,23 +388,56 @@ mod tests {
     fn test_problem_header() {
         let problem_hash =
             bytes32!("0xeff7dccf304315aa520ad7e704062a8b8deadc5c0906e7e16d7305067a72a57e");
+        //let problem_hash = testnet_state().0.hash().0;
         let fetcher = InputFetcher::<DefaultParameters, 2, 1>(Default::default());
 
         let define = |b: &mut B| {
             let trusted_header_hash = b.read::<CryptoHashVariable>();
 
-            let (header, bps, nb) = fetcher.fetch_sync_inputs(b, &trusted_header_hash);
-            // Seems like signatures issue
-            b.sync(&header, &bps, &nb);
+            let Inputs::Sync {
+                header,
+                bps,
+                next_block,
+            } = fetcher.fetch(
+                b,
+                &Fetch::Sync {
+                    untrusted_header_hash: trusted_header_hash,
+                },
+            );
 
-            b.write::<BlockVariable>(nb);
+            // TODO: validate
+            b.write::<HeaderVariable>(header.clone());
+            b.write::<BpsArr<ValidatorStakeVariable>>(bps.clone());
+            b.write::<BlockVariable>(next_block.clone());
+
+            let approval = b.reconstruct_approval_message(&next_block);
+            b.validate_signatures(&next_block.approvals_after_next, &bps, approval);
         };
         let writer = |input: &mut PI| {
             input.write::<CryptoHashVariable>(problem_hash.into());
         };
         let assertions = |mut output: PO| {
-            let output = output.read::<BlockVariable>();
+            // let header = output.read::<HeaderVariable>();
+            // let bps = output.read::<BpsArr<ValidatorStakeVariable>>();
+            // let nb = output.read::<BlockVariable>();
         };
         builder_suite(define, writer, assertions);
+
+        let head = serde_json::from_str::<LightClientBlockLiteView>(
+            std::fs::read_to_string("header.json").unwrap().as_str(),
+        )
+        .unwrap();
+        let epoch_bps: Vec<ValidatorStake> = serde_json::from_str::<Vec<ValidatorStakeView>>(
+            std::fs::read_to_string("bps.json").unwrap().as_str(),
+        )
+        .unwrap()
+        .into_iter()
+        .map(ValidatorStakeView::into)
+        .collect();
+        let next_block = serde_json::from_str::<LightClientBlockView>(
+            std::fs::read_to_string("next_block.json").unwrap().as_str(),
+        )
+        .unwrap();
+        near_light_client_protocol::Protocol::sync(&head, &epoch_bps, next_block).unwrap();
     }
 }
