@@ -1,9 +1,13 @@
+use plonky2x::register_watch_generator;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 
 use crate::{
     builder::Sync,
     hint::{FetchHeaderInputs, FetchNextHeaderInputs},
-    variables::{BuildEndorsement, CryptoHashVariable, EncodeInner, HashBpsInputs},
+    variables::{
+        ApprovalMessage, BuildEndorsement, CryptoHashVariable, EncodeInner, HashBpsInputs,
+        StakeInfoVariable,
+    },
 };
 
 // TODO: lazy sync
@@ -60,6 +64,8 @@ impl<const NETWORK: usize> Circuit for SyncCircuit<NETWORK> {
         registry.register_hint::<EncodeInner>();
         registry.register_hint::<BuildEndorsement>();
         registry.register_hint::<HashBpsInputs>();
+
+        register_watch_generator!(registry, L, D, ApprovalMessage, StakeInfoVariable);
     }
 }
 
@@ -76,8 +82,6 @@ mod beefy_tests {
     fn sync_e2e() {
         let (header, _, _) = testnet_state();
         let header = header.hash().0;
-        let header =
-            bytes32!("0xeff7dccf304315aa520ad7e704062a8b8deadc5c0906e7e16d7305067a72a57e").0;
 
         let define = |b: &mut B| {
             SyncCircuit::<NETWORK>::define(b);

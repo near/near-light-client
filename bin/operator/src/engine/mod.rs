@@ -5,18 +5,16 @@ use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use near_light_clientx::VERIFY_AMT;
 use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 pub use types::RegistryInfo;
 
 use self::types::{PriorityWeight, TransactionOrReceiptIdNewtype};
-use crate::{
-    succinct::{
-        self,
-        types::{ProofResponse, ProofStatus},
-        ProofId,
-    },
-    VERIFY_ID_AMT,
+use crate::succinct::{
+    self,
+    types::{ProofResponse, ProofStatus},
+    ProofId,
 };
 
 mod types;
@@ -78,10 +76,10 @@ impl Engine {
     }
 
     fn make_batch(&mut self) -> Option<(u32, Vec<TransactionOrReceiptId>)> {
-        if self.proving_queue.len() >= VERIFY_ID_AMT {
+        if self.proving_queue.len() >= VERIFY_AMT {
             let id = self.batches.len() as u32;
             let mut txs = vec![];
-            for _ in 0..VERIFY_ID_AMT {
+            for _ in 0..VERIFY_AMT {
                 let (req, _) = self.proving_queue.pop().unwrap();
                 txs.push(req.0);
             }
@@ -325,7 +323,7 @@ mod tests {
     //     let mut m = manager().await;
     //
     //     let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
-    //     let fixtures = fixture.iter().take(VERIFY_ID_AMT);
+    //     let fixtures = fixture.iter().take(VERIFY_AMT);
     //     for r in fixtures {
     //         m.prove(message::ProveTransaction {
     //             tx: r.clone(),
@@ -352,9 +350,9 @@ mod tests {
         let mut m = manager().await;
 
         let fixture = fixture::<Vec<TransactionOrReceiptId>>("ids.json");
-        let to_take = VERIFY_ID_AMT - 1;
+        let to_take = VERIFY_AMT - 1;
         let fixtures = fixture.clone().into_iter().take(to_take);
-        let priority_from = VERIFY_ID_AMT - 7;
+        let priority_from = VERIFY_AMT - 7;
 
         let mut priority: Vec<TransactionOrReceiptIdNewtype> = vec![];
 

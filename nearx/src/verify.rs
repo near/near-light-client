@@ -194,6 +194,7 @@ impl<const N: usize> MergeProofHint<N> {
 mod beefy_tests {
     use std::str::FromStr;
 
+    use log::logger;
     use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
     use serial_test::serial;
