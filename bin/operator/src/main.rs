@@ -11,11 +11,11 @@ pub async fn main() -> anyhow::Result<()> {
         .filter_module("reqwest", LevelFilter::Info)
         .init();
 
-    let config = Config::default();
+    let config = Config::new(std::env::var("NEAR_LIGHT_CLIENT_DIR").ok().as_deref())?;
 
     let client = Arc::new(SuccinctClient::new(&config).await?);
 
-    let engine = Engine::new(client.clone()).start();
+    let engine = Engine::new(&config, client.clone()).start();
 
     let server_handle = RpcServer::new(client, engine.clone()).run(&config).await?;
 

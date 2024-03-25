@@ -8,6 +8,7 @@ pub struct Config {
     pub rpc: near_light_client_rpc::Config,
     pub protocol: near_light_client_protocol::config::Config,
     pub succinct: crate::succinct::Config,
+    pub engine: crate::engine::Config,
 }
 
 impl Configurable for Config {}

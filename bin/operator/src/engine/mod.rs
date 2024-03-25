@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
-use near_light_clientx::VERIFY_AMT;
+use near_light_clientx::config::bps_from_network;
 use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
 pub use types::RegistryInfo;
@@ -19,22 +19,43 @@ use crate::succinct::{
 
 mod types;
 
-// TODO: decide if we can try to identity hash based on ids, they're already
-// hashed
-// Collision <> receipt & tx?
+// TODO[Optimisation]: decide if we can try to identity hash based on ids,
+// they're already hashed, perhaps a collision would be if receipt_id ++ tx_id
+// are the same, unlikely
 type Queue = PriorityQueue<TransactionOrReceiptIdNewtype, PriorityWeight, DefaultHashBuilder>;
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct Config {
+    drain_interval: u64,
+    sync_interval: u64,
+    cleanup_interval: u64,
+    persist_interval: u64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            drain_interval: 1,
+            sync_interval: 60 * 30,
+            cleanup_interval: 60,
+            persist_interval: 30,
+        }
+    }
+}
 
 pub struct Engine {
     registry: HashMap<usize, RegistryInfo>,
     succinct_client: Arc<succinct::Client>,
-    // TODO: persist me
     proving_queue: Queue,
     batches: HashMap<u32, Option<ProofId>>,
     request_info: HashMap<ProofId, Option<ProofStatus>>,
+    config: Config,
+    verify_amt: usize,
 }
 
 impl Engine {
-    pub fn new(succinct_client: Arc<succinct::Client>) -> Self {
+    pub fn new(config: &super::Config, succinct_client: Arc<succinct::Client>) -> Self {
         log::info!("starting queue manager");
 
         let state = PersistedState::try_from("state.json");
@@ -54,6 +75,8 @@ impl Engine {
                 .map(|s| s.batches.clone())
                 .unwrap_or_default(),
             request_info: state.map(|s| s.request_info).unwrap_or_default(),
+            config: config.engine.clone(),
+            verify_amt: bps_from_network(&config.rpc.network),
         }
     }
 
@@ -70,24 +93,23 @@ impl Engine {
         } else {
             1
         };
-        log::debug!("adding to {:?} with weight: {weight}", tx);
+        log::debug!("enqueuing {:?} with weight: {weight}", tx);
         self.proving_queue.push(tx.into(), weight);
         Ok(())
     }
 
     fn make_batch(&mut self) -> Option<(u32, Vec<TransactionOrReceiptId>)> {
-        if self.proving_queue.len() >= VERIFY_AMT {
-            let id = self.batches.len() as u32;
-            let mut txs = vec![];
-            for _ in 0..VERIFY_AMT {
-                let (req, _) = self.proving_queue.pop().unwrap();
-                txs.push(req.0);
-            }
-            self.batches.insert(id, None);
-            Some((id, txs))
-        } else {
-            None
+        if self.proving_queue.len() < self.verify_amt {
+            return None;
         }
+        let id = self.batches.len() as u32;
+        let mut txs = vec![];
+        for _ in 0..self.verify_amt {
+            let (req, _) = self.proving_queue.pop()?;
+            txs.push(req.0);
+        }
+        self.batches.insert(id, None);
+        Some((id, txs))
     }
 }
 
@@ -95,18 +117,20 @@ impl Actor for Engine {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_interval(Duration::from_secs(1), |_, ctx| {
+        ctx.run_interval(Duration::from_secs(self.config.drain_interval), |_, ctx| {
             ctx.address().do_send(Drain)
         });
-        ctx.run_interval(Duration::from_secs(60 * 30), |_, ctx| {
+        ctx.run_interval(Duration::from_secs(self.config.sync_interval), |_, ctx| {
             ctx.address().do_send(Sync)
         });
-        ctx.run_interval(Duration::from_secs(60), |_, ctx| {
-            ctx.address().do_send(Cleanup)
-        });
-        ctx.run_interval(Duration::from_secs(60), |_, ctx| {
-            ctx.address().do_send(Persist)
-        });
+        ctx.run_interval(
+            Duration::from_secs(self.config.cleanup_interval),
+            |_, ctx| ctx.address().do_send(Cleanup),
+        );
+        ctx.run_interval(
+            Duration::from_secs(self.config.persist_interval),
+            |_, ctx| ctx.address().do_send(Persist),
+        );
     }
 }
 
@@ -310,6 +334,8 @@ mod tests {
 
     use super::*;
     use crate::succinct::tests::mocks;
+
+    const VERIFY_AMT: usize = 64;
 
     async fn manager() -> Engine {
         let client = mocks().await;

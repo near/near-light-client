@@ -2727,7 +2727,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
  "ahash 0.8.11",
- "serde",
 ]
 
 [[package]]
@@ -3858,7 +3857,7 @@ dependencies = [
  "near-light-client-rpc",
  "near-primitives",
  "pretty_env_logger",
- "rand 0.7.3",
+ "rand 0.8.5",
  "serde",
  "sled",
  "tokio",
@@ -3890,7 +3889,7 @@ dependencies = [
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
- "rand 0.7.3",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "test-utils",
@@ -3913,7 +3912,7 @@ dependencies = [
  "near-primitives",
  "near-primitives-core",
  "pretty_env_logger",
- "rand 0.7.3",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "tokio",
@@ -4123,7 +4122,7 @@ dependencies = [
  "anyhow",
  "config",
  "futures",
- "hashbrown 0.13.1",
+ "hashbrown 0.14.3",
  "hex",
  "http-cache-reqwest",
  "jsonrpsee",

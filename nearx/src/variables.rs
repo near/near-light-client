@@ -16,7 +16,6 @@ use plonky2x::{
             EDDSASignatureVariable, EDDSASignatureVariableValue, DUMMY_PUBLIC_KEY, DUMMY_SIGNATURE,
         },
         hint::simple::hint::Hint,
-        uint::Uint,
         vars::EvmVariable,
     },
     prelude::*,
@@ -415,14 +414,13 @@ pub struct ValidatorsVariable<const N: usize> {
     pub(crate) inner: BpsArr<ValidatorStakeVariable, N>,
 }
 
-impl<F: RichField, I: Into<ValidatorStakeView>, const N: usize> FromIterator<I>
+impl<F: RichField, I: Into<ValidatorStake>, const N: usize> FromIterator<I>
     for ValidatorsVariableValue<N, F>
 {
     fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
         let mut bps = iter
             .into_iter()
             .take(N)
-            .map(Into::<ValidatorStakeView>::into)
             .map(Into::<ValidatorStake>::into)
             .map(Into::<ValidatorStakeVariableValue<F>>::into)
             .collect_vec();
@@ -570,11 +568,11 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for BuildEndorsement {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HashBpsInputs;
+pub struct HashBpsInputs<const A: usize>;
 
-impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
+impl<L: PlonkParameters<D>, const D: usize, const A: usize> Hint<L, D> for HashBpsInputs<A> {
     fn hint(&self, input_stream: &mut ValueStream<L, D>, output_stream: &mut ValueStream<L, D>) {
-        let bps = input_stream.read_value::<Validators>();
+        let bps = input_stream.read_value::<Validators<A>>();
         // TODO: if we use a bitmask we wont need default checks
         let default_validator =
             ValidatorStakeVariableValue::<<L as PlonkParameters<D>>::Field>::default();
@@ -595,14 +593,14 @@ impl<L: PlonkParameters<D>, const D: usize> Hint<L, D> for HashBpsInputs {
     }
 }
 
-impl HashBpsInputs {
+impl<const A: usize> HashBpsInputs<A> {
     pub fn hash<L: PlonkParameters<D>, const D: usize>(
         self,
         b: &mut CircuitBuilder<L, D>,
-        bps: &Validators,
+        bps: &Validators<A>,
     ) -> CryptoHashVariable {
         let mut input_stream = VariableStream::new();
-        input_stream.write::<Validators>(bps);
+        input_stream.write::<Validators<A>>(bps);
 
         let output_stream = b.hint(input_stream, self);
         output_stream.read::<CryptoHashVariable>(b)
