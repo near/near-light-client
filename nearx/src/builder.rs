@@ -1,4 +1,3 @@
-use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 use near_light_client_protocol::prelude::Itertools;
 use plonky2x::{
     frontend::{
@@ -303,7 +302,7 @@ impl<L: PlonkParameters<D>, const D: usize> Sync<L, D> for CircuitBuilder<L, D> 
             &next_block.next_bps_hash,
         );
         self.assertx(bps_valid);
-        assert!(next_block.next_bps.inner.len() == NUM_BLOCK_PRODUCER_SEATS);
+        assert_eq!(next_block.next_bps.inner.len(), LEN);
 
         next_block.header.to_owned()
     }
@@ -388,6 +387,7 @@ fn to_le_bytes<L: PlonkParameters<D>, V: CircuitVariable, const D: usize, const 
 
 #[cfg(test)]
 mod tests {
+    use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
     use near_light_client_protocol::{Protocol, StakeInfo};
 
     use self::assert_eq;

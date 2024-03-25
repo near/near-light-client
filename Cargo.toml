@@ -8,17 +8,21 @@ members  = [ "bin/*", "crates/*", "nearx" ]
 resolver = "2"
 
 [workspace.dependencies]
-anyhow            = "1.0"
-async-trait       = "0.1"
-config            = "0.13"
-derive_more       = "0.99"
-either            = { version = "1.9", features = [ "serde" ] }
-itertools         = "0.12"
-log               = "0.4"
-pretty_assertions = "1.4"
-pretty_env_logger = "0.5"
-sled              = "0.34" # TODO: maybe heavy, use heed instead
-thiserror         = "1.0"
+anyhow             = "1.0"
+async-trait        = "0.1"
+config             = "0.13"
+derive_more        = "0.99"
+dotenv             = "0.15"
+either             = { version = "1.9", features = [ "serde" ] }
+figment            = { version = "0.10", features = [ "toml", "env" ] }
+itertools          = "0.12"
+log                = "0.4"
+pretty_assertions  = "1.4"
+pretty_env_logger  = "0.5"
+sled               = "0.34" # TODO: maybe heavy, use heed instead
+thiserror          = "1.0"
+tracing            = "0.1"
+tracing-subscriber = "0.3"
 
 # Async
 axum    = "*"

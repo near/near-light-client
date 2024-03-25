@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{lightClientBaseUrl}}
+  url: {{operatorBaseUrl}}
   body: json
   auth: none
 }
@@ -18,4 +18,8 @@ body:json {
     "params": {
     }
   }
+}
+
+assert {
+  res.status: eq 200
 }

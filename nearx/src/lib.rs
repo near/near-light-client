@@ -1,3 +1,8 @@
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
+#![feature(generic_arg_infer)]
+#![feature(const_trait_impl)]
+
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 pub use sync::SyncCircuit;
 pub use verify::VerifyCircuit;
@@ -16,8 +21,7 @@ pub mod verify;
 #[cfg(test)]
 mod test_utils;
 
-pub const VERIFY_AMT: usize = 64;
-pub const VERIFY_BATCH: usize = 4;
+pub mod config;
 
 #[cfg(test)]
 mod beefy_tests {
@@ -25,7 +29,7 @@ mod beefy_tests {
     use serial_test::serial;
 
     use super::*;
-    use crate::test_utils::NETWORK;
+    use crate::config::Testnet;
 
     #[test]
     #[serial]
@@ -36,14 +40,14 @@ mod beefy_tests {
         let mut builder = DefaultBuilder::new();
 
         log::debug!("Defining circuit");
-        SyncCircuit::<NETWORK>::define(&mut builder);
+        SyncCircuit::<Testnet>::define(&mut builder);
         let circuit = builder.build();
         log::debug!("Done building circuit");
 
         let mut hint_registry = HintRegistry::new();
         let mut gate_registry = GateRegistry::new();
-        SyncCircuit::<NETWORK>::register_generators(&mut hint_registry);
-        SyncCircuit::<NETWORK>::register_gates(&mut gate_registry);
+        SyncCircuit::<Testnet>::register_generators(&mut hint_registry);
+        SyncCircuit::<Testnet>::register_gates(&mut gate_registry);
 
         circuit.test_serializers(&gate_registry, &hint_registry);
     }
@@ -57,14 +61,14 @@ mod beefy_tests {
         let mut builder = DefaultBuilder::new();
 
         log::debug!("Defining circuit");
-        VerifyCircuit::<VERIFY_AMT, VERIFY_BATCH, NETWORK>::define(&mut builder);
+        VerifyCircuit::<Testnet>::define(&mut builder);
         let circuit = builder.build();
         log::debug!("Done building circuit");
 
         let mut hint_registry = HintRegistry::new();
         let mut gate_registry = GateRegistry::new();
-        VerifyCircuit::<VERIFY_AMT, VERIFY_BATCH, NETWORK>::register_generators(&mut hint_registry);
-        VerifyCircuit::<VERIFY_AMT, VERIFY_BATCH, NETWORK>::register_gates(&mut gate_registry);
+        VerifyCircuit::<Testnet>::register_generators(&mut hint_registry);
+        VerifyCircuit::<Testnet>::register_gates(&mut gate_registry);
 
         circuit.test_serializers(&gate_registry, &hint_registry);
     }

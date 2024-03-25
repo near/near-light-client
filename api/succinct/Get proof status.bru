@@ -1,0 +1,19 @@
+meta {
+  name: Get proof status
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{succinctBaseUrl}}/proof/{{proof_id}}
+  body: json
+}
+
+
+vars:pre-request {
+  proof_id: e112ffa6-d2ee-4263-ac93-a31b94277882
+}
+
+vars:post-response {
+  status: res.body.status
+}

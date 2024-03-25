@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "name": "api",
+  "type": "collection",
+  "presets": {
+    "requestType": "http",
+    "requestUrl": "{{succinctBaseUrl}}"
+  },
+  "ignore": [
+    "bin",
+    "target",
+    ".git",
+    "crates",
+    "build",
+    "nearx",
+    "vendor",
+    "wrapped"
+  ]
+}
