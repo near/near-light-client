@@ -455,6 +455,7 @@ pub mod tests {
     use self::types::NearX;
     use super::*;
 
+    const VERIFY_AMT: usize = 64;
     pub struct Stub(Circuit);
     impl Stub {
         pub fn selector(&self) -> String {

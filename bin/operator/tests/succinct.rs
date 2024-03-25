@@ -2,7 +2,6 @@
 use std::str::FromStr;
 
 use near_light_client_rpc::prelude::Itertools;
-use near_light_clientx::VERIFY_AMT;
 use nearx_operator::{
     config::Config, succinct::*, types::TransactionOrReceiptIdPrimitive, BaseConfig,
 };

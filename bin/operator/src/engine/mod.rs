@@ -329,6 +329,7 @@ impl Handler<Persist> for Engine {
 #[cfg(test)]
 mod tests {
 
+    use near_light_client_primitives::config::BaseConfig;
     use near_light_client_rpc::TransactionOrReceiptId;
     use test_utils::fixture;
 
@@ -339,7 +340,8 @@ mod tests {
 
     async fn manager() -> Engine {
         let client = mocks().await;
-        Engine::new(Arc::new(client))
+
+        Engine::new(&crate::config::Config::test_config(), Arc::new(client))
     }
 
     // TODO: move to integration tests

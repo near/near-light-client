@@ -22,10 +22,10 @@ RUN apt-get update && apt-get install -y \
 RUN cargo new --bin bin/dummy
 RUN cargo new --lib crates/dummylib
 RUN cargo new --lib nearx
-RUN cargo build --release --bin dummy
+RUN cargo build --release --bin dummy --config net.git-fetch-with-cli=true 
 
 COPY ./ ./
-RUN cargo build --release --bin nearx-operator
+RUN cargo build --release --bin nearx-operator --config net.git-fetch-with-cli=true 
 RUN ldd target/release/nearx-operator 
 RUN cp target/release/nearx-operator /near/near-light-client
 

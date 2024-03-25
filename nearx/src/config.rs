@@ -13,7 +13,7 @@ pub trait Config: std::fmt::Debug + Clone + PartialEq + Sync + Send + 'static {
 pub struct Testnet;
 impl const Config for Testnet {
     const NETWORK: Network = Network::Testnet;
-    const BPS: usize = 35; // In practice we only see 30-35
+    const BPS: usize = 50; // In practice we only see 30-35
 
     const VERIFY_AMT: usize = 64;
     const VERIFY_BATCH: usize = 4;
