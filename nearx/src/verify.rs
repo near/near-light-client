@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use near_light_client_protocol::prelude::Itertools;
 pub use plonky2x::{self, backend::circuit::Circuit, prelude::*};
 use plonky2x::{
@@ -9,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     builder::Verify,
-    hint::{FetchHeaderInputs, FetchProofInputs, ProofInputVariable},
+    config::Config,
+    hint::{FetchProofInputs, InputFetcher, ProofInputVariable},
     variables::{byte_from_bool, CryptoHashVariable, EncodeInner, TransactionOrReceiptIdVariable},
 };
 
@@ -22,31 +25,36 @@ pub struct ProofVerificationResultVariable {
 }
 
 #[derive(Debug, Clone)]
-pub struct VerifyCircuit<const N: usize, const B: usize, const NETWORK: usize = 1>;
+pub struct VerifyCircuit<C: Config>(PhantomData<C>);
 
-impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
-    for VerifyCircuit<N, B, NETWORK>
+impl<C: Config> Circuit for VerifyCircuit<C>
+where
+    [(); C::BPS]:,
+    [(); C::VERIFY_AMT]:,
+    [(); C::VERIFY_BATCH]:,
 {
     fn define<L: PlonkParameters<D>, const D: usize>(b: &mut CircuitBuilder<L, D>)
     where
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher:
             AlgebraicHasher<<L as PlonkParameters<D>>::Field>,
     {
+        let fetcher = InputFetcher::<C>::default();
+
         // TODO: this is trusted, we should join the result of this to assert that the
         // light client did know about this header OR ensure in the circuit we knew
         // about this information, the contract should emit an event for the height so
         // it's easily queryable
         let trusted_header_hash = b.evm_read::<CryptoHashVariable>();
-        let head = FetchHeaderInputs(NETWORK.into()).fetch(b, &trusted_header_hash);
+        let header = fetcher.fetch_verify(b, &trusted_header_hash);
         // TODO: check that the head.block_height was once known to the verifier if not
         // the checkpoint header
 
         let mut ids = vec![];
-        for _ in 0..N {
+        for _ in 0..C::VERIFY_AMT {
             ids.push(b.evm_read::<TransactionOrReceiptIdVariable>());
         }
 
-        let proofs = FetchProofInputs::<N>(NETWORK.into()).fetch(b, &head, &ids);
+        let proofs = FetchProofInputs::<{ C::VERIFY_AMT }>(C::NETWORK).fetch(b, &header, &ids);
 
         // Init a default result for N
         let zero = b.constant::<CryptoHashVariable>([0u8; 32].into());
@@ -58,7 +66,7 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
         };
 
         // TODO: write some outputs here for each ID
-        let output = b.mapreduce_dynamic::<ProofVerificationResultVariable, ProofInputVariable, ArrayVariable<ProofVerificationResultVariable, N>, Self, B, _, _>(
+        let output = b.mapreduce_dynamic::<ProofVerificationResultVariable, ProofInputVariable, ArrayVariable<ProofVerificationResultVariable, {C::VERIFY_AMT}>, Self, {C::VERIFY_BATCH}, _, _>(
             default,
             proofs.data,
             |default, proofs, b| {
@@ -72,13 +80,13 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
                 }
 
                 results.resize(
-                    N,
+                    C::VERIFY_AMT,
                     default,
                 );
 
                 results.into()
             },
-            |_, l, r, b| MergeProofHint::<N>.merge(b, &l, &r),
+            |_, l, r, b| MergeProofHint::<{C::VERIFY_AMT}>.merge(b, &l, &r),
         );
         b.watch_slice(&output.data, "output");
 
@@ -94,9 +102,9 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
     where
         <<L as PlonkParameters<D>>::Config as GenericConfig<D>>::Hasher: AlgebraicHasher<L::Field>,
     {
-        registry.register_async_hint::<FetchProofInputs<N>>();
-        registry.register_hint::<MergeProofHint<N>>();
-        registry.register_async_hint::<FetchHeaderInputs>();
+        registry.register_async_hint::<FetchProofInputs<{ C::VERIFY_AMT }>>();
+        registry.register_hint::<MergeProofHint<{ C::VERIFY_AMT }>>();
+        registry.register_async_hint::<InputFetcher<C>>();
 
         // We hash in verify
         registry.register_hint::<EncodeInner>();
@@ -107,9 +115,9 @@ impl<const N: usize, const B: usize, const NETWORK: usize> Circuit
             L,
             ProofVerificationResultVariable,
             ProofInputVariable,
-            ArrayVariable<ProofVerificationResultVariable, N>,
+            ArrayVariable<ProofVerificationResultVariable, { C::VERIFY_AMT }>,
             Self,
-            B,
+            { C::VERIFY_BATCH },
             D,
         >>(dynamic_id);
 
@@ -194,7 +202,6 @@ impl<const N: usize> MergeProofHint<N> {
 mod beefy_tests {
     use std::str::FromStr;
 
-    use log::logger;
     use near_light_client_protocol::prelude::Itertools;
     use near_primitives::types::TransactionOrReceiptId;
     use serial_test::serial;
@@ -202,7 +209,8 @@ mod beefy_tests {
 
     use super::*;
     use crate::{
-        test_utils::{builder_suite, testnet_state, B, NETWORK, PI, PO},
+        config::CustomBatchNumConfig,
+        test_utils::{builder_suite, testnet_state, B, PI, PO},
         variables::TransactionOrReceiptIdVariableValue,
     };
 
@@ -210,11 +218,8 @@ mod beefy_tests {
     #[serial]
     #[ignore]
     fn verify_e2e_2x1() {
+        type C = CustomBatchNumConfig<2, 1>;
         let (header, _, _) = testnet_state();
-
-        // TODO: test many configs of these
-        const AMT: usize = 2;
-        const BATCH: usize = 1;
 
         fn tx(hash: &str, sender: &str) -> TransactionOrReceiptId {
             TransactionOrReceiptId::Transaction {
@@ -244,10 +249,10 @@ mod beefy_tests {
         .map(Into::into)
         .collect_vec();
 
-        assert_eq!(txs.len(), AMT);
+        assert_eq!(txs.len(), C::VERIFY_AMT);
 
         let define = |b: &mut B| {
-            VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
+            VerifyCircuit::<C>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.hash().0.into());
@@ -257,7 +262,7 @@ mod beefy_tests {
         };
         let assertions = |mut output: PO| {
             let mut results = vec![];
-            for _ in 0..AMT {
+            for _ in 0..C::VERIFY_AMT {
                 let id = output.evm_read::<CryptoHashVariable>();
                 let result = output.evm_read::<ByteVariable>();
                 results.push(ProofVerificationResultVariableValue::<GoldilocksField> {
@@ -276,21 +281,18 @@ mod beefy_tests {
     // #[ignore]
     #[allow(dead_code)] // Justification: huge test, takes 36 minutes. keep for local testing
     fn verify_e2e_128x4() {
-        let (header, _, _) = testnet_state();
+        type C = CustomBatchNumConfig<128, 4>;
 
-        const AMT: usize = 128;
-        const BATCH: usize = 4;
+        let (header, _, _) = testnet_state();
 
         let txs = fixture::<Vec<TransactionOrReceiptId>>("ids.json")
             .into_iter()
-            .take(AMT)
+            .take(C::VERIFY_AMT)
             .map(Into::<TransactionOrReceiptIdVariableValue<GoldilocksField>>::into)
             .collect_vec();
 
-        assert_eq!(txs.len(), AMT);
-
         let define = |b: &mut B| {
-            VerifyCircuit::<AMT, BATCH, NETWORK>::define(b);
+            VerifyCircuit::<C>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.hash().0.into());
@@ -300,7 +302,7 @@ mod beefy_tests {
         };
         let assertions = |mut output: PO| {
             let mut results = vec![];
-            for _ in 0..AMT {
+            for _ in 0..C::VERIFY_AMT {
                 let id = output.evm_read::<CryptoHashVariable>();
                 let result = output.evm_read::<ByteVariable>();
                 results.push(ProofVerificationResultVariableValue::<GoldilocksField> {

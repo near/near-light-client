@@ -1,0 +1,26 @@
+meta {
+  name: Protocol config
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{nearBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "EXPERIMENTAL_protocol_config",
+    "params": {
+      "block_id": "{{id}}"
+    }
+  }
+}
+
+vars:pre-request {
+  id: 8S5rDw9i5mtbxVFG8BvwukqBLbSvHLeUepQ5Hu4vT5f9
+}

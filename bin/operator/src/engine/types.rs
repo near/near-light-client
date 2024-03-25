@@ -65,3 +65,51 @@ pub struct RegistryInfo {
     // Their weight in the shared queue
     pub weight: PriorityWeight,
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::str::FromStr;
+
+    use near_light_client_protocol::near_account_id::AccountId;
+    use test_utils::CryptoHash;
+
+    use super::*;
+
+    #[test]
+    fn test_transaction_or_receipt_id_eq() {
+        let transaction1 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Transaction {
+            transaction_hash: CryptoHash::default(),
+            sender_id: AccountId::from_str("sender1").unwrap(),
+        });
+        let transaction2 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Transaction {
+            transaction_hash: CryptoHash::default(),
+            sender_id: AccountId::from_str("sender1").unwrap(),
+        });
+        assert!(transaction1 == transaction2);
+
+        let receipt1 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Receipt {
+            receipt_id: CryptoHash::default(),
+            receiver_id: AccountId::from_str("receiver1").unwrap(),
+        });
+        let receipt2 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Receipt {
+            receipt_id: CryptoHash::default(),
+            receiver_id: AccountId::from_str("receiver1").unwrap(),
+        });
+        assert!(receipt1 == receipt2);
+
+        let transaction3 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Transaction {
+            transaction_hash: CryptoHash::default(),
+            sender_id: AccountId::from_str("sender2").unwrap(),
+        });
+        assert!(transaction1 != transaction3);
+
+        let receipt3 = TransactionOrReceiptIdNewtype(TransactionOrReceiptId::Receipt {
+            receipt_id: CryptoHash::default(),
+            receiver_id: AccountId::from_str("receiver2").unwrap(),
+        });
+        assert!(receipt1 != receipt3);
+
+        assert!(transaction1 != receipt1);
+    }
+}

@@ -10,6 +10,7 @@ use jsonrpsee::{
 use jsonrpsee_core::{async_trait, SubscriptionResult};
 use near_light_client_rpc::prelude::GetProof;
 use tokio::task::JoinHandle;
+use tracing::error;
 
 use crate::{
     config::Config,
@@ -26,7 +27,7 @@ pub struct RpcServerImpl {
 
 impl RpcServerImpl {
     pub fn new(succinct_client: Arc<succinct::Client>, queue: Addr<Engine>) -> Self {
-        log::info!("starting rpc server");
+        tracing::info!("starting rpc server");
         Self {
             succinct_client,
             queue,
@@ -64,18 +65,20 @@ pub trait ProveRpc {
 #[async_trait]
 impl ProveRpcServer for RpcServerImpl {
     async fn sync(&self) -> Result<ProofId> {
-        let pid = self.succinct_client.sync(true).await.map_err(|e| {
-            log::error!("{:?}", e);
-            ErrorCode::ServerError(500)
-        })?;
+        let pid = self
+            .succinct_client
+            .sync(true)
+            .await
+            .map_err(coerce_error)?;
         Ok(pid)
     }
 
     async fn verify(&self, ids: Vec<GetProof>) -> Result<ProofId> {
-        let pid = self.succinct_client.verify(ids, true).await.map_err(|e| {
-            log::error!("{:?}", e);
-            ErrorCode::ServerError(500)
-        })?;
+        let pid = self
+            .succinct_client
+            .verify(ids, true)
+            .await
+            .map_err(coerce_error)?;
         Ok(pid)
     }
 
@@ -84,11 +87,8 @@ impl ProveRpcServer for RpcServerImpl {
             self.queue
                 .send(ProveTransaction { id: None, tx })
                 .await
-                .map_err(|e| {
-                    log::error!("{:?}", e);
-                    ErrorCode::ServerError(500)
-                })?
-                .unwrap();
+                .map_err(coerce_error)?
+                .map_err(coerce_error)?;
         }
         Ok(())
     }
@@ -113,8 +113,8 @@ impl ProveRpcServer for RpcServerImpl {
                 for (i, id) in proofs.clone().iter().enumerate() {
                     let res = self.succinct_client.get_proof(*id).await;
                     if let Ok(res) = res {
-                        let msg = SubscriptionMessage::from_json(&res).unwrap();
-                        sink.send(msg).await.unwrap();
+                        let msg = SubscriptionMessage::from_json(&res)?;
+                        sink.send(msg).await?;
                         successful.push(i);
                     }
                 }
@@ -129,7 +129,11 @@ impl ProveRpcServer for RpcServerImpl {
     }
 
     async fn register(&self, info: RegistryInfo) -> Result<()> {
-        self.queue.send(Register(info)).await.unwrap();
-        Ok(())
+        self.queue.send(Register(info)).await.map_err(coerce_error)
     }
+}
+
+pub fn coerce_error<T: Into<anyhow::Error>>(e: T) -> ErrorObjectOwned {
+    error!("{:?}", e.into());
+    ErrorCode::ServerError(500).into()
 }

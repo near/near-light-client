@@ -7,26 +7,26 @@ version.workspace = true
 [lib]
 
 [dependencies]
-actix                       = { version = "*", features = [ "macros" ] }
-anyhow.workspace            = true
-config.workspace            = true
-futures.workspace           = true
-hashbrown                   = { version = "*", features = [ "serde" ] }
-hex.workspace               = true
-http-cache-reqwest          = "0.13.0"
-jsonrpsee                   = { version = "0.22.1", features = [ "server", "macros" ] }
-jsonrpsee-core              = "0.22.1"
-log.workspace               = true
-pretty_env_logger.workspace = true
-priority-queue              = "*"
-reqwest-middleware          = "*"
-reqwest-retry               = "*"
-reqwest.workspace           = true
-serde.workspace             = true
-serde_json.workspace        = true
-thiserror.workspace         = true
-tokio.workspace             = true
-uuid                        = { version = "1.4.1", features = [ "serde", "v4" ] }
+actix                        = { version = "*", features = [ "macros" ] }
+anyhow.workspace             = true
+figment.workspace            = true
+futures.workspace            = true
+hashbrown                    = { version = "*", features = [ "serde" ] }
+hex.workspace                = true
+http-cache-reqwest           = "0.13.0"
+jsonrpsee                    = { version = "0.22.1", features = [ "server", "macros" ] }
+jsonrpsee-core               = "0.22.1"
+priority-queue               = "*"
+reqwest-middleware           = "*"
+reqwest-retry                = "*"
+reqwest.workspace            = true
+serde.workspace              = true
+serde_json.workspace         = true
+thiserror.workspace          = true
+tokio.workspace              = true
+tracing-subscriber.workspace = true
+tracing.workspace            = true
+uuid                         = { version = "1.4.1", features = [ "serde", "v4" ] }
 
 alloy = { git = "https://github.com/alloy-rs/alloy.git", features = [ "contract", "provider-http" ] }
 

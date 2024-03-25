@@ -1,11 +1,11 @@
 meta {
   name: Get proofs
   type: http
-  seq: 7
+  seq: 9
 }
 
 get {
-  url: {{succintBaseUrl}}/proofs?project=near/near-light-client
+  url: {{succinctBaseUrl}}/proofs?project=near/near-light-client
   body: json
   auth: bearer
 }
@@ -15,7 +15,7 @@ query {
 }
 
 auth:bearer {
-  token: {{succintAuthToken}}
+  token: {{succinctAuthToken}}
 }
 
 body:json {

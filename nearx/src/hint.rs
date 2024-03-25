@@ -1,169 +1,100 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use async_trait::async_trait;
-use log::debug;
-use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
-use near_light_client_protocol::{prelude::CryptoHash, Proof};
-use near_light_client_rpc::{prelude::GetProof, LightClientRpc, NearRpcClient, Network};
+use ethers::utils::hex;
+use log::{debug, trace};
+use near_light_client_protocol::{prelude::CryptoHash, Proof, ValidatorStake};
+use near_light_client_rpc::{
+    prelude::{GetProof, Itertools},
+    LightClientRpc, NearRpcClient, Network,
+};
 use plonky2x::{
     frontend::hint::asynchronous::hint::AsyncHint,
     prelude::{plonky2::field::types::PrimeField64, *},
 };
 use serde::{Deserialize, Serialize};
 
-use crate::variables::{
-    normalise_account_id, BlockVariable, BlockVariableValue, CryptoHashVariable, HeaderVariable,
-    ProofVariable, TransactionOrReceiptIdVariable, Validators, ValidatorsVariable,
-    ValidatorsVariableValue,
+use crate::{
+    config::Config,
+    variables::{
+        normalise_account_id, BlockVariable, BlockVariableValue, CryptoHashVariable, HashBpsInputs,
+        HeaderVariable, ProofVariable, TransactionOrReceiptIdVariable, Validators,
+        ValidatorsVariableValue,
+    },
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct FetchNextHeaderInputs(pub Network);
+pub struct InputFetcher<C: Config>(pub PhantomData<C>);
+
+impl<C: Config> Default for InputFetcher<C> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 
 #[async_trait]
-impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchNextHeaderInputs {
-    async fn hint(
-        &self,
-        input_stream: &mut ValueStream<L, D>,
-        output_stream: &mut ValueStream<L, D>,
-    ) {
-        let client = NearRpcClient::new(&self.0.into());
-
-        let h = input_stream.read_value::<CryptoHashVariable>().0;
-
-        let next = client
-            .fetch_latest_header(&CryptoHash(h))
-            .await
-            .expect("Failed to fetch header")
-            .expect("Expected a header");
-
-        output_stream.write_value::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next.into());
-    }
-}
-
-impl FetchNextHeaderInputs {
-    pub fn fetch<L: PlonkParameters<D>, const D: usize, const LEN: usize>(
-        &self,
-        b: &mut CircuitBuilder<L, D>,
-        hash: &CryptoHashVariable,
-    ) -> Option<BlockVariable<LEN>> {
-        let mut input_stream = VariableStream::new();
-        input_stream.write::<CryptoHashVariable>(hash);
-
-        let output_stream = b.async_hint(input_stream, self.clone());
-        Some(output_stream.read::<BlockVariable<LEN>>(b))
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct FetchHeaderInputs(pub Network);
-
-#[async_trait]
-impl<L: PlonkParameters<D>, const D: usize> AsyncHint<L, D> for FetchHeaderInputs {
-    async fn hint(
-        &self,
-        input_stream: &mut ValueStream<L, D>,
-        output_stream: &mut ValueStream<L, D>,
-    ) {
-        let client = NearRpcClient::new(&self.0.into());
-
-        let h = input_stream.read_value::<CryptoHashVariable>().0;
-
-        let header = client
-            .fetch_header(&CryptoHash(h))
-            .await
-            .expect("Failed to fetch header");
-
-        output_stream.write_value::<HeaderVariable>(header.into());
-    }
-}
-
-impl FetchHeaderInputs {
-    /// Fetches a header based on its known hash and witnesses the result.
-    pub fn fetch<L: PlonkParameters<D>, const D: usize>(
-        &self,
-        b: &mut CircuitBuilder<L, D>,
-        trusted_hash: &CryptoHashVariable,
-    ) -> HeaderVariable {
-        let mut input_stream = VariableStream::new();
-        input_stream.write::<CryptoHashVariable>(trusted_hash);
-
-        let output_stream = b.async_hint(input_stream, self.clone());
-        let untrusted = output_stream.read::<HeaderVariable>(b);
-        let untrusted_hash = untrusted.hash(b);
-        b.assert_is_equal(*trusted_hash, untrusted_hash);
-        untrusted
-    }
-}
-
-pub enum Fetch {
-    Sync {
-        untrusted_header_hash: CryptoHashVariable,
-    },
-}
-
-pub enum Inputs<const N: usize> {
-    Sync {
-        header: HeaderVariable,
-        bps: Validators<N>,
-        next_block: BlockVariable<N>,
-    },
-}
-
-impl<const N: usize> Inputs<N> {
-    fn validate<L: PlonkParameters<D>, const D: usize>(&self, b: &mut CircuitBuilder<L, D>) {
-        // TODO: validate based on inputs, here is where we might entrust
-        // untrusted headers and such
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct InputFetcher<L: PlonkParameters<D>, const D: usize, const N: usize>(
-    (Network, PhantomData<(L)>),
-);
-
-#[async_trait]
-impl<L: PlonkParameters<D>, const D: usize, const N: usize> AsyncHint<L, D>
-    for InputFetcher<L, D, N>
+impl<L: PlonkParameters<D>, const D: usize, C: Config> AsyncHint<L, D> for InputFetcher<C>
+where
+    [(); C::BPS]:,
 {
     async fn hint(
         &self,
         input_stream: &mut ValueStream<L, D>,
         output_stream: &mut ValueStream<L, D>,
     ) {
-        let client = NearRpcClient::new(&self.0 .0.clone().into());
+        let client = NearRpcClient::new(&C::NETWORK.into());
 
         let marker: L::Field = input_stream.read_value::<Variable>();
         let marker = marker.to_canonical_u64();
+        debug!("Marker: {}", marker);
         match marker {
             0 => {
-                let current_hash = input_stream.read_value::<CryptoHashVariable>().0;
+                let trusted_header_hash = input_stream.read_value::<CryptoHashVariable>().0;
 
-                let header = client
-                    .fetch_header(&CryptoHash(current_hash))
+                let trusted_header = client
+                    .fetch_header(&CryptoHash(trusted_header_hash))
                     .await
                     .expect("Failed to fetch header");
-                log::debug!("Fetched header: {:#?}", header);
+                debug!("Fetched header: {:#?}", trusted_header);
 
+                // This is a very interesting trick to be able to get the BPS for the next epoch
+                // without the need to store the BPS, we verify the hash of the BPS in the
+                // circuit
                 let bps = client
-                    .fetch_latest_header(&header.inner_lite.next_epoch_id)
+                    .fetch_latest_header(&trusted_header.inner_lite.next_epoch_id)
                     .await
                     .expect("Failed to fetch bps")
                     .expect("Expected a header")
-                    .next_bps;
-                log::debug!("Fetched next epoch bps: {:?}", bps);
+                    .next_bps
+                    .expect("Expected bps for the trusted header")
+                    .into_iter()
+                    .map(Into::<ValidatorStake>::into)
+                    .collect_vec();
+                trace!("Fetched next epoch bps: {:?}", bps);
+                debug!(
+                    "Next epoch bps hash {}, len: {}",
+                    CryptoHash::hash_borsh(bps.clone()),
+                    bps.len()
+                );
 
                 let next_block = client
-                    .fetch_latest_header(&CryptoHash(current_hash))
+                    .fetch_latest_header(&CryptoHash(trusted_header_hash))
                     .await
-                    .expect("Failed to fetch header")
-                    .expect("Expected a header");
+                    .expect("Failed to fetch next block")
+                    // FIXME: this will cause issues syncing if there is no block
+                    .expect("Expected a next_block");
 
-                let header_var = header.into();
-                let bps_var = ValidatorsVariableValue::from_iter(bps.unwrap());
-                let next_block_var: BlockVariableValue<N, _> = next_block.into();
+                // Test the protocol with the offchain protocol.
+                near_light_client_protocol::Protocol::sync(
+                    &trusted_header,
+                    &bps,
+                    next_block.clone(),
+                )
+                .expect("Offchain protocol verification failed");
 
-                use ethers::utils::hex;
+                let bps_var = ValidatorsVariableValue::from_iter(bps);
+                let next_block_var: BlockVariableValue<{ C::BPS }, L::Field> = next_block.into();
+
                 next_block_var
                     .approvals_after_next
                     .is_active
@@ -171,7 +102,7 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> AsyncHint<L, D>
                     .zip(next_block_var.approvals_after_next.signatures.iter())
                     .enumerate()
                     .for_each(|(i, (x, y))| {
-                        log::debug!(
+                        trace!(
                             "bps({i}): {:?} sig: {:?} active: {:?}",
                             hex::encode(bps_var.inner[i].public_key.0),
                             hex::encode(y.r.0),
@@ -179,71 +110,92 @@ impl<L: PlonkParameters<D>, const D: usize, const N: usize> AsyncHint<L, D>
                         );
                     });
 
-                output_stream.write_value::<HeaderVariable>(header_var);
-                // TODO: fix the bounding issue here
-                output_stream.write_value::<Validators<N>>(bps_var);
-                output_stream.write_value::<BlockVariable<N>>(next_block_var);
+                output_stream.write_value::<HeaderVariable>(trusted_header.into());
+                output_stream.write_value::<Validators<{ C::BPS }>>(bps_var);
+                output_stream.write_value::<BlockVariable<{ C::BPS }>>(next_block_var);
+            }
+            1 => {
+                let trusted_header_hash = input_stream.read_value::<CryptoHashVariable>().0;
+
+                let trusted_header = client
+                    .fetch_header(&CryptoHash(trusted_header_hash))
+                    .await
+                    .expect("Failed to fetch header");
+                debug!("Fetched header: {:#?}", trusted_header);
+                output_stream.write_value::<HeaderVariable>(trusted_header.into());
             }
             _ => panic!("Invalid marker"),
         }
     }
 }
 
-impl<L: PlonkParameters<D>, const D: usize, const N: usize> InputFetcher<L, D, N> {
-    pub fn fetch(&self, b: &mut CircuitBuilder<L, D>, args: &Fetch) -> Inputs<N> {
-        let mut input_stream = VariableStream::new();
-        match args {
-            Fetch::Sync {
-                untrusted_header_hash,
-            } => {
-                input_stream.write::<Variable>(&b.constant(L::Field::from_canonical_u64(0)));
-                input_stream.write::<CryptoHashVariable>(untrusted_header_hash);
-            }
-        }
-        let output_stream = b.async_hint(input_stream, self.clone());
-
-        match args {
-            Fetch::Sync { .. } => {
-                let header = output_stream.read::<HeaderVariable>(b);
-                let bps = output_stream.read::<Validators<N>>(b);
-                let next_block = output_stream.read::<BlockVariable<N>>(b);
-                Inputs::Sync {
-                    header,
-                    bps,
-                    next_block,
-                }
-            }
-        }
-    }
-    pub fn fetch_sync_inputs(
+impl<C: Config> InputFetcher<C>
+where
+    [(); C::BPS]:,
+{
+    pub fn fetch_sync<L: PlonkParameters<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<L, D>,
-        untrusted_header_hash: &CryptoHashVariable,
-    ) -> (HeaderVariable, Validators<N>, BlockVariable<N>) {
-        let fetch_header = FetchHeaderInputs(self.0 .0.into());
-        let fetch_next_header = FetchNextHeaderInputs(self.0 .0.into());
+        trusted_header_hash: &CryptoHashVariable,
+    ) -> (
+        HeaderVariable,
+        Validators<{ C::BPS }>,
+        BlockVariable<{ C::BPS }>,
+    ) {
+        b.watch(trusted_header_hash, "fetch_sync: trusted_header_hash");
 
-        let header = fetch_header.fetch(b, &untrusted_header_hash);
-        let bps = fetch_next_header
-            .fetch(b, &header.inner_lite.next_epoch_id)
-            .unwrap()
-            .next_bps;
+        let mut input_stream = VariableStream::new();
+        input_stream.write::<Variable>(&b.constant(L::Field::from_canonical_u64(0)));
+        input_stream.write::<CryptoHashVariable>(trusted_header_hash);
 
-        let next_block = fetch_next_header
-            .fetch(b, &untrusted_header_hash)
-            .expect("Failed to fetch next block");
+        let output_stream = b.async_hint(input_stream, self.clone());
 
+        let untrusted_header = output_stream.read::<HeaderVariable>(b);
+        let untrusted_header_hash = untrusted_header.hash(b);
+        b.watch(&untrusted_header_hash, "fetch_sync: untrusted_header_hash");
+        b.assert_is_equal(untrusted_header_hash, *trusted_header_hash);
+        let header = untrusted_header;
+
+        let bps = output_stream.read::<Validators<{ C::BPS }>>(b);
+        let bps_hash = HashBpsInputs::<{ C::BPS }>.hash(b, &bps);
+        b.watch(
+            &header.inner_lite.next_bp_hash,
+            "fetch_sync: header.next_bp_hash",
+        );
+        b.watch(&bps_hash, "fetch_sync: calculate_bps_hash");
+        b.assert_is_equal(header.inner_lite.next_bp_hash, bps_hash);
+
+        let next_block = output_stream.read::<BlockVariable<{ C::BPS }>>(b);
         (header, bps, next_block)
+    }
+
+    pub fn fetch_verify<L: PlonkParameters<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<L, D>,
+        trusted_header_hash: &CryptoHashVariable,
+    ) -> HeaderVariable {
+        let mut input_stream = VariableStream::new();
+        input_stream.write::<Variable>(&b.constant(L::Field::from_canonical_u64(1)));
+        input_stream.write::<CryptoHashVariable>(trusted_header_hash);
+        let output_stream = b.async_hint(input_stream, self.clone());
+
+        let untrusted_header = output_stream.read::<HeaderVariable>(b);
+        let untrusted_header_hash = untrusted_header.hash(b);
+        b.watch(&untrusted_header_hash, "untrusted_header_hash");
+        // Build trust in the header by hashing, ensuring equality
+        b.assert_is_equal(untrusted_header_hash, untrusted_header_hash);
+        let header = untrusted_header;
+        header
     }
 }
 
 // TODO: refactor into some client-like carrier for all hints that is serdeable
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct FetchProofInputs<const B: usize>(pub Network);
+pub struct FetchProofInputs<const N: usize>(pub Network);
 
 #[async_trait]
-impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
-    for FetchProofInputs<B>
+impl<L: PlonkParameters<D>, const D: usize, const N: usize> AsyncHint<L, D>
+    for FetchProofInputs<N>
 {
     async fn hint(
         &self,
@@ -255,7 +207,7 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
         let last_verified = input_stream.read_value::<CryptoHashVariable>().0;
 
         let mut reqs = vec![];
-        for _ in 0..B {
+        for _ in 0..N {
             let tx = input_stream.read_value::<TransactionOrReceiptIdVariable>();
             reqs.push(if tx.is_transaction {
                 GetProof::Transaction {
@@ -287,7 +239,7 @@ impl<L: PlonkParameters<D>, const D: usize, const B: usize> AsyncHint<L, D>
             .collect::<HashMap<CryptoHash, Proof>>();
         debug!("Fetched {} proofs", proofs.len());
 
-        assert_eq!(proofs.len(), B, "Invalid number of proofs");
+        assert_eq!(proofs.len(), N, "Invalid number of proofs");
 
         for (k, p) in proofs.into_iter() {
             output_stream.write_value::<CryptoHashVariable>(k.0.into());
@@ -334,17 +286,17 @@ pub struct ProofInputVariable {
 
 #[cfg(test)]
 mod tests {
-    use near_light_client_protocol::{LightClientBlockLiteView, ValidatorStake};
-    use near_light_client_rpc::{
-        prelude::Itertools, LightClientBlockView, Network, ValidatorStakeView,
-    };
+    use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 
     use super::*;
     use crate::{
-        builder::{Ensure, Sync},
+        config::{self, FixturesConfig},
         test_utils::{builder_suite, test_state, testnet_state, B, PI, PO},
-        variables::{BlockVariableValue, BpsApprovals, HeaderVariable},
+        variables::{BlockVariableValue, HeaderVariable, ValidatorsVariable},
     };
+
+    type Testnet = FixturesConfig<config::Testnet>;
+    type Mainnet = FixturesConfig<config::Mainnet>;
 
     #[test]
     fn test_fetch_header() {
@@ -353,15 +305,19 @@ mod tests {
 
         let define = |b: &mut B| {
             let header = b.read::<HeaderVariable>();
-            let hash = header.hash(b);
-            let next_block = FetchNextHeaderInputs(Network::Mainnet).fetch(b, &hash);
-            b.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.unwrap());
+            let trusted_header_hash = header.hash(b);
+
+            let (header, bps, next_block) =
+                InputFetcher::<Testnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
+            b.write::<BlockVariable<{ Testnet::BPS }>>(next_block);
 
             let header = b.read::<HeaderVariable>();
-            let hash = header.hash(b);
-            let next_block = FetchNextHeaderInputs(Network::Testnet).fetch(b, &hash);
-            b.write::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>(next_block.unwrap());
+            let trusted_header_hash = header.hash(b);
+            let (header, bps, next_block) =
+                InputFetcher::<Mainnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
+            b.write::<BlockVariable<{ Mainnet::BPS }>>(next_block);
         };
+
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(main_h.into());
             input.write::<HeaderVariable>(test_h.into());
@@ -379,64 +335,40 @@ mod tests {
     }
 
     #[test]
-    fn test_problem_header() {
-        let problem_hash =
-            bytes32!("0xeff7dccf304315aa520ad7e704062a8b8deadc5c0906e7e16d7305067a72a57e");
-        //let problem_hash = testnet_state().0.hash().0;
-        const AMT: usize = 50;
-        let fetcher = InputFetcher::<DefaultParameters, 2, AMT>(Default::default());
+    fn test_fetch_corner_cases() {
+        let corner_cases = [
+            // This is the current investigated one
+            bytes32!("0x84ebac64b1fd5809ac2c19193100c7e346b765b98a6e3f6de3e40b7d12d3425e"),
+        ];
+        let fetcher = InputFetcher::<Testnet>(Default::default());
 
         let define = |b: &mut B| {
-            let trusted_header_hash = b.read::<CryptoHashVariable>();
+            for _ in corner_cases {
+                let h = b.read::<CryptoHashVariable>();
 
-            let Inputs::Sync {
-                header,
-                bps,
-                next_block,
-            } = fetcher.fetch(
-                b,
-                &Fetch::Sync {
-                    untrusted_header_hash: trusted_header_hash,
-                },
-            );
+                let (header, bps, next_block) = fetcher.fetch_sync(b, &h);
 
-            // TODO: validate
-            b.write::<HeaderVariable>(header.clone());
-            b.write::<ValidatorsVariable<AMT>>(bps.clone());
-            b.write::<BlockVariable<AMT>>(next_block.clone());
+                b.write::<HeaderVariable>(header.clone());
+                b.write::<ValidatorsVariable<_>>(bps.clone());
+                b.write::<BlockVariable<_>>(next_block.clone());
 
-            let approval = b.reconstruct_approval_message(&next_block);
-            b.validate_signatures(&next_block.approvals_after_next, &bps, approval);
+                // let approval = b.reconstruct_approval_message(&next_block);
+                // b.validate_signatures(&next_block.approvals_after_next, &bps,
+                // approval);
+            }
         };
         let writer = |input: &mut PI| {
-            input.write::<CryptoHashVariable>(problem_hash.into());
+            for hash in corner_cases {
+                input.write::<CryptoHashVariable>(hash.into());
+            }
         };
         let assertions = |mut output: PO| {
-            // let header = output.read::<HeaderVariable>();
-            // let bps = output.read::<BpsArr<ValidatorStakeVariable>>();
-            // let nb = output.read::<BlockVariable>();
+            for hash in corner_cases {
+                let header = output.read::<HeaderVariable>();
+                let bps = output.read::<ValidatorsVariable<{ Testnet::BPS }>>();
+                let nb = output.read::<BlockVariable<{ Testnet::BPS }>>();
+            }
         };
         builder_suite(define, writer, assertions);
-
-        // TODO: everything doing anything sync wise should also verify with the
-        // data in the base protocol, if possible
-        // let head = serde_json::from_str::<LightClientBlockLiteView>(
-        //     std::fs::read_to_string("header.json").unwrap().as_str(),
-        // )
-        // .unwrap();
-        // let epoch_bps: Vec<ValidatorStake> =
-        // serde_json::from_str::<Vec<ValidatorStakeView>>(
-        //     std::fs::read_to_string("bps.json").unwrap().as_str(),
-        // )
-        // .unwrap()
-        // .into_iter()
-        // .map(ValidatorStakeView::into)
-        // .collect();
-        // let next_block = serde_json::from_str::<LightClientBlockView>(
-        //     std::fs::read_to_string("next_block.json").unwrap().as_str(),
-        // )
-        // .unwrap();
-        // near_light_client_protocol::Protocol::sync(&head, &epoch_bps,
-        // next_block).unwrap();
     }
 }
