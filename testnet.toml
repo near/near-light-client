@@ -3,7 +3,7 @@ host       = "0.0.0.0:3030"
 state_path = "state.db"
 
 [protocol]
-starting_head = "EfFrYtjeTtpqmFkD3xdB2UJHtfr4dhxQkp6fFHtg6Yav"
+genesis = "6pD4xDH3kRSyBdEacErHF7WTeJ2fUXmzU8zXHHTrCnHY"
 
 [rpc]
 network = "Testnet"

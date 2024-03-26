@@ -315,7 +315,7 @@ impl Client {
     /// Wait for the proof to be submitted to the explorer so we can track them
     /// by their proof id
     pub async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut attempts = 0;
         loop {
             let proofs = self.fetch_proofs().await?;

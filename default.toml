@@ -1,8 +1,14 @@
-state_path    = "state.db"
-catchup       = false
+catchup    = false
+state_path = "state.db"
 
 [rpc]
-network       = "Testnet"
+network = "Testnet"
 
 [protocol]
-genesis = "4zwZQzjQDpimeLK3tX39nzok6UjDU9edS57EFhkAa4Sk"
+genesis = "6pD4xDH3kRSyBdEacErHF7WTeJ2fUXmzU8zXHHTrCnHY"
+
+[succinct]
+api_key          = ""
+contract_address = "0x0000000000000000000000000000000000000000"
+eth_rpc_url      = "https://gateway.tenderly.co/public/sepolia"
+version          = "latest"

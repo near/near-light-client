@@ -97,9 +97,10 @@ pub struct ProofEdges {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProofStatus {
+    Pending,
+    Running,
     Success,
     Failure,
-    Running,
     Requested,
 }
 

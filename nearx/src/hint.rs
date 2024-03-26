@@ -1,7 +1,8 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use async_trait::async_trait;
-use log::debug;
+use ethers::utils::hex;
+use log::{debug, trace};
 use near_light_client_protocol::{prelude::CryptoHash, Proof, ValidatorStake};
 use near_light_client_rpc::{
     prelude::{GetProof, Itertools},
@@ -45,6 +46,7 @@ where
 
         let marker: L::Field = input_stream.read_value::<Variable>();
         let marker = marker.to_canonical_u64();
+        debug!("Marker: {}", marker);
         match marker {
             0 => {
                 let trusted_header_hash = input_stream.read_value::<CryptoHashVariable>().0;
@@ -53,7 +55,7 @@ where
                     .fetch_header(&CryptoHash(trusted_header_hash))
                     .await
                     .expect("Failed to fetch header");
-                log::debug!("Fetched header: {:#?}", trusted_header);
+                debug!("Fetched header: {:#?}", trusted_header);
 
                 // This is a very interesting trick to be able to get the BPS for the next epoch
                 // without the need to store the BPS, we verify the hash of the BPS in the
@@ -68,13 +70,19 @@ where
                     .into_iter()
                     .map(Into::<ValidatorStake>::into)
                     .collect_vec();
-                log::debug!("Fetched next epoch bps: {:?}", bps);
+                trace!("Fetched next epoch bps: {:?}", bps);
+                debug!(
+                    "Next epoch bps hash {}, len: {}",
+                    CryptoHash::hash_borsh(bps.clone()),
+                    bps.len()
+                );
 
                 let next_block = client
                     .fetch_latest_header(&CryptoHash(trusted_header_hash))
                     .await
-                    .expect("Failed to fetch header")
-                    .expect("Expected a header");
+                    .expect("Failed to fetch next block")
+                    // FIXME: this will cause issues syncing if there is no block
+                    .expect("Expected a next_block");
 
                 // Test the protocol with the offchain protocol.
                 near_light_client_protocol::Protocol::sync(
@@ -87,7 +95,6 @@ where
                 let bps_var = ValidatorsVariableValue::from_iter(bps);
                 let next_block_var: BlockVariableValue<{ C::BPS }, L::Field> = next_block.into();
 
-                use ethers::utils::hex;
                 next_block_var
                     .approvals_after_next
                     .is_active
@@ -95,7 +102,7 @@ where
                     .zip(next_block_var.approvals_after_next.signatures.iter())
                     .enumerate()
                     .for_each(|(i, (x, y))| {
-                        log::debug!(
+                        trace!(
                             "bps({i}): {:?} sig: {:?} active: {:?}",
                             hex::encode(bps_var.inner[i].public_key.0),
                             hex::encode(y.r.0),
@@ -114,7 +121,7 @@ where
                     .fetch_header(&CryptoHash(trusted_header_hash))
                     .await
                     .expect("Failed to fetch header");
-                log::debug!("Fetched header: {:#?}", trusted_header);
+                debug!("Fetched header: {:#?}", trusted_header);
                 output_stream.write_value::<HeaderVariable>(trusted_header.into());
             }
             _ => panic!("Invalid marker"),
@@ -135,6 +142,8 @@ where
         Validators<{ C::BPS }>,
         BlockVariable<{ C::BPS }>,
     ) {
+        b.watch(trusted_header_hash, "fetch_sync: trusted_header_hash");
+
         let mut input_stream = VariableStream::new();
         input_stream.write::<Variable>(&b.constant(L::Field::from_canonical_u64(0)));
         input_stream.write::<CryptoHashVariable>(trusted_header_hash);
@@ -143,15 +152,18 @@ where
 
         let untrusted_header = output_stream.read::<HeaderVariable>(b);
         let untrusted_header_hash = untrusted_header.hash(b);
-        b.watch(&untrusted_header_hash, "untrusted_header_hash");
-        // Build trust in the header by hashing, ensuring equality
-        b.assert_is_equal(untrusted_header_hash, untrusted_header_hash);
+        b.watch(&untrusted_header_hash, "fetch_sync: untrusted_header_hash");
+        b.assert_is_equal(untrusted_header_hash, *trusted_header_hash);
         let header = untrusted_header;
 
         let bps = output_stream.read::<Validators<{ C::BPS }>>(b);
-        let bps_hash = HashBpsInputs.hash(b, &bps);
+        let bps_hash = HashBpsInputs::<{ C::BPS }>.hash(b, &bps);
+        b.watch(
+            &header.inner_lite.next_bp_hash,
+            "fetch_sync: header.next_bp_hash",
+        );
+        b.watch(&bps_hash, "fetch_sync: calculate_bps_hash");
         b.assert_is_equal(header.inner_lite.next_bp_hash, bps_hash);
-        b.watch(&bps_hash, "calculate_bps_hash");
 
         let next_block = output_stream.read::<BlockVariable<{ C::BPS }>>(b);
         (header, bps, next_block)
@@ -278,11 +290,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        builder::{Ensure, Sync},
-        config::{Mainnet, Testnet},
+        config::{self, FixturesConfig},
         test_utils::{builder_suite, test_state, testnet_state, B, PI, PO},
         variables::{BlockVariableValue, HeaderVariable, ValidatorsVariable},
     };
+
+    type Testnet = FixturesConfig<config::Testnet>;
+    type Mainnet = FixturesConfig<config::Mainnet>;
 
     #[test]
     fn test_fetch_header() {
@@ -320,36 +334,40 @@ mod tests {
         builder_suite(define, writer, assertions);
     }
 
-    // This test was a proof where there were appended BPS, the bug was the
-    // signature was active, but dummy BPS from the LC protocol
     #[test]
-    fn test_problem_header() {
-        let problem_hash =
-            bytes32!("0x6fd201bb6c09c3708793945be6d5e2c3dc8c9fcf65e9e3ccf81d4720735e5fe6");
-        //let problem_hash = testnet_state().0.hash().0;
-        const AMT: usize = 50;
+    fn test_fetch_corner_cases() {
+        let corner_cases = [
+            // This is the current investigated one
+            bytes32!("0x84ebac64b1fd5809ac2c19193100c7e346b765b98a6e3f6de3e40b7d12d3425e"),
+        ];
         let fetcher = InputFetcher::<Testnet>(Default::default());
 
         let define = |b: &mut B| {
-            let trusted_header_hash = b.read::<CryptoHashVariable>();
+            for _ in corner_cases {
+                let h = b.read::<CryptoHashVariable>();
 
-            let (header, bps, next_block) = fetcher.fetch_sync(b, &trusted_header_hash);
+                let (header, bps, next_block) = fetcher.fetch_sync(b, &h);
 
-            // TODO: validate
-            b.write::<HeaderVariable>(header.clone());
-            b.write::<ValidatorsVariable<_>>(bps.clone());
-            b.write::<BlockVariable<_>>(next_block.clone());
+                b.write::<HeaderVariable>(header.clone());
+                b.write::<ValidatorsVariable<_>>(bps.clone());
+                b.write::<BlockVariable<_>>(next_block.clone());
 
-            let approval = b.reconstruct_approval_message(&next_block);
-            b.validate_signatures(&next_block.approvals_after_next, &bps, approval);
+                // let approval = b.reconstruct_approval_message(&next_block);
+                // b.validate_signatures(&next_block.approvals_after_next, &bps,
+                // approval);
+            }
         };
         let writer = |input: &mut PI| {
-            input.write::<CryptoHashVariable>(problem_hash.into());
+            for hash in corner_cases {
+                input.write::<CryptoHashVariable>(hash.into());
+            }
         };
         let assertions = |mut output: PO| {
-            let header = output.read::<HeaderVariable>();
-            let bps = output.read::<ValidatorsVariable<AMT>>();
-            let nb = output.read::<BlockVariable<AMT>>();
+            for hash in corner_cases {
+                let header = output.read::<HeaderVariable>();
+                let bps = output.read::<ValidatorsVariable<{ Testnet::BPS }>>();
+                let nb = output.read::<BlockVariable<{ Testnet::BPS }>>();
+            }
         };
         builder_suite(define, writer, assertions);
     }

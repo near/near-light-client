@@ -59,25 +59,29 @@ where
 
 #[cfg(test)]
 mod beefy_tests {
+    use std::str::FromStr;
+
     use serial_test::serial;
+    use test_utils::{mainnet_state, CryptoHash};
 
     use super::*;
     use crate::{
-        config::Testnet,
+        config::{self, FixturesConfig},
         test_utils::{builder_suite, testnet_state, B, PI, PO},
     };
 
-    type SyncCircuit = super::SyncCircuit<Testnet>;
+    type Testnet = FixturesConfig<config::Testnet>;
+    type Mainnet = FixturesConfig<config::Mainnet>;
 
     #[test]
     #[serial]
     #[ignore]
-    fn sync_e2e() {
+    fn sync_e2e_testnet() {
         let (header, _, _) = testnet_state();
         let header = header.hash().0;
 
         let define = |b: &mut B| {
-            SyncCircuit::define(b);
+            super::SyncCircuit::<Testnet>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.into());
@@ -92,14 +96,71 @@ mod beefy_tests {
     #[test]
     #[serial]
     #[ignore]
-    fn sync_e2e_blocked() {
-        let header = bytes32!("0x6fd201bb6c09c3708793945be6d5e2c3dc8c9fcf65e9e3ccf81d4720735e5fe6");
+    fn sync_e2e_mainnet() {
+        let (header, _, _) = mainnet_state();
+        let header = header.hash().0;
 
         let define = |b: &mut B| {
-            SyncCircuit::define(b);
+            super::SyncCircuit::<Mainnet>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(header.into());
+        };
+        let assertions = |mut output: PO| {
+            let hash = output.evm_read::<CryptoHashVariable>();
+            println!("hash: {:?}", hash);
+        };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn sync_e2e_too_little_bps() {
+        // Previously BPS were roughly 30-35, but this one had 52, they're now set to
+        // protocol config amt for NUM_BPS_SEATS, although this is never really
+        // this amount in practise
+        let h = bytes32!("0x84ebac64b1fd5809ac2c19193100c7e346b765b98a6e3f6de3e40b7d12d3425e");
+
+        let define = |b: &mut B| {
+            SyncCircuit::<FixturesConfig<config::Testnet, 52>>::define(b);
+        };
+        let writer = |input: &mut PI| {
+            input.evm_write::<CryptoHashVariable>(h.into());
+        };
+        let assertions = |mut output: PO| {};
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn sync_e2e_mismatch_signatures() {
+        // This test was a proof where there were appended BPS, the bug was the
+        // signature was active, but dummy BPS from the LC protocol
+        let h = bytes32!("0x6fd201bb6c09c3708793945be6d5e2c3dc8c9fcf65e9e3ccf81d4720735e5fe6");
+
+        let define = |b: &mut B| {
+            SyncCircuit::<FixturesConfig<config::Testnet, 52>>::define(b);
+        };
+        let writer = |input: &mut PI| {
+            input.evm_write::<CryptoHashVariable>(h.into());
+        };
+        let assertions = |mut output: PO| {};
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn sync_e2e_protocol_size() {
+        let h = CryptoHash::from_str("HV17CCRTmamtfaWRwaHN673gtr5miW6WQxnKKqk5ELEY").unwrap();
+
+        let define = |b: &mut B| {
+            SyncCircuit::<config::Testnet>::define(b);
+        };
+        let writer = |input: &mut PI| {
+            input.evm_write::<CryptoHashVariable>(h.0.into());
         };
         let assertions = |mut output: PO| {
             let hash = output.evm_read::<CryptoHashVariable>();

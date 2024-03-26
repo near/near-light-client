@@ -5,13 +5,14 @@ use std::{
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
+use near_jsonrpc_client::methods::EXPERIMENTAL_protocol_config::RpcProtocolConfigResponse;
 pub use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
 pub use near_primitives::{
     block_header::BlockHeader,
-    types::TransactionOrReceiptId,
+    types::{BlockId, BlockReference, TransactionOrReceiptId},
     views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 
@@ -139,6 +140,10 @@ pub trait LightClientRpc {
     ) -> Result<RpcLightClientExecutionProofResponse>;
     async fn fetch_epoch_bps(&self, epoch_id: &CryptoHash) -> Result<Vec<ValidatorStakeView>>;
     async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header>;
+    async fn fetch_protocol_config(
+        &self,
+        block_id: &BlockReference,
+    ) -> Result<RpcProtocolConfigResponse>;
 }
 
 #[async_trait]
@@ -220,6 +225,23 @@ impl LightClientRpc for NearRpcClient {
             })
             .map_err(|e| anyhow::format_err!("{:?}:{}", epoch_id, e))
     }
+
+    async fn fetch_protocol_config(
+        &self,
+        block_reference: &BlockReference,
+    ) -> Result<RpcProtocolConfigResponse> {
+        let req = methods::EXPERIMENTAL_protocol_config::RpcProtocolConfigRequest {
+            block_reference: block_reference.clone(),
+        };
+        self.client
+            .call(&req)
+            .or_else(|e| {
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
+                self.archive.call(&req)
+            })
+            .await
+            .map_err(|e| anyhow::format_err!("{:?}", e))
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -236,6 +258,7 @@ impl From<Network> for Config {
 mod tests {
     use std::str::FromStr;
 
+    use futures::{stream::FusedStream, AsyncReadExt, StreamExt};
     use near_primitives::{
         types::{BlockId, BlockReference, TransactionOrReceiptId},
         views::{BlockView, ChunkView},

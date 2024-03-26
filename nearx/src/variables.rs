@@ -583,9 +583,9 @@ impl<L: PlonkParameters<D>, const D: usize, const A: usize> Hint<L, D> for HashB
             .filter(|x| x.account_id != default_validator.account_id)
             .map(Into::<ValidatorStakeView>::into)
             .collect_vec();
-        trace!("Bps to hash: {:#?}", bps);
+        debug!("bps to hash: {:#?}", bps);
         let hash = CryptoHash::hash_borsh(bps);
-        debug!("Bps hash: {:#?}", hash);
+        debug!("bps hash: {:#?}", hash);
 
         // TODO: figure out how to hash this in circuit
         // It's non trivial because the account id is padded to the max len
