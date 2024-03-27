@@ -55,8 +55,6 @@ where
                     .global(),
             );
 
-        println!("figment: {figment:#?}");
-
         figment.extract()
     }
 

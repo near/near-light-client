@@ -1,0 +1,44 @@
+meta {
+  name: Pull Verifying Key
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{succinctBaseUrl}}/release/{{releaseId}}/download/FunctionVerifier.sol
+  body: text
+  auth: none
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  content-type: text/plain;charset=UTF-8
+}
+
+vars:pre-request {
+  releaseId: 	c2829278-6849-4487-ba5f-96ce503837d5
+}
+
+assert {
+  res.status: eq 200
+}
+
+script:pre-request {
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  let releaseId = bru.getEnvVar(`${entrypoint}_RELEASE_ID_NEW`)
+  if (releaseId != null && entrypoint != null) {
+    bru.setVar("releaseId", releaseId)
+  }
+}

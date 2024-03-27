@@ -11,7 +11,12 @@ pub async fn main() -> anyhow::Result<()> {
         .add_directive("reqwest=info".parse()?);
 
     tracing_subscriber::registry()
-        .with(fmt::layer().compact().with_line_number(true))
+        .with(
+            fmt::layer()
+                .compact()
+                .with_line_number(true)
+                .with_file(false),
+        )
         .with(filter)
         .init();
 

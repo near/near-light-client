@@ -1,0 +1,56 @@
+meta {
+  name: Update name
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{succinctBaseUrl}}/release/{{releaseNum}}/name
+  body: json
+  auth: none
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  content-type: application/json
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/17
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppMozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  cookie: session={{succinctSession}}
+}
+
+body:json {
+  {"name":"{{version}}"}
+}
+
+vars:pre-request {
+  releaseNum: noop
+  version: dev
+}
+
+assert {
+  res.body.status: eq success
+  res.status: eq 200
+}
+
+script:pre-request {
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  let releaseNum = bru.getEnvVar(`${entrypoint}_RELEASE_ID`)
+  if (releaseNum != null && entrypoint != null) {
+    bru.setVar("releaseNum", releaseNum)
+  }
+  
+  let version = bru.getProcessEnv("VERSION")
+  if (version != null) {
+    bru.setVar("version", version)
+  }
+}

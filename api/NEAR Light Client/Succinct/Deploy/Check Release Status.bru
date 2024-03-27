@@ -1,0 +1,54 @@
+meta {
+  name: Check Release Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{succinctBaseUrl}}/projects/near/near-light-client/releases/{{release}}
+  body: text
+  auth: none
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  content-type: text/plain;charset=UTF-8
+}
+
+vars:pre-request {
+  release: 13
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq "success"
+}
+
+script:pre-request {
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  let release = bru.getEnvVar(`${entrypoint}_RELEASE_NUM_NEW`)
+  if (release != null && entrypoint != null) {
+    bru.setVar("release", release)
+  }
+}
+
+script:post-response {
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  if (res.body.status == "success") {
+    bru.setEnvVar(`${entrypoint}_RELEASE_ID_OLD`, bru.getEnvVar(`${entrypoint}_RELEASE_ID`))
+    bru.setEnvVar(`${entrypoint}_RELEASE_NUM`, bru.getEnvVar(`${entrypoint}_RELEASE_NUM_NEW`))
+    bru.setEnvVar(`${entrypoint}_RELEASE_ID`,  bru.getEnvVar(`${entrypoint}_RELEASE_ID_NEW`))
+  }
+}

@@ -1,0 +1,65 @@
+meta {
+  name: Deployment new test
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{succinctBaseUrl}}/deployment/new
+  body: json
+  auth: none
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  content-type: text/plain;charset=UTF-8
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/deployments/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  ~cookie: session=Qa84UBz81dNmH6kV7DTW_de8TtSdeYZExnnngHJoMH8
+}
+
+body:json {
+  {
+    "release_id": "{{release_id}}",
+    "contract_address": "{{contract_address}}",
+    "gateway_address": "{{gateway_address}}",
+    "chain_id": {{chain_id}},
+    "function_id": "0x{{function_id}}",
+    "salt": "0x{{salt}}",
+    "tx_hash": "0x{{tx_hash}}"
+  }
+}
+
+body:text {
+  {"release_id":"870e6490-2a30-4703-9958-646f3945da9c","contract_address":"0x395C22aEC73F7960245afBf6eDD77E086bf908C5","gateway_address":"0x6c7a05e0AE641c6559fD76ac56641778B6eCd776","chain_id":421614,"function_id":"0xf7dc8cfca607134de24309d606b91a4c071b7f6b2a7cf8535da65cef25db520f","salt":"0xd4f4fed64865db8ba82177c0c4528a9eb7ec47ec4fb0ddaf8d56dd7b79537597","tx_hash":"0x5ff9a3899f4716dbe63d21f2dfd1c13ece08ac9751f6509761ca1a510719c2b2"}
+}
+
+vars:pre-request {
+  salt: d4f4fed64865db8ba82177c0c4528a9eb7ec47ec4fb0ddaf8d56dd7b79537597
+  chain_id: 421614
+  function_id: 
+  tx_hash: 
+}
+
+script:pre-request {
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  let release = bru.getEnvVar(`${entrypoint}_RELEASE_ID`)
+  let functionId = bru.getEnvVar(`${entrypoint}_FUNCTION_ID`)
+  let chainId = bru.getProcessEnv("CHAIN_ID")
+  let salt = bru.getEnvVar(`${entrypoint}_SALT`)
+  let txHash = bru.getEnvVar(`${entrypoint}_TX_HASH`)
+  
+  if (release != null && entrypoint != null) {
+     bru.setVar("release_id", release)
+   }
+}
