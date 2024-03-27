@@ -1,5 +1,5 @@
 meta {
-  name: New Entrypoint
+  name: new-deployment
   type: http
   seq: 1
 }
@@ -7,7 +7,6 @@ meta {
 post {
   url: {{succinctBaseUrl}}/release/new
   body: text
-  auth: bearer
 }
 
 headers {
@@ -24,12 +23,12 @@ headers {
   sec-fetch-site: same-origin
   sec-gpc: 1
   user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
-  cookie: session={{succinctSession}}
   content-type: text/plain;charset=UTF-8
+  cookie: session={{succinctSession}}
 }
 
 auth:bearer {
-  token: {{succinctAuthToken}}
+  token: {{succinctApiKey}}
 }
 
 body:text {
@@ -47,6 +46,10 @@ vars:pre-request {
   entrypoint: fake
 }
 
+assert {
+  res.status: eq 200
+}
+
 script:pre-request {
   let gitRef = bru.getProcessEnv("GIT_REF")
   if (gitRef != null) {
@@ -56,16 +59,11 @@ script:pre-request {
   if (entrypoint != null) {
     bru.setVar("entrypoint", entrypoint)
   }
+  bru.setVar("succinctSession", bru.getProcessEnv("SUCCINCT_SESSION"))
+  bru.setVar("succinctApiKey", bru.getProcessEnv("SUCCINCT_API_KEY"))
 }
 
 script:post-response {
-  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
-  bru.setEnvVar(`${entrypoint}_RELEASE_ID_NEW`, res.body.release_id)
-  bru.setEnvVar(`${entrypoint}_RELEASE_NUM_NEW`, res.body.release_number)
-  bru.setVar(`${entrypoint}_RELEASE_ID_NEW`, res.body.release_id)
-  bru.setVar(`${entrypoint}_RELEASE_NUM_NEW`, res.body.release_number)
-}
-
-assert {
-  res.status: eq 200
+  bru.setVar(`CHECK_RELEASE_ID`, res.body.release_id)
+  bru.setVar(`CHECK_RELEASE_NUM`, res.body.release_number)
 }

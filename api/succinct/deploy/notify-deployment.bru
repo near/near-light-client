@@ -1,0 +1,93 @@
+meta {
+  name: notify-deployment 
+  type: http
+  seq: 50 
+}
+
+post {
+  url: {{succinctBaseUrl}}/deployment/new
+  body: text 
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  content-type: text/plain;charset=UTF-8
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/deployments/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  cookie: session=Qa84UBz81dNmH6kV7DTW_de8TtSdeYZExnnngHJoMH8
+}
+
+body:text {
+  {
+    "release_id": "{{release}}",
+    "contract_address": "{{contract}}",
+    "gateway_address": "{{gateway}}",
+    "chain_id": {{chain_id}},
+    "function_id": "{{function_id}}",
+    "salt": "{{salt}}",
+    "tx_hash": {{tx_hash}}
+  }
+}
+
+
+vars:pre-request {
+  salt: d4f4fed64865db8ba82177c0c4528a9eb7ec47ec4fb0ddaf8d56dd7b79537597
+  chain_id: 421614
+  function_id: 
+  tx_hash: 
+}
+
+script:pre-request {
+  let release = bru.getEnvVar(`RELEASE_ID`)
+  console.log(`release: ${release}`)
+  if (release != null) {
+    bru.setVar("release", release)
+  }
+
+  let contract = bru.getEnvVar(`VERIFIER_ADDRESS`)
+  console.log(`contract: ${contract}`)
+  if (contract != null) {
+    bru.setVar("contract", contract)
+  }
+
+  let gateway = bru.getProcessEnv(`SUCCINCT_GATEWAY_ID`)
+  console.log(`gateway: ${gateway}`)
+  if (gateway != null) {
+    bru.setVar("gateway", gateway)
+  }
+
+  let chain = bru.getProcessEnv(`CHAIN_ID`)
+  console.log(`chain: ${chain}`)
+  if (chain != null) {
+    bru.setVar("chain", chain)
+  }
+
+  let function_id = bru.getEnvVar(`FUNCTION_ID`)
+  console.log(`function_id: ${function_id}`)
+  if (function_id != null) {
+    bru.setVar("function_id", function_id)
+  }
+
+  let salt = bru.getEnvVar(`CREATE2_SALT`)
+  console.log(`salt: ${salt}`)
+  if (salt != null) {
+    bru.setVar("salt", salt)
+  }
+  
+  let tx_hash = bru.getEnvVar(`TX_HASH`)
+  console.log(`tx_hash: ${tx_hash}`)
+  if (tx_hash != null) {
+    bru.setVar("tx_hash", tx_hash)
+  }
+}
+

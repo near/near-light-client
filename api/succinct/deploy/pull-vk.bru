@@ -1,5 +1,5 @@
 meta {
-  name: Pull Verifying Key
+  name: pull-vk
   type: http
   seq: 4
 }
@@ -28,7 +28,7 @@ headers {
 }
 
 vars:pre-request {
-  releaseId: 	c2829278-6849-4487-ba5f-96ce503837d5
+  releaseId: c2829278-6849-4487-ba5f-96ce503837d5
 }
 
 assert {
@@ -36,9 +36,8 @@ assert {
 }
 
 script:pre-request {
-  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
-  let releaseId = bru.getEnvVar(`${entrypoint}_RELEASE_ID_NEW`)
-  if (releaseId != null && entrypoint != null) {
+  let releaseId = bru.getEnvVar("RELASE_ID")
+  if (releaseId != null) {
     bru.setVar("releaseId", releaseId)
   }
 }

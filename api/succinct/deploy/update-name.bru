@@ -1,11 +1,11 @@
 meta {
-  name: Update name
+  name: update-name
   type: http
   seq: 3
 }
 
 patch {
-  url: {{succinctBaseUrl}}/release/{{releaseNum}}/name
+  url: {{succinctBaseUrl}}/release/{{release}}/name
   body: json
   auth: none
 }
@@ -33,8 +33,8 @@ body:json {
 }
 
 vars:pre-request {
-  releaseNum: noop
-  version: dev
+  release: noop
+  version: noop 
 }
 
 assert {
@@ -43,14 +43,16 @@ assert {
 }
 
 script:pre-request {
-  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
-  let releaseNum = bru.getEnvVar(`${entrypoint}_RELEASE_ID`)
-  if (releaseNum != null && entrypoint != null) {
-    bru.setVar("releaseNum", releaseNum)
+  let release = bru.getEnvVar(`RELEASE_ID`)
+  console.log(`release: ${release}`)
+  if (release != null) {
+    bru.setVar("release", release)
   }
   
-  let version = bru.getProcessEnv("VERSION")
+  let version = bru.getEnvVar("VERSION")
+  console.log(`version: ${version}`)
   if (version != null) {
     bru.setVar("version", version)
   }
+  bru.setVar("succinctSession", bru.getProcessEnv("SUCCINCT_SESSION"))
 }

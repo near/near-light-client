@@ -28,6 +28,7 @@
           nativeBuildInputs = with pkgs; [
             bashInteractive
             taplo
+            just
             clang
             cmake
             openssl
@@ -43,7 +44,6 @@
 
             vscode-extensions.vadimcn.vscode-lldb.adapter
             rust-analyzer
-
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })

@@ -1,5 +1,5 @@
 meta {
-  name: Check Release Status
+  name: check-release
   type: http
   seq: 2
 }
@@ -28,7 +28,7 @@ headers {
 }
 
 vars:pre-request {
-  release: 13
+  release: noop 
 }
 
 assert {
@@ -37,9 +37,8 @@ assert {
 }
 
 script:pre-request {
-  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
-  let release = bru.getEnvVar(`${entrypoint}_RELEASE_NUM_NEW`)
-  if (release != null && entrypoint != null) {
+  let release = bru.getProcessEnv(`CHECK_RELEASE_NUM`)
+  if (release != null) {
     bru.setVar("release", release)
   }
 }
@@ -47,8 +46,7 @@ script:pre-request {
 script:post-response {
   let entrypoint = bru.getProcessEnv("ENTRYPOINT")
   if (res.body.status == "success") {
-    bru.setEnvVar(`${entrypoint}_RELEASE_ID_OLD`, bru.getEnvVar(`${entrypoint}_RELEASE_ID`))
-    bru.setEnvVar(`${entrypoint}_RELEASE_NUM`, bru.getEnvVar(`${entrypoint}_RELEASE_NUM_NEW`))
-    bru.setEnvVar(`${entrypoint}_RELEASE_ID`,  bru.getEnvVar(`${entrypoint}_RELEASE_ID_NEW`))
+    bru.setEnvVar(`${entrypoint}_RELEASE_NUM`, bru.getProcessEnv(`CHECK_RELEASE_NUM`))
+    bru.setEnvVar(`${entrypoint}_RELEASE_ID`,  bru.getProcessEnv(`CHECK_RELEASE_ID`))
   }
 }
