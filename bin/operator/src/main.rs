@@ -1,26 +1,31 @@
 use std::sync::Arc;
 
-use log::LevelFilter;
-use nearx_operator::{config::Config, *};
+use nearx_operator::*;
+use tracing::{debug, info};
+use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[actix::main]
 pub async fn main() -> anyhow::Result<()> {
-    pretty_env_logger::formatted_builder()
-        .parse_default_env()
-        .filter_module("hyper", LevelFilter::Info)
-        .filter_module("reqwest", LevelFilter::Info)
+    let filter = EnvFilter::from_default_env()
+        .add_directive("hyper=info".parse()?)
+        .add_directive("reqwest=info".parse()?);
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().compact().with_line_number(true))
+        .with(filter)
         .init();
 
-    let config = Config::new(std::env::var("NEAR_LIGHT_CLIENT_DIR").ok().as_deref())?;
+    let config = config::Config::new(std::env::var("NEAR_LIGHT_CLIENT_DIR").ok().as_deref())?;
 
     let client = Arc::new(SuccinctClient::new(&config).await?);
 
     let engine = Engine::new(&config, client.clone()).start();
 
+    debug!("Running operator with host: {}", config.host);
     let server_handle = RpcServer::new(client, engine.clone()).run(&config).await?;
 
     if tokio::signal::ctrl_c().await.is_ok() {
-        log::info!("Shutting down..");
+        info!("Shutting down..");
         server_handle.abort();
         System::current().stop();
     }

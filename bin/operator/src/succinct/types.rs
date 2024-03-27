@@ -9,6 +9,7 @@ use near_light_clientx::plonky2x::backend::{
     prover::ProofId,
 };
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use uuid::Uuid;
 use NearX::TransactionOrReceiptId;
 
@@ -26,6 +27,7 @@ sol!(
 );
 
 /// The circuits we support in this nearxclient
+#[derive(Debug)]
 pub enum Circuit {
     Sync,
     Verify,
@@ -57,9 +59,9 @@ impl Circuit {
     /// Filter a deployment from the release list
     /// Safety: panics when a deployment cannot be found
     pub fn deployment(&self, releases: &[Deployment]) -> Deployment {
-        log::debug!("finding deployment in {:?}", releases);
+        debug!("finding deployment in {:?}", releases);
         let find = |entrypoint: &str| -> Deployment {
-            log::debug!("finding deployment for {}", entrypoint);
+            debug!("finding deployment for {}", entrypoint);
             releases
                 .iter()
                 .find(|r| r.release_info.release.entrypoint == entrypoint)

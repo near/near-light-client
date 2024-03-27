@@ -1,15 +1,11 @@
 #![allow(dead_code)] // Justification: Until we decide on test feature flags
 use std::str::FromStr;
 
-use near_light_client_rpc::prelude::Itertools;
-use nearx_operator::{
-    config::Config, succinct::*, types::TransactionOrReceiptIdPrimitive, BaseConfig,
-};
-use test_utils::fixture;
+use nearx_operator::{config::Config, succinct::*, BaseConfig};
 use uuid::Uuid;
 
 async fn client() -> Client {
-    pretty_env_logger::try_init().ok();
+    let _ = tracing_subscriber::fmt::try_init();
     Client::new(&Config::test_config()).await.unwrap()
 }
 

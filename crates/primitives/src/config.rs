@@ -1,6 +1,9 @@
 use std::env;
 
-use config::{Config as ConfigTrait, ConfigError, Environment, File};
+use figment::{
+    providers::{Env, Format, Toml},
+    Error as ConfigError, Figment,
+};
 use serde::Deserialize;
 
 pub fn default_host() -> String {
@@ -24,34 +27,55 @@ where
         T::new(None).expect("Failed to load config")
     }
     fn new(path: Option<&str>) -> Result<Self, ConfigError> {
-        let path = path.unwrap_or(".");
+        let path = path.unwrap_or("");
 
         let env_prefix = "NEAR_LIGHT_CLIENT";
 
         let required = env::var(format!("{env_prefix}_CONFIG_FILE"))
-            .unwrap_or_else(|_| format!("{path}/default"));
+            .unwrap_or_else(|_| format!("config.toml"));
         log::debug!("required file: {required}");
 
-        let mode_path = env::var(format!("{env_prefix}_NETWORK"))
-            .map(|s| s.to_lowercase())
-            .unwrap_or_else(|_| format!("{path}/testnet"));
+        let mode = env::var(format!("{env_prefix}_MODE"))
+            .unwrap_or_else(|_| "testnet".into())
+            .to_lowercase();
+
+        let mode_path = format!("{path}{mode}.toml");
         log::debug!("mode file: {mode_path}");
 
-        let local_path = format!("{path}/local");
+        let local_path = format!("{path}local.toml");
         log::debug!("local file: {local_path}");
 
-        let s = ConfigTrait::builder()
-            .add_source(File::with_name(&required).required(true))
-            .add_source(File::with_name(&mode_path).required(false))
-            // This file shouldn't be checked in to git
-            .add_source(File::with_name(&local_path).required(false))
-            .add_source(Environment::with_prefix(env_prefix).try_parsing(true))
-            .build()?;
+        let figment = Figment::new()
+            .select(mode)
+            .merge(Toml::file(&required).nested())
+            .merge(Toml::file(&local_path).nested())
+            .merge(
+                Env::prefixed(&format!("{env_prefix}_"))
+                    .split("__")
+                    .global(),
+            );
 
-        s.try_deserialize()
+        println!("figment: {figment:#?}");
+
+        figment.extract()
     }
 
     fn test_config() -> T {
         Self::new(Some("../../")).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, Clone)]
+    struct StubConfig;
+    impl Configurable for StubConfig {}
+
+    #[test]
+    fn test_default() {
+        std::env::set_var("NEAR_LIGHT_CLIENT_NETWORK", "fakenet");
+        StubConfig::test_config();
     }
 }

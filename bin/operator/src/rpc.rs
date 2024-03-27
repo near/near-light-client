@@ -26,7 +26,7 @@ pub struct RpcServerImpl {
 
 impl RpcServerImpl {
     pub fn new(succinct_client: Arc<succinct::Client>, queue: Addr<Engine>) -> Self {
-        log::info!("starting rpc server");
+        tracing::info!("starting rpc server");
         Self {
             succinct_client,
             queue,
@@ -65,7 +65,7 @@ pub trait ProveRpc {
 impl ProveRpcServer for RpcServerImpl {
     async fn sync(&self) -> Result<ProofId> {
         let pid = self.succinct_client.sync(true).await.map_err(|e| {
-            log::error!("{:?}", e);
+            tracing::error!("{:?}", e);
             ErrorCode::ServerError(500)
         })?;
         Ok(pid)
@@ -73,7 +73,7 @@ impl ProveRpcServer for RpcServerImpl {
 
     async fn verify(&self, ids: Vec<GetProof>) -> Result<ProofId> {
         let pid = self.succinct_client.verify(ids, true).await.map_err(|e| {
-            log::error!("{:?}", e);
+            tracing::error!("{:?}", e);
             ErrorCode::ServerError(500)
         })?;
         Ok(pid)
@@ -85,7 +85,7 @@ impl ProveRpcServer for RpcServerImpl {
                 .send(ProveTransaction { id: None, tx })
                 .await
                 .map_err(|e| {
-                    log::error!("{:?}", e);
+                    tracing::error!("{:?}", e);
                     ErrorCode::ServerError(500)
                 })?
                 .unwrap();

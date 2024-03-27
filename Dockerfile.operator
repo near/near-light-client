@@ -32,8 +32,9 @@ RUN cp target/release/nearx-operator /near/near-light-client
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y openssl libssl-dev pkg-config ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /near/target/release/nearx-operator /usr/local/bin
-COPY --from=build /near/default.toml /var/near-light-client/default.toml
+COPY --from=build /near/config.toml /var/near-light-client/config.toml
 
-ENV NEAR_LIGHT_CLIENT_DIR=/var/near-light-client/
+ENV NEAR_LIGHT_CLIENT_DIR=/var/near-light-client
+ENV NEAR_LIGHT_CLIENT_CONFIG_FILE=/var/near-light-client/config.toml
 
 ENTRYPOINT ["/usr/local/bin/nearx-operator"]

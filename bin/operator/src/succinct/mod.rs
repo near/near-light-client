@@ -28,6 +28,7 @@ use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::Deserialize;
 use succinct_client::{request::SuccinctClient as SuccinctClientExt, utils::get_gateway_address};
+use tracing::{debug, info, trace};
 use types::TransactionOrReceiptIdPrimitive;
 
 use self::types::{Circuit, Deployment, NearX::NearXInstance, NearXClient, ProofResponse};
@@ -96,7 +97,7 @@ pub struct Client {
 
 impl Client {
     pub async fn new(config: &config::Config) -> anyhow::Result<Self> {
-        log::info!("starting succinct client");
+        info!("starting succinct client");
 
         let (contract, chain_id) = Self::init_contract_client(&config.succinct).await?;
 
@@ -130,7 +131,7 @@ impl Client {
     }
 
     async fn init_contract_client(config: &Config) -> anyhow::Result<(NearXClient, u32)> {
-        log::debug!("initializing contract client");
+        debug!("initializing contract client");
 
         let url = Url::from_str(&config.eth_rpc_url).with_context(|| "invalid rpc url")?;
         let inner = Provider::new_http(url);
@@ -139,7 +140,7 @@ impl Client {
             .await
             .with_context(|| "failed to get chain id")?;
         let contract = NearXInstance::new(config.contract_address, inner.into());
-        log::debug!("chain id: {}", chain_id);
+        debug!("chain id: {}", chain_id);
 
         Ok((contract, chain_id.to()))
     }
@@ -168,8 +169,9 @@ impl Client {
         Ok(client)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn fetch_releases(&self, chain_id: &u32) -> anyhow::Result<Vec<Deployment>> {
-        log::debug!(
+        debug!(
             "filtering releases for {chain_id} and version {}",
             self.config.version
         );
@@ -178,7 +180,7 @@ impl Client {
             chain_id,
             &self.config.version,
         ))
-        .inspect(|r| log::trace!("releases: {:?}", r))
+        .inspect(|r| trace!("releases: {:?}", r))
     }
 
     fn extract_release_details(
@@ -198,7 +200,7 @@ impl Client {
                         d
                     })
                 } else {
-                    log::debug!("matched deployment: {:#?}", d);
+                    debug!("matched deployment: {:#?}", d);
                     Some(d)
                 }
             })
@@ -210,7 +212,7 @@ impl Client {
         release_id: &str,
         data: BytesRequestData,
     ) -> ProofRequest<DefaultParameters, 2> {
-        log::trace!(
+        trace!(
             "building proof request for {:?} with data {:?}",
             release_id,
             hex!(&data.input)
@@ -224,7 +226,7 @@ impl Client {
     }
 
     fn build_sync_request(&self, trusted_header_hash: CryptoHash) -> BytesRequestData {
-        log::debug!("building sync request for {:?}", trusted_header_hash);
+        debug!("building sync request for {:?}", trusted_header_hash);
         BytesRequestData {
             input: trusted_header_hash.0.to_vec(),
         }
@@ -235,8 +237,8 @@ impl Client {
         trusted_header_hash: CryptoHash,
         ids: Vec<TransactionOrReceiptIdPrimitive>,
     ) -> BytesRequestData {
-        log::debug!("building verify request for {:?}", trusted_header_hash);
-        log::trace!("ids {:?}", ids);
+        debug!("building verify request for {:?}", trusted_header_hash);
+        trace!("ids {:?}", ids);
         BytesRequestData {
             // TODO: define this input by abi
             input: [
@@ -250,8 +252,9 @@ impl Client {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn fetch_deployments(&self) -> anyhow::Result<Vec<Deployment>> {
-        log::debug!("getting deployments");
+        debug!("getting deployments");
         Ok(self
             .inner
             .get(format!(
@@ -263,9 +266,10 @@ impl Client {
             .error_for_status()?
             .json()
             .await
-            .inspect(|d| log::debug!("fetched deployments: {:?}", d))?)
+            .inspect(|d| debug!("fetched deployments: {:?}", d))?)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn request_relayed_proof(
         &self,
         circuit: &Circuit,
@@ -284,15 +288,16 @@ impl Client {
                 circuit
                     .function_id(&self.contract)
                     .await
-                    .inspect(|d| log::debug!("function_id: {:?}", d))?
+                    .inspect(|d| debug!("function_id: {:?}", d))?
                     .into(),
                 req.input.into(),
             )
             .await
-            .inspect(|d| log::debug!("requested relay proof: {:?}", d))?;
+            .inspect(|d| debug!("requested relay proof: {:?}", d))?;
         self.wait_for_proof(&request_id).await
     }
 
+    #[tracing::instrument(skip(self))]
     async fn fetch_proofs(&self) -> anyhow::Result<Vec<ProofResponse>> {
         let res: anyhow::Result<_> = Ok(self
             .inner
@@ -314,6 +319,7 @@ impl Client {
 
     /// Wait for the proof to be submitted to the explorer so we can track them
     /// by their proof id
+    #[tracing::instrument(skip(self))]
     pub async fn wait_for_proof(&self, request_id: &str) -> anyhow::Result<ProofId> {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut attempts = 0;
@@ -341,16 +347,17 @@ impl Client {
                     .requests
                     .iter()
                     .find(|r| {
-                        log::debug!("checking if {:?} matches {:?}", r.id, request_id);
+                        debug!("checking if {:?} matches {:?}", r.id, request_id);
                         r.id == request_id
                     })
                     .is_some()
             })
-            .inspect(|p| log::debug!("found proof {:?} matching request: {:?}", p.id, request_id))
+            .inspect(|p| debug!("found proof {:?} matching request: {:?}", p.id, request_id))
     }
 
     /// Request a proof to be proven, this doesn't relay the proof to the
     /// contract, useful for users who don't want to relay
+    #[tracing::instrument(skip(self))]
     pub async fn request_proof(
         &self,
         circuit: &Circuit,
@@ -368,12 +375,13 @@ impl Client {
             .error_for_status()?
             .json::<ProofRequestResponse>()
             .await
-            .inspect(|d| log::debug!("requested proof: {:?}", d.proof_id))?
+            .inspect(|d| debug!("requested proof: {:?}", d.proof_id))?
             .proof_id)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_proof(&self, proof_id: ProofId) -> anyhow::Result<ProofResponse> {
-        log::debug!("fetching proof: {}", proof_id.0);
+        debug!("fetching proof: {}", proof_id.0);
         Ok(self
             .inner
             .get(format!("{}/proof/{}", self.config.rpc_url, proof_id.0))
@@ -382,10 +390,11 @@ impl Client {
             .error_for_status()?
             .json::<ProofResponse>()
             .await
-            .inspect(|d| log::debug!("fetched proof: {:?}/{:?}", d.id, d.status))?)
+            .inspect(|d| debug!("fetched proof: {:?}/{:?}", d.id, d.status))?)
     }
 
     /// Sync the light client
+    #[tracing::instrument(skip(self))]
     pub async fn sync(&self, relay: bool) -> anyhow::Result<ProofId> {
         let circuit = Circuit::Sync;
         let req = self.build_sync_request(self.fetch_trusted_header_hash().await?);
@@ -399,12 +408,13 @@ impl Client {
     }
 
     /// Verify a set of transactions
+    #[tracing::instrument(skip(self))]
     pub async fn verify(
         &self,
         ids: Vec<TransactionOrReceiptIdPrimitive>,
         relay: bool,
     ) -> anyhow::Result<ProofId> {
-        log::trace!("verifying {} ids", ids.len());
+        trace!("verifying {} ids", ids.len());
         ensure!(
             ids.len() == self.verify_amt,
             "wrong number of transactions for verify"
@@ -421,6 +431,7 @@ impl Client {
     }
 
     /// Fetch the last synced header from the contract
+    #[tracing::instrument(skip(self))]
     async fn fetch_trusted_header_hash(&self) -> anyhow::Result<CryptoHash> {
         let mut h = self
             .contract
@@ -429,9 +440,9 @@ impl Client {
             .await
             .map(|x| *x._0)
             .map(CryptoHash)?;
-        log::debug!("fetched trusted header hash {:?}", h);
+        debug!("fetched trusted header hash {:?}", h);
         if h == CryptoHash::default() {
-            log::info!("no trusted header found, using checkpoint hash");
+            info!("no trusted header found, using checkpoint hash");
             h = self.genesis;
         }
         Ok(h)

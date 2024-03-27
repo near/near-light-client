@@ -4,10 +4,14 @@ use actix::prelude::*;
 use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
-use near_light_client_rpc::{prelude::Itertools, TransactionOrReceiptId};
+use near_light_client_rpc::{
+    prelude::{info, Itertools},
+    TransactionOrReceiptId,
+};
 use near_light_clientx::config::bps_from_network;
 use priority_queue::PriorityQueue;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, trace};
 pub use types::RegistryInfo;
 
 use self::types::{PriorityWeight, TransactionOrReceiptIdNewtype};
@@ -56,7 +60,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(config: &super::Config, succinct_client: Arc<succinct::Client>) -> Self {
-        log::info!("starting queue manager");
+        info!("starting queue manager");
 
         let state = PersistedState::try_from("state.json");
 
@@ -80,6 +84,7 @@ impl Engine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn prove(
         &mut self,
         id: Option<usize>,
@@ -93,7 +98,7 @@ impl Engine {
         } else {
             1
         };
-        log::debug!("enqueuing {:?} with weight: {weight}", tx);
+        debug!("enqueuing {:?} with weight: {weight}", tx);
         self.proving_queue.push(tx.into(), weight);
         Ok(())
     }
@@ -164,6 +169,7 @@ impl From<ProofId> for CheckProof {
 impl Handler<CheckProof> for Engine {
     type Result = ResponseFuture<Result<ProofResponse>>;
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: CheckProof, _ctx: &mut Self::Context) -> Self::Result {
         // // This feels like a succinct client job, keep checking queues
         // let fut = self.check_proof(msg.0);
@@ -172,25 +178,27 @@ impl Handler<CheckProof> for Engine {
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Register(pub RegistryInfo);
 
 impl Handler<Register> for Engine {
     type Result = ();
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, msg: Register, _ctx: &mut Self::Context) -> Self::Result {
         self.registry.insert(msg.0.id, msg.0);
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Sync;
 
 impl Handler<Sync> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Sync, _ctx: &mut Self::Context) -> Self::Result {
         let client = self.succinct_client.clone();
         // Not ssure this needs atomic
@@ -198,20 +206,21 @@ impl Handler<Sync> for Engine {
             async move { client.sync(true).await.unwrap() }
                 .into_actor(self)
                 .map(move |r, this, _| {
-                    log::debug!("sync requested {:?}", r);
+                    debug!("sync requested {:?}", r);
                     this.request_info.insert(r, None);
                 }),
         ))
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Drain;
 
 impl Handler<Drain> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Drain, _ctx: &mut Self::Context) -> Self::Result {
         AtomicResponse::new(if let Some((id, batch)) = self.make_batch() {
             let client = self.succinct_client.clone();
@@ -221,7 +230,7 @@ impl Handler<Drain> for Engine {
                 // Once verify proof id is returned, write the result to ourselves
                 .map(move |r, this, _| {
                     this.batches.get_mut(&id).unwrap().replace(r);
-                    log::debug!("batch {id} done, batches: {:?}", this.batches);
+                    debug!("batch {id} done, batches: {:?}", this.batches);
                 });
             Box::pin(fut)
         } else {
@@ -230,15 +239,16 @@ impl Handler<Drain> for Engine {
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Cleanup;
 
 impl Handler<Cleanup> for Engine {
     type Result = AtomicResponse<Self, ()>;
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Cleanup, _ctx: &mut Self::Context) -> Self::Result {
-        log::trace!("cleaning up");
+        trace!("cleaning up");
 
         let to_check = self
             .batches
@@ -258,7 +268,7 @@ impl Handler<Cleanup> for Engine {
         AtomicResponse::new(Box::pin(
             async move {
                 let mut futs = vec![];
-                log::debug!("checking on {} proofs", to_check.len());
+                debug!("checking on {} proofs", to_check.len());
                 for pid in to_check {
                     futs.push(client.get_proof(pid).map(move |p| (pid, p)));
                 }
@@ -268,11 +278,11 @@ impl Handler<Cleanup> for Engine {
             .map(move |r, this, _| {
                 r.into_iter().for_each(|(pid, p)| match p {
                     Ok(p) => {
-                        log::debug!("proof: {:?} status: {:?}", pid, p.status);
+                        debug!("proof: {:?} status: {:?}", pid, p.status);
                         this.request_info.insert(pid, Some(p.status));
                     }
                     Err(e) => {
-                        log::error!("{:?}", e);
+                        error!("{:?}", e);
                     }
                 });
             }),
@@ -301,15 +311,16 @@ impl TryFrom<&str> for PersistedState {
     }
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "anyhow::Result<()>")]
 pub struct Persist;
 
 impl Handler<Persist> for Engine {
     type Result = anyhow::Result<()>;
 
+    #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Persist, _ctx: &mut Self::Context) -> Self::Result {
-        log::trace!("persisting state");
+        trace!("persisting state");
         let state = PersistedState {
             registry: self.registry.clone(),
             batches: self.batches.clone(),
