@@ -98,7 +98,14 @@ pub struct Client {
 impl Client {
     pub async fn new(config: &config::Config) -> anyhow::Result<Self> {
         info!("starting succinct client");
+        info!("rpc: {}", config.succinct.rpc_url);
+        info!("contract address: {}", config.succinct.contract_address);
+        info!("eth rpc: {}", config.succinct.eth_rpc_url);
 
+        ensure!(
+            config.succinct.contract_address != Address::ZERO,
+            "invalid contract address",
+        );
         let (contract, chain_id) = Self::init_contract_client(&config.succinct).await?;
 
         let inner = Self::init_inner_client(&config.succinct).await?;
@@ -122,10 +129,7 @@ impl Client {
             verify_amt: bps_from_network(&config.rpc.network),
         };
         s.releases = s.fetch_releases(&chain_id).await?;
-        ensure!(
-            s.config.contract_address != Address::ZERO,
-            "invalid contract address",
-        );
+        ensure!(!s.releases.is_empty(), "no releases found");
 
         Ok(s)
     }
@@ -180,7 +184,7 @@ impl Client {
             chain_id,
             &self.config.version,
         ))
-        .inspect(|r| trace!("releases: {:?}", r))
+        .inspect(|r| debug!("releases: {:?}", r))
     }
 
     fn extract_release_details(
@@ -266,7 +270,7 @@ impl Client {
             .error_for_status()?
             .json()
             .await
-            .inspect(|d| debug!("fetched deployments: {:?}", d))?)
+            .inspect(|d| trace!("fetched deployments: {:?}", d))?)
     }
 
     #[tracing::instrument(skip(self))]

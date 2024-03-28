@@ -1,3 +1,9 @@
-**target/
-**direnv/
-**vendor/
+target/
+.direnv/
+vendor/
+nearx/contract/out/
+nearx/build/
+state.db/
+wrapped/
+build/
+.git/

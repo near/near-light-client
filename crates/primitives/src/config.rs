@@ -54,6 +54,7 @@ where
                     .split("__")
                     .global(),
             );
+        log::debug!("config: {figment:#?}");
 
         figment.extract()
     }

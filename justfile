@@ -78,21 +78,17 @@ init: (fetch-deployments "/tmp/deployments.json")
 call-brunoc REQUEST:
     {{brunoc}} "api/succinct/deploy/{{REQUEST}}.bru" --env testnet -o /tmp/{{REQUEST}}.json
 
-# Deploy a succinct circuit
-succinct-deploy $ENTRYPOINT $VERSION: 
-    {{brunoc}} "Succinct/Deploy/new-deployment.bru" --env testnet -o /tmp/deploy.json
-
 check $CHECK_RELEASE_NUM: 
     {{brunoc}} "api/succinct/deploy/check.bru" --env testnet -o /tmp/check.json
 
 wait-for-success RELEASE_NUM:
     #!/usr/bin/env bash
 
-    for ((count=0; count<20; count++)); do
+    for ((count=0; count<10; count++)); do
         just check {{RELEASE_NUM}}
         if [ $? -ne 0 ]; then
             echo "non zero exit code: $?, trying in 30s"
-            sleep 30s
+            sleep 60s
         else
             echo "success"
             break
@@ -121,20 +117,20 @@ update-current-name ENTRYPOINT:
 get-verifier OUTPUT:
     cat {{OUTPUT}} | jq -r '.bytecode'
 
-release-dev ENTRYPOINT VERSION:
+release-dev $ENTRYPOINT $VERSION:
     #!/usr/bin/env bash
     set -euxo pipefail
 
-    # just update-current-name {{ENTRYPOINT}} 
-
     # just call-brunoc "new-deployment"
+    {{brunoc}} "api/succinct/deploy/new-deployment.bru" --env testnet -o /tmp/new-deployment.json
+    #
     RELEASE_ID=`just extract-release-id`
     RELEASE_NUM=`just extract-release-num`
-    # just wait-for-success $RELEASE_NUM 
-    # 
-    # just update-current-name $ENTRYPOINT
-    # cat /tmp/check.json | jq -r ".results[0].response.data" > /tmp/{{ENTRYPOINT}}-release.json
-    # just update-name $RELEASE_ID 
+    just wait-for-success $RELEASE_NUM 
+
+    just update-current-name $ENTRYPOINT
+    cat /tmp/check.json | jq -r ".results[0].response.data" > /tmp/{{ENTRYPOINT}}-release.json
+    just update-name $RELEASE_ID $VERSION
 
     export CREATE2_SALT=`cast th "$RANDOM$RANDOM$RANDOM$RANDOM" | cast to-uint256| cast tb`
     export FUNCTION_VERIFIER=`just get-verifier /tmp/{{ENTRYPOINT}}-release.json`
