@@ -1,0 +1,34 @@
+[default]
+catchup    = false
+state_path = "state.db"
+
+[default.rpc]
+network = "Testnet"
+
+[default.protocol]
+genesis = "6pD4xDH3kRSyBdEacErHF7WTeJ2fUXmzU8zXHHTrCnHY"
+
+[default.succinct]
+api_key          = "default"
+contract_address = "0x0000000000000000000000000000000000000000"
+eth_rpc_url      = "https://gateway.tenderly.co/public/sepolia"
+version          = "latest"
+
+[default.engine]
+cleanup_interval = 60
+drain_interval   = 1
+persist_interval = 30
+sync_interval    = 3000
+
+[testnet]
+catchup = true
+
+[testnet.rpc]
+network = "Testnet"
+
+# Sepolia
+[testnet.succinct]
+api_key          = "testnet"
+contract_address = "0x73876e41ca149853160Ed5BFeC22e3C7bABEA67a"
+eth_rpc_url      = "https://gateway.tenderly.co/public/sepolia"
+version          = "v0.0.4-rc.1"

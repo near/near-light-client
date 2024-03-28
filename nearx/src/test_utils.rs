@@ -9,9 +9,6 @@ pub use plonky2x::{
 };
 pub use test_utils::*;
 
-// Testnet Repr
-pub const NETWORK: usize = 1;
-
 pub type B<const D: usize = 2> = CircuitBuilder<DefaultParameters, D>;
 pub type PI<const D: usize = 2> = PublicInput<DefaultParameters, D>;
 pub type PO<const D: usize = 2> = PublicOutput<DefaultParameters, D>;

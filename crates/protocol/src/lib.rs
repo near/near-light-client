@@ -1,8 +1,9 @@
-use config::NUM_BLOCK_PRODUCER_SEATS;
 use error::Error;
 pub use merkle_util::*;
 pub use near_crypto::{ED25519PublicKey, PublicKey, Signature};
+use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 pub use near_primitives::{
+    account::id as near_account_id,
     block_header::{ApprovalInner, BlockHeaderInnerLite},
     merkle::MerklePathItem,
     types::{validator_stake::ValidatorStake, BlockHeight, EpochId},
@@ -262,7 +263,11 @@ impl Protocol {
 
                 let approved_stake = match Self::validate_signature(approval_message, sig, pk) {
                     Ok(_) => approved_stake + stake,
-                    Err(Error::SignatureInvalid) | Err(Error::ValidatorNotSigned) => approved_stake,
+                    Err(Error::SignatureInvalid) => {
+                        log::debug!("invalid signature: pk: {} sig: {:?}", pk, sig);
+                        approved_stake
+                    }
+                    Err(Error::ValidatorNotSigned) => approved_stake,
                     Err(_) => approved_stake,
                 };
 

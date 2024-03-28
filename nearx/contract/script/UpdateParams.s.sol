@@ -18,7 +18,6 @@ contract UpdateParams is Script {
         vm.startBroadcast();
         NearX lightClient = NearX(payable(proxyAddress));
 
-        // Succinct's goerli gateway
         address initialGateway = vm.envAddress("GATEWAY_ID");
         lightClient.updateGateway(initialGateway);
 

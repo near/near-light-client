@@ -18,6 +18,7 @@ near-primitives.workspace         = true
 serde.workspace                   = true
 thiserror.workspace               = true
 
+near-light-client-primitives.workspace = true
 # async-trait.workspace          = true
 # axum.workspace                 = true
 # coerce.workspace               = true

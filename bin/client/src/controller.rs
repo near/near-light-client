@@ -47,7 +47,7 @@ async fn health_check() -> StatusCode {
 
 mod header {
     use super::*;
-    use crate::client::message::{Archive, Head};
+    use crate::client::actor::{Archive, Head};
 
     #[derive(Debug, Deserialize, Serialize)]
     pub struct Params {
@@ -84,7 +84,7 @@ mod proof {
     use protocol::Proof;
 
     use super::*;
-    use crate::client::message::{BatchGetProof, GetProof, VerifyProof};
+    use crate::client::actor::{BatchGetProof, GetProof, VerifyProof};
 
     pub(super) async fn post_get_proof(
         State(client): State<LocalActorRef<LightClient>>,

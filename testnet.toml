@@ -1,5 +1,0 @@
-catchup       = true
-host          = "0.0.0.0:3030"
-network       = "Testnet"
-starting_head = "4bM5eXMDGxpFZXbWNT6TqX1HdZsWoHZ11KerCHJ8RKmU"
-state_path    = "state.db"

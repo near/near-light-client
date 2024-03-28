@@ -1,0 +1,55 @@
+{
+  "summary": {
+    "totalRequests": 1,
+    "passedRequests": 1,
+    "failedRequests": 0,
+    "totalAssertions": 0,
+    "passedAssertions": 0,
+    "failedAssertions": 0,
+    "totalTests": 0,
+    "passedTests": 0,
+    "failedTests": 0
+  },
+  "results": [
+    {
+      "test": {
+        "filename": "api/succinct/Get proof status.bru"
+      },
+      "request": {
+        "method": "GET",
+        "url": "https://alpha.succinct.xyz/api/proof/e112ffa6-d2ee-4263-ac93-a31b94277882",
+        "headers": {
+          "content-type": "application/json"
+        }
+      },
+      "response": {
+        "status": 500,
+        "statusText": "Internal Server Error",
+        "headers": {
+          "cache-control": "public, max-age=0, must-revalidate",
+          "cf-cache-status": "DYNAMIC",
+          "cf-ray": "86b8f7084e9a9408-LHR",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "date": "Thu, 28 Mar 2024 16:23:29 GMT",
+          "rndr-id": "7e837532-0efc-42da",
+          "server": "Vercel",
+          "strict-transport-security": "max-age=63072000",
+          "vary": "Origin, Cookie, Accept-Encoding",
+          "x-render-origin-server": "Render",
+          "x-vercel-id": "lhr1::drsz9-1711643009296-8fbc9bc3ace2",
+          "transfer-encoding": "chunked"
+        },
+        "data": {
+          "error": "failed to get proof"
+        },
+        "responseTime": 657
+      },
+      "error": null,
+      "assertionResults": [],
+      "testResults": [],
+      "runtime": 0.663039508,
+      "suitename": "api/succinct/Get proof status"
+    }
+  ]
+}

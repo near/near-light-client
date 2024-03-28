@@ -1,0 +1,46 @@
+meta {
+  name: Release Verify
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{succinctBaseUrl}}/release/new
+  body: json
+  auth: bearer
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  content-type: text/plain;charset=UTF-8
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+}
+
+auth:bearer {
+  token: {{succinctAuthToken}}
+}
+
+body:json {
+  {
+    "org_name": "near",
+    "project_name": "near-light-client",
+    "git_ref": "{{gitRef}}",
+    "entrypoint": "verify",
+    "env_vars": []
+  }
+}
+
+body:text {
+  {"org_name":"near","project_name":"near-light-client","git_ref":"700edd24ac1666307f3f740e36bf4c5808c26e1b","entrypoint":"verify","env_vars":[]}
+}
