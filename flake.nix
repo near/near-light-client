@@ -44,6 +44,9 @@
 
             vscode-extensions.vadimcn.vscode-lldb.adapter
             rust-analyzer
+
+            (google-cloud-sdk.withExtraComponents ([pkgs.google-cloud-sdk.components.cloud-run-proxy]))
+
           ];
           buildInputs = with pkgs; [
               (rustVersion.override { extensions = [ "rust-src" ]; })
