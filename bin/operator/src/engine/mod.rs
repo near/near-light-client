@@ -192,49 +192,57 @@ impl Handler<Register> for Engine {
 }
 
 #[derive(Message, Debug)]
-#[rtype(result = "()")]
+#[rtype(result = "Result<()>")]
 pub struct Sync;
 
 impl Handler<Sync> for Engine {
-    type Result = AtomicResponse<Self, ()>;
+    type Result = AtomicResponse<Self, Result<()>>;
 
     #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Sync, _ctx: &mut Self::Context) -> Self::Result {
         let client = self.succinct_client.clone();
         // Not ssure this needs atomic
         AtomicResponse::new(Box::pin(
-            async move { client.sync(true).await.unwrap() }
+            async move { client.sync(true).await }
                 .into_actor(self)
                 .map(move |r, this, _| {
                     debug!("sync requested {:?}", r);
-                    this.request_info.insert(r, None);
+                    this.request_info.insert(r?, None);
+                    Ok(())
                 }),
         ))
     }
 }
 
 #[derive(Message, Debug)]
-#[rtype(result = "()")]
+#[rtype(result = "Result<()>")]
 pub struct Drain;
 
 impl Handler<Drain> for Engine {
-    type Result = AtomicResponse<Self, ()>;
+    type Result = AtomicResponse<Self, Result<()>>;
 
     #[tracing::instrument(skip(self))]
     fn handle(&mut self, _msg: Drain, _ctx: &mut Self::Context) -> Self::Result {
         AtomicResponse::new(if let Some((id, batch)) = self.make_batch() {
             let client = self.succinct_client.clone();
-            let fut = async move { client.verify(batch, true).await.unwrap() }
+            let fut = async move { client.verify(batch, true).await }
                 // Then ask succinct to verify
                 .into_actor(self)
                 // Once verify proof id is returned, write the result to ourselves
-                .map(move |r, this, _| {
-                    this.batches.get_mut(&id).unwrap().replace(r);
-                    debug!("batch {id} done, batches: {:?}", this.batches);
+                .map(move |r, this, _| match r {
+                    Ok(r) => {
+                        debug!("batch {id} done, batches: {:?}", this.batches);
+                        this.batches.insert(id, Some(r));
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("{:?}", e);
+                        Err(e)
+                    }
                 });
             Box::pin(fut)
         } else {
-            Box::pin(async {}.into_actor(self))
+            Box::pin(async { Ok(()) }.into_actor(self))
         })
     }
 }
