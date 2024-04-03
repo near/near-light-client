@@ -141,7 +141,7 @@ impl<L: PlonkParameters<D>, const D: usize> Ensure<L, D> for CircuitBuilder<L, D
             let is_active = self.select(is_dummy, inactive, sig_active);
 
             pubkeys.push(vs.public_key.clone());
-            active.push(is_active.clone());
+            active.push(is_active);
 
             let added_stake = self.add(approved_stake, vs.stake);
             total_stake = self.add(total_stake, vs.stake);

@@ -4,25 +4,18 @@ use near_light_clientx::{
     plonky2x::backend::function::Plonky2xFunction,
 };
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "testnet")] {
-        type CFG = Testnet;
-    } else if #[cfg(feature = "mainnet")] {
-        type CFG = Mainnet;
-    } else {
-        panic!("No network feature enabled")
-    }
-}
-
 fn main() {
+    #[allow(dead_code)]
+    type Conf = Testnet;
+
     cfg_if::cfg_if! {
         if #[cfg(feature = "sync")] {
             use near_light_clientx::SyncCircuit;
-            SyncCircuit::<CFG>::entrypoint();
+            SyncCircuit::<Conf>::entrypoint();
         } else if #[cfg(feature = "verify")] {
 
-            assert!(CFG::VERIFY_AMT % CFG::VERIFY_BATCH == 0);
-            assert!((CFG::VERIFY_AMT / CFG::VERIFY_BATCH).is_power_of_two());
+            assert!(Conf::VERIFY_AMT % Conf::VERIFY_BATCH == 0);
+            assert!((Conf::VERIFY_AMT / Conf::VERIFY_BATCH).is_power_of_two());
 
             use near_light_clientx::VerifyCircuit;
             VerifyCircuit::<CFG>::entrypoint();
