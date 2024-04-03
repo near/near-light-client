@@ -72,7 +72,7 @@ impl Engine {
             succinct_client,
             proving_queue: state
                 .as_ref()
-                .map(|s| Queue::from_iter(s.queue.clone().into_iter()))
+                .map(|s| Queue::from_iter(s.queue.clone()))
                 .unwrap_or(Queue::with_default_hasher()),
             batches: state
                 .as_ref()
@@ -333,12 +333,7 @@ impl Handler<Persist> for Engine {
             registry: self.registry.clone(),
             batches: self.batches.clone(),
             request_info: self.request_info.clone(),
-            queue: self
-                .proving_queue
-                .clone()
-                .into_sorted_iter()
-                .map(|(i, w)| (i, w))
-                .collect(),
+            queue: self.proving_queue.clone().into_sorted_iter().collect(),
         };
         std::fs::write("state.json", serde_json::to_string(&state)?)?;
         Ok(())
