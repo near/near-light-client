@@ -283,17 +283,21 @@ impl Client {
             self.config.contract_address.0 != [0u8; 20],
             "no contract address"
         );
+        let function_id = circuit.function_id(&self.contract).await?;
+        debug!("requesting relayed proof for {:?}", function_id);
+        ensure!(
+            self.releases
+                .iter()
+                .any(|d| d.function_id == hex::encode(function_id)),
+            "function_id not found in active releases"
+        );
         let request_id = self
             .ext
             .submit_request(
                 circuit.deployment(&self.releases).chain_id,
                 self.config.contract_address.0 .0.into(),
                 circuit.with_selector(&req.input).into(),
-                circuit
-                    .function_id(&self.contract)
-                    .await
-                    .inspect(|d| debug!("function_id: {:?}", d))?
-                    .into(),
+                function_id.into(),
                 req.input.into(),
             )
             .await
