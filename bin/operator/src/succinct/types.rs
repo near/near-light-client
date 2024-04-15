@@ -42,7 +42,7 @@ impl Circuit {
 
     /// Writes the input prepended with the selector
     pub fn with_selector(&self, input: &[u8]) -> Vec<u8> {
-        vec![&self.selector()[..], input].concat()
+        [&self.selector()[..], input].concat()
     }
 
     /// Get the function id from the contract

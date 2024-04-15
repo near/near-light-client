@@ -14,6 +14,7 @@ pub fn default_host() -> String {
 pub trait Configurable {}
 
 pub trait BaseConfig<T> {
+    #[allow(clippy::new_ret_no_self)]
     fn new(path_prefix: Option<&str>) -> Result<T, ConfigError>;
     fn test_config() -> T;
     fn default() -> T;
@@ -32,7 +33,7 @@ where
         let env_prefix = "NEAR_LIGHT_CLIENT";
 
         let required = env::var(format!("{env_prefix}_CONFIG_FILE"))
-            .unwrap_or_else(|_| format!("config.toml"));
+            .unwrap_or_else(|_| "config.toml".to_string());
         log::debug!("required file: {required}");
 
         let mode = env::var(format!("{env_prefix}_MODE"))

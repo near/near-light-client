@@ -143,7 +143,7 @@ impl Client {
             .get_chain_id()
             .await
             .with_context(|| "failed to get chain id")?;
-        let contract = NearXInstance::new(config.contract_address, inner.into());
+        let contract = NearXInstance::new(config.contract_address, inner);
         debug!("chain id: {}", chain_id);
 
         Ok((contract, chain_id.to()))
@@ -351,14 +351,10 @@ impl Client {
         proofs
             .iter()
             .find(|p| {
-                p.edges
-                    .requests
-                    .iter()
-                    .find(|r| {
-                        debug!("checking if {:?} matches {:?}", r.id, request_id);
-                        r.id == request_id
-                    })
-                    .is_some()
+                p.edges.requests.iter().any(|r| {
+                    debug!("checking if {:?} matches {:?}", r.id, request_id);
+                    r.id == request_id
+                })
             })
             .inspect(|p| debug!("found proof {:?} matching request: {:?}", p.id, request_id))
     }
@@ -522,7 +518,7 @@ pub mod tests {
                 .respond_with(
                     ResponseTemplate::new(200).set_body_json(json!({"proof_id": self.proof_id()})),
                 )
-                .mount(&server)
+                .mount(server)
                 .await;
 
             Mock::given(method("POST"))
@@ -532,7 +528,7 @@ pub mod tests {
                     ResponseTemplate::new(200).set_body_json(json!({"request_id":
                 self.request_id()})),
                 )
-                .mount(&server)
+                .mount(server)
                 .await;
 
             let proof_fixture = match self.0 {
@@ -546,7 +542,7 @@ pub mod tests {
                     ResponseTemplate::new(200)
                         .set_body_json(fixture::<ProofResponse>(proof_fixture)),
                 )
-                .mount(&server)
+                .mount(server)
                 .await;
         }
     }
@@ -573,7 +569,7 @@ pub mod tests {
         config.succinct.eth_rpc_url = server.uri();
         config.succinct.rpc_url = server.uri();
 
-        let releases = Client::extract_release_details(deployments.clone(), &CHAIN_ID, &VERSION);
+        let releases = Client::extract_release_details(deployments.clone(), &CHAIN_ID, VERSION);
 
         // Mock for eth_chainId request
         Mock::given(method("POST"))

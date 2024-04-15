@@ -126,9 +126,9 @@ mod beefy_tests {
             SyncCircuit::<FixturesConfig<config::Testnet, 52>>::define(b);
         };
         let writer = |input: &mut PI| {
-            input.evm_write::<CryptoHashVariable>(h.into());
+            input.evm_write::<CryptoHashVariable>(h);
         };
-        let assertions = |mut output: PO| {};
+        let assertions = |_output: PO| {};
         builder_suite(define, writer, assertions);
     }
 
@@ -144,9 +144,9 @@ mod beefy_tests {
             SyncCircuit::<FixturesConfig<config::Testnet, 52>>::define(b);
         };
         let writer = |input: &mut PI| {
-            input.evm_write::<CryptoHashVariable>(h.into());
+            input.evm_write::<CryptoHashVariable>(h);
         };
-        let assertions = |mut output: PO| {};
+        let assertions = |_output: PO| {};
         builder_suite(define, writer, assertions);
     }
 

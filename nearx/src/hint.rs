@@ -184,8 +184,8 @@ where
         b.watch(&untrusted_header_hash, "untrusted_header_hash");
         // Build trust in the header by hashing, ensuring equality
         b.assert_is_equal(untrusted_header_hash, untrusted_header_hash);
-        let header = untrusted_header;
-        header
+
+        untrusted_header
     }
 }
 
@@ -307,13 +307,13 @@ mod tests {
             let header = b.read::<HeaderVariable>();
             let trusted_header_hash = header.hash(b);
 
-            let (header, bps, next_block) =
+            let (_header, _bps, next_block) =
                 InputFetcher::<Testnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
             b.write::<BlockVariable<{ Testnet::BPS }>>(next_block);
 
             let header = b.read::<HeaderVariable>();
             let trusted_header_hash = header.hash(b);
-            let (header, bps, next_block) =
+            let (_header, _bps, next_block) =
                 InputFetcher::<Mainnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
             b.write::<BlockVariable<{ Mainnet::BPS }>>(next_block);
         };
@@ -359,15 +359,16 @@ mod tests {
         };
         let writer = |input: &mut PI| {
             for hash in corner_cases {
-                input.write::<CryptoHashVariable>(hash.into());
+                input.write::<CryptoHashVariable>(hash);
             }
         };
         let assertions = |mut output: PO| {
-            for hash in corner_cases {
-                let header = output.read::<HeaderVariable>();
-                let bps = output.read::<ValidatorsVariable<{ Testnet::BPS }>>();
-                let nb = output.read::<BlockVariable<{ Testnet::BPS }>>();
+            for _hash in corner_cases {
+                let _header = output.read::<HeaderVariable>();
+                let _bps = output.read::<ValidatorsVariable<{ Testnet::BPS }>>();
+                let _nb = output.read::<BlockVariable<{ Testnet::BPS }>>();
             }
+            // TODO: assert on these
         };
         builder_suite(define, writer, assertions);
     }

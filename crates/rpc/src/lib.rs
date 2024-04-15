@@ -258,7 +258,6 @@ impl From<Network> for Config {
 mod tests {
     use std::str::FromStr;
 
-    use futures::{stream::FusedStream, AsyncReadExt, StreamExt};
     use near_primitives::{
         types::{BlockId, BlockReference, TransactionOrReceiptId},
         views::{BlockView, ChunkView},

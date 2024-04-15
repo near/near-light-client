@@ -52,7 +52,7 @@ async fn client() -> Client {
 async fn test_check_proof() {
     let c = client().await;
     let request_id = "76688871-5262-4384-9891-0a68fe7a2efb";
-    let p = c.wait_for_proof(&request_id).await.unwrap();
+    let p = c.wait_for_proof(request_id).await.unwrap();
     println!("found proof: {:?}", p);
     assert_eq!(
         p.0,
