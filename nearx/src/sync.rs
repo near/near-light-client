@@ -141,7 +141,7 @@ mod beefy_tests {
         let h = bytes32!("0x6fd201bb6c09c3708793945be6d5e2c3dc8c9fcf65e9e3ccf81d4720735e5fe6");
 
         let define = |b: &mut B| {
-            SyncCircuit::<FixturesConfig<config::Testnet, 52>>::define(b);
+            SyncCircuit::<Testnet>::define(b);
         };
         let writer = |input: &mut PI| {
             input.evm_write::<CryptoHashVariable>(h);
@@ -166,6 +166,23 @@ mod beefy_tests {
             let hash = output.evm_read::<CryptoHashVariable>();
             println!("hash: {:?}", hash);
         };
+        builder_suite(define, writer, assertions);
+    }
+
+    #[test]
+    #[serial]
+    #[ignore]
+    fn sync_e2e_latest_corner_case() {
+        // TODO: this is a new test with a corner case
+        let h = bytes32!("0x312a16eef866d75e9da24a5c65ce8b98597d5a903ef643018e144b8543c37a8b");
+
+        let define = |b: &mut B| {
+            SyncCircuit::<Testnet>::define(b);
+        };
+        let writer = |input: &mut PI| {
+            input.evm_write::<CryptoHashVariable>(h);
+        };
+        let assertions = |_output: PO| {};
         builder_suite(define, writer, assertions);
     }
 }
