@@ -254,7 +254,6 @@ impl Protocol {
         signatures
             .iter()
             .zip(epoch_bps.iter())
-            .take(NUM_BLOCK_PRODUCER_SEATS)
             .fold((0, 0), |(total_stake, approved_stake), (sig, vs)| {
                 let pk = vs.public_key();
                 let stake = vs.stake();
