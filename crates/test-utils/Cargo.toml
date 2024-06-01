@@ -5,27 +5,10 @@ name              = "test-utils"
 version.workspace = true
 
 [dependencies]
-anyhow.workspace                     = true
-borsh.workspace                      = true
 derive_more.workspace                = true
-either.workspace                     = true
-itertools.workspace                  = true
-log.workspace                        = true
-near-crypto.workspace                = true
-near-jsonrpc-primitives.workspace    = true
 near-light-client-protocol.workspace = true
-near-primitives-core.workspace       = true
 near-primitives.workspace            = true
 pretty_assertions.workspace          = true
+pretty_env_logger.workspace          = true
 serde.workspace                      = true
-thiserror.workspace                  = true
-# async-trait.workspace          = true
-# near-jsonrpc-client.workspace  = true
-# protobuf.workspace             = true
-# reqwest.workspace              = true
-# sled.workspace                 = true
-
-hex.workspace               = true
-pretty_env_logger.workspace = true
-rand                        = "*"
-serde_json.workspace        = true
+serde_json.workspace                 = true
