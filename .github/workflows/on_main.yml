@@ -3,7 +3,7 @@ name: "Deploying Light Client"
 on:
   push:
      branches:
-       - main
+       - master
 
 jobs:
   git-submodules-update:
