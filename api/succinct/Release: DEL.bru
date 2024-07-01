@@ -1,0 +1,37 @@
+meta {
+  name: Delete release
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{succinctBaseUrl}}/release/{{id}}
+  body: none
+  auth: bearer
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  cookie: session={{succinctSession}}
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/11
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+}
+
+auth:bearer {
+  token: {{succinctAuthToken}}
+}
+
+vars:pre-request {
+  id: 20b28ab4-b47f-458d-9933-8c7f565f082a
+  session: {{succinctSession}}
+}

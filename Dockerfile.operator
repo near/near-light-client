@@ -1,0 +1,40 @@
+FROM --platform=$BUILDPLATFORM rust:1.72.0-bookworm as build
+ARG TARGETARCH
+
+WORKDIR /near
+
+COPY rust-toolchain.toml ./rust-toolchain.toml
+COPY Cargo.toml Cargo.lock ./
+COPY nearx/contract near/contract
+
+RUN rustup show 
+RUN apt-get update && apt-get install -y \
+    git \
+    jq \
+    make \
+    bash \
+    openssl \
+    libssl-dev \
+    protobuf-compiler \
+    pkg-config \
+    cbindgen
+
+RUN cargo new --bin bin/dummy
+RUN cargo new --lib crates/dummylib
+RUN cargo new --lib nearx
+RUN cargo build --release --bin dummy --config net.git-fetch-with-cli=true 
+
+COPY ./ ./
+RUN cargo build --release --bin nearx-operator --config net.git-fetch-with-cli=true 
+RUN ldd target/release/nearx-operator 
+RUN cp target/release/nearx-operator /near/near-light-client
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y openssl libssl-dev pkg-config ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /near/target/release/nearx-operator /usr/local/bin
+COPY --from=build /near/config.toml /var/near-light-client/config.toml
+
+ENV NEAR_LIGHT_CLIENT_DIR=/var/near-light-client
+ENV NEAR_LIGHT_CLIENT_CONFIG_FILE=/var/near-light-client/config.toml
+
+ENTRYPOINT ["/usr/local/bin/nearx-operator"]

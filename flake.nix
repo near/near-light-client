@@ -28,6 +28,7 @@
           nativeBuildInputs = with pkgs; [
             bashInteractive
             taplo
+            just
             clang
             cmake
             openssl
@@ -40,6 +41,15 @@
             nodejs
             solc
             slither-analyzer
+
+            vscode-extensions.vadimcn.vscode-lldb.adapter
+            rust-analyzer
+
+            (google-cloud-sdk.withExtraComponents ([
+              pkgs.google-cloud-sdk.components.cloud-run-proxy 
+              pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin
+            ]))
+            kubectl
 
           ];
           buildInputs = with pkgs; [

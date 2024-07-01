@@ -3,6 +3,7 @@ pub use itertools::{izip, Itertools};
 pub use log::{debug, error, info, trace, warn};
 pub use near_primitives::types::AccountId;
 pub use near_primitives_core::{
+    account::id::AccountIdRef,
     borsh::{self, BorshDeserialize, BorshSerialize},
     hash::CryptoHash,
 };

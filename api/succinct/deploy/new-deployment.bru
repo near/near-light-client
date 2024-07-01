@@ -1,0 +1,69 @@
+meta {
+  name: new-deployment
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{succinctBaseUrl}}/release/new
+  body: text
+}
+
+headers {
+  authority: alpha.succinct.xyz
+  accept: */*
+  accept-language: en-GB,en;q=0.9
+  origin: https://alpha.succinct.xyz
+  referer: https://alpha.succinct.xyz/near/near-light-client/releases/new
+  sec-ch-ua: "Not A(Brand";v="99", "Brave";v="121", "Chromium";v="121"
+  sec-ch-ua-mobile: ?0
+  sec-ch-ua-platform: "Linux"
+  sec-fetch-dest: empty
+  sec-fetch-mode: cors
+  sec-fetch-site: same-origin
+  sec-gpc: 1
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36
+  content-type: text/plain;charset=UTF-8
+  cookie: session={{succinctSession}}
+}
+
+auth:bearer {
+  token: {{succinctApiKey}}
+}
+
+body:text {
+  {
+    "org_name": "near",
+    "project_name": "near-light-client",
+    "git_ref": "{{gitRef}}",
+    "entrypoint": "{{entrypoint}}",
+    "env_vars": []
+  }
+}
+
+vars:pre-request {
+  gitRef: notused
+  entrypoint: fake
+}
+
+assert {
+  res.status: eq 200
+}
+
+script:pre-request {
+  let gitRef = bru.getProcessEnv("GIT_REF")
+  if (gitRef != null) {
+    bru.setVar("gitRef", gitRef)
+  }
+  let entrypoint = bru.getProcessEnv("ENTRYPOINT")
+  if (entrypoint != null) {
+    bru.setVar("entrypoint", entrypoint)
+  }
+  bru.setVar("succinctSession", bru.getProcessEnv("SUCCINCT_SESSION"))
+  bru.setVar("succinctApiKey", bru.getProcessEnv("SUCCINCT_API_KEY"))
+}
+
+script:post-response {
+  bru.setVar(`CHECK_RELEASE_ID`, res.body.release_id)
+  bru.setVar(`CHECK_RELEASE_NUM`, res.body.release_number)
+}

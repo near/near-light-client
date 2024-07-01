@@ -1,0 +1,22 @@
+meta {
+  name: Req proof (verify)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{lightClientBaseUrl}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": "dontcare",
+    "method": "verify",
+    "params": {
+      "ids": []
+    }
+  }
+}

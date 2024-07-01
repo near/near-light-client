@@ -1,6 +1,8 @@
 use coerce::actor::{system::ActorSystem, IntoActor};
+use config::Config;
+use near_light_client_primitives::config::BaseConfig;
 
-use crate::client::{message::Shutdown, LightClient};
+use crate::client::{actor::Shutdown, LightClient};
 
 mod client;
 mod config;
@@ -12,7 +14,7 @@ pub struct ShutdownMsg;
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
 
-    let config = config::Config::new()?;
+    let config = Config::new(std::env::var("NEAR_LIGHT_CLIENT_DIR").ok().as_deref())?;
     let system = ActorSystem::builder()
         .system_name("near-light-client")
         .build();

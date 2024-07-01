@@ -5,12 +5,14 @@ use std::{
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
-use near_jsonrpc_client::{
+use near_jsonrpc_client::methods::EXPERIMENTAL_protocol_config::RpcProtocolConfigResponse;
+pub use near_jsonrpc_client::{
     methods::{self, light_client_proof::RpcLightClientExecutionProofResponse},
     JsonRpcClient,
 };
-use near_primitives::{
+pub use near_primitives::{
     block_header::BlockHeader,
+    types::{BlockId, BlockReference, TransactionOrReceiptId},
     views::{validator_stake_view::ValidatorStakeView, LightClientBlockView},
 };
 
@@ -86,9 +88,9 @@ impl std::fmt::Debug for NearRpcClient {
 }
 
 impl NearRpcClient {
-    pub fn new(network: Network) -> Self {
-        let client = JsonRpcClient::connect(network.to_endpoint());
-        let archive = JsonRpcClient::connect(network.archive_endpoint());
+    pub fn new(config: &Config) -> Self {
+        let client = JsonRpcClient::connect(config.network.to_endpoint());
+        let archive = JsonRpcClient::connect(config.network.archive_endpoint());
 
         NearRpcClient { client, archive }
     }
@@ -138,6 +140,10 @@ pub trait LightClientRpc {
     ) -> Result<RpcLightClientExecutionProofResponse>;
     async fn fetch_epoch_bps(&self, epoch_id: &CryptoHash) -> Result<Vec<ValidatorStakeView>>;
     async fn fetch_header(&self, hash: &CryptoHash) -> Result<Header>;
+    async fn fetch_protocol_config(
+        &self,
+        block_id: &BlockReference,
+    ) -> Result<RpcProtocolConfigResponse>;
 }
 
 #[async_trait]
@@ -219,6 +225,33 @@ impl LightClientRpc for NearRpcClient {
             })
             .map_err(|e| anyhow::format_err!("{:?}:{}", epoch_id, e))
     }
+
+    async fn fetch_protocol_config(
+        &self,
+        block_reference: &BlockReference,
+    ) -> Result<RpcProtocolConfigResponse> {
+        let req = methods::EXPERIMENTAL_protocol_config::RpcProtocolConfigRequest {
+            block_reference: block_reference.clone(),
+        };
+        self.client
+            .call(&req)
+            .or_else(|e| {
+                trace!("Error hitting main rpc, falling back to archive: {:?}", e);
+                self.archive.call(&req)
+            })
+            .await
+            .map_err(|e| anyhow::format_err!("{:?}", e))
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Config {
+    pub network: Network,
+}
+impl From<Network> for Config {
+    fn from(network: Network) -> Self {
+        Config { network }
+    }
 }
 
 #[cfg(test)]
@@ -298,7 +331,7 @@ mod tests {
     // this is committed in the repo, only needed for gathering data
     #[allow(dead_code)]
     async fn test_get_ids() {
-        let client = NearRpcClient::new(Network::Testnet);
+        let client = NearRpcClient::new(&(Network::Testnet.into()));
 
         let first_block = fetch_block(
             &client,

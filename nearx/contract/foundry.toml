@@ -1,22 +1,31 @@
 [profile.default]
-fs_permissions = [ { access = "read", path = "./broadcast" } ]
+build_info     = true
+extra_output   = [ "storageLayout" ]
+ffi            = true
 gas_reports    = [ "*" ]
 libs           = [ "lib" ]
 optimizer      = true # This was breaking verification for some reason
 optimizer-runs = 1000 # TODO: change when we properly release this
 out            = "out"
-solc_version   = "0.8.19"
+solc_version   = "0.8.24"
 src            = "src"
 
 remappings = [
   "forge-std=lib/forge-std/src",
-  "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts",
-  "@openzeppelin/contracts-upgradeable=lib/openzeppelin-contracts-upgradeable/contracts",
-  "@openzeppelin/contracts@4.9.5=lib/openzeppelin-contracts/contracts",
-  "@openzeppelin/contracts-upgradeable@4.9.5=lib/openzeppelin-contracts-upgradeable/contracts",
+  "@openzeppelin-foundry-upgrades=lib/openzeppelin-foundry-upgrades/src",
+  "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts",
 ]
 
 [profile.optimizer-details]
 constant_optimizer = true
 cse                = true
 deduplicate        = true
+
+[[profile.default.fs_permissions]]
+access = "read"
+path   = "./broadcast"
+
+[[profile.default.fs_permissions]]
+access = true
+path   = "./out"
