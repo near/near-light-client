@@ -345,12 +345,13 @@ mod tests {
 
     use near_light_client_primitives::config::BaseConfig;
     use near_light_client_rpc::TransactionOrReceiptId;
+    use near_light_clientx::config::{Config, Testnet};
     use test_utils::fixture;
 
     use super::*;
     use crate::succinct::tests::mocks;
 
-    const VERIFY_AMT: usize = 64;
+    const VERIFY_AMT: usize = Testnet::BPS;
 
     async fn manager() -> Engine {
         let client = mocks().await;
@@ -432,6 +433,7 @@ mod tests {
         let (tx, w) = m.proving_queue.pop().unwrap();
         // Make empty batch, since theres not enough to fill
         let batch = m.make_batch();
+        println!("batch {:?}", batch);
         assert!(batch.is_none());
 
         // Put the tx we took back

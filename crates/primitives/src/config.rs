@@ -70,7 +70,7 @@ mod tests {
     use super::*;
 
     #[derive(Debug, Deserialize, Clone)]
-    struct StubConfig;
+    struct StubConfig {}
     impl Configurable for StubConfig {}
 
     #[test]
