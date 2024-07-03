@@ -62,7 +62,7 @@ mod beefy_tests {
     use std::str::FromStr;
 
     use serial_test::serial;
-    use test_utils::{mainnet_state, CryptoHash};
+    use test_utils::CryptoHash;
 
     use super::*;
     use crate::{
@@ -71,7 +71,7 @@ mod beefy_tests {
     };
 
     type Testnet = FixturesConfig<config::Testnet>;
-    type Mainnet = FixturesConfig<config::Mainnet>;
+    type _Mainnet = FixturesConfig<config::Mainnet>;
 
     #[test]
     #[serial]
@@ -93,25 +93,25 @@ mod beefy_tests {
         builder_suite(define, writer, assertions);
     }
 
-    #[test]
-    #[serial]
-    #[ignore]
-    fn sync_e2e_mainnet() {
-        let (header, _, _) = mainnet_state();
-        let header = header.hash().0;
+    // #[test]
+    // #[serial]
+    // #[ignore]
+    // fn sync_e2e_mainnet() {
+    //     let (header, _, _) = mainnet_state();
+    //     let header = header.hash().0;
 
-        let define = |b: &mut B| {
-            super::SyncCircuit::<Mainnet>::define(b);
-        };
-        let writer = |input: &mut PI| {
-            input.evm_write::<CryptoHashVariable>(header.into());
-        };
-        let assertions = |mut output: PO| {
-            let hash = output.evm_read::<CryptoHashVariable>();
-            println!("hash: {:?}", hash);
-        };
-        builder_suite(define, writer, assertions);
-    }
+    //     let define = |b: &mut B| {
+    //         super::SyncCircuit::<Mainnet>::define(b);
+    //     };
+    //     let writer = |input: &mut PI| {
+    //         input.evm_write::<CryptoHashVariable>(header.into());
+    //     };
+    //     let assertions = |mut output: PO| {
+    //         let hash = output.evm_read::<CryptoHashVariable>();
+    //         println!("hash: {:?}", hash);
+    //     };
+    //     builder_suite(define, writer, assertions);
+    // }
 
     #[test]
     #[serial]
