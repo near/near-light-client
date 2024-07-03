@@ -286,13 +286,12 @@ pub struct ProofInputVariable {
 
 #[cfg(test)]
 mod tests {
-    use near_light_client_primitives::NUM_BLOCK_PRODUCER_SEATS;
 
     use super::*;
     use crate::{
         config::{self, FixturesConfig},
         test_utils::{builder_suite, test_state, testnet_state, B, PI, PO},
-        variables::{BlockVariableValue, HeaderVariable, ValidatorsVariable},
+        variables::{BlockVariableValue, HeaderVariable},
     };
 
     type Testnet = FixturesConfig<config::Testnet>;
@@ -306,70 +305,73 @@ mod tests {
         let define = |b: &mut B| {
             let header = b.read::<HeaderVariable>();
             let trusted_header_hash = header.hash(b);
-
             let (_header, _bps, next_block) =
-                InputFetcher::<Testnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
-            b.write::<BlockVariable<{ Testnet::BPS }>>(next_block);
+                InputFetcher::<Mainnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
+            b.write::<BlockVariable<{ Mainnet::BPS }>>(next_block);
 
             let header = b.read::<HeaderVariable>();
             let trusted_header_hash = header.hash(b);
             let (_header, _bps, next_block) =
-                InputFetcher::<Mainnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
-            b.write::<BlockVariable<{ Mainnet::BPS }>>(next_block);
+                InputFetcher::<Testnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
+            b.write::<BlockVariable<{ Testnet::BPS }>>(next_block);
         };
 
         let writer = |input: &mut PI| {
             input.write::<HeaderVariable>(main_h.into());
             input.write::<HeaderVariable>(test_h.into());
         };
+
         let assertions = |mut output: PO| {
-            let inputs = output.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
-            let nbh: BlockVariableValue<NUM_BLOCK_PRODUCER_SEATS, GoldilocksField> = main_nb.into();
+            let inputs = output.read::<BlockVariable<{ Mainnet::BPS }>>();
+            let nbh: BlockVariableValue<{ Mainnet::BPS }, GoldilocksField> = main_nb.into();
             pretty_assertions::assert_eq!(format!("{:#?}", inputs), format!("{:#?}", nbh));
 
-            let inputs = output.read::<BlockVariable<NUM_BLOCK_PRODUCER_SEATS>>();
-            let nbh: BlockVariableValue<NUM_BLOCK_PRODUCER_SEATS, GoldilocksField> = test_nb.into();
+            let inputs = output.read::<BlockVariable<{ Testnet::BPS }>>();
+            let nbh: BlockVariableValue<{ Testnet::BPS }, GoldilocksField> = test_nb.into();
             pretty_assertions::assert_eq!(format!("{:#?}", inputs), format!("{:#?}", nbh));
         };
         builder_suite(define, writer, assertions);
     }
 
-    #[test]
-    fn test_fetch_corner_cases() {
-        let corner_cases = [
-            // This is the current investigated one
-            bytes32!("0x84ebac64b1fd5809ac2c19193100c7e346b765b98a6e3f6de3e40b7d12d3425e"),
-        ];
-        let fetcher = InputFetcher::<Testnet>(Default::default());
+    // TODO: turns out this resolved itself on live after 2 weeks without doing
+    // anything, probably platform issue #[test]
+    // fn test_fetch_corner_cases() {
+    //     let corner_cases = [
+    //         // This is the current investigated one
+    //         bytes32!("
+    // 0x84ebac64b1fd5809ac2c19193100c7e346b765b98a6e3f6de3e40b7d12d3425e"),
+    //     ];
+    //     let fetcher = InputFetcher::<Testnet>(Default::default());
 
-        let define = |b: &mut B| {
-            for _ in corner_cases {
-                let h = b.read::<CryptoHashVariable>();
+    //     let define = |b: &mut B| {
+    //         for _ in corner_cases {
+    //             let h = b.read::<CryptoHashVariable>();
 
-                let (header, bps, next_block) = fetcher.fetch_sync(b, &h);
+    //             let (header, bps, next_block) = fetcher.fetch_sync(b, &h);
 
-                b.write::<HeaderVariable>(header.clone());
-                b.write::<ValidatorsVariable<_>>(bps.clone());
-                b.write::<BlockVariable<_>>(next_block.clone());
+    //             b.write::<HeaderVariable>(header.clone());
+    //             b.write::<ValidatorsVariable<_>>(bps.clone());
+    //             b.write::<BlockVariable<_>>(next_block.clone());
 
-                // let approval = b.reconstruct_approval_message(&next_block);
-                // b.validate_signatures(&next_block.approvals_after_next, &bps,
-                // approval);
-            }
-        };
-        let writer = |input: &mut PI| {
-            for hash in corner_cases {
-                input.write::<CryptoHashVariable>(hash);
-            }
-        };
-        let assertions = |mut output: PO| {
-            for _hash in corner_cases {
-                let _header = output.read::<HeaderVariable>();
-                let _bps = output.read::<ValidatorsVariable<{ Testnet::BPS }>>();
-                let _nb = output.read::<BlockVariable<{ Testnet::BPS }>>();
-            }
-            // TODO: assert on these
-        };
-        builder_suite(define, writer, assertions);
-    }
+    //             // let approval =
+    // b.reconstruct_approval_message(&next_block);             //
+    // b.validate_signatures(&next_block.approvals_after_next, &bps,
+    //             // approval);
+    //         }
+    //     };
+    //     let writer = |input: &mut PI| {
+    //         for hash in corner_cases {
+    //             input.write::<CryptoHashVariable>(hash);
+    //         }
+    //     };
+    //     let assertions = |mut output: PO| {
+    //         for _hash in corner_cases {
+    //             let _header = output.read::<HeaderVariable>();
+    //             let _bps = output.read::<ValidatorsVariable<{ Testnet::BPS
+    // }>>();             let _nb = output.read::<BlockVariable<{
+    // Testnet::BPS }>>();         }
+    //         // TODO: assert on these
+    //     };
+    //     builder_suite(define, writer, assertions);
+    // }
 }
