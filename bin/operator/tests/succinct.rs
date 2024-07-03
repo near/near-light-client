@@ -48,14 +48,14 @@ async fn client() -> Client {
 //     println!("verify with {:?}", s);
 // }
 
-#[tokio::test]
-async fn test_check_proof() {
-    let c = client().await;
-    let request_id = "76688871-5262-4384-9891-0a68fe7a2efb";
-    let p = c.wait_for_proof(request_id).await.unwrap();
-    println!("found proof: {:?}", p);
-    assert_eq!(
-        p.0,
-        Uuid::from_str("3dcaeed9-b467-4d4f-bfb5-c22bac100527").unwrap()
-    );
-}
+// #[tokio::test]
+// async fn test_check_proof() {
+//     let c = client().await;
+//     let request_id = "76688871-5262-4384-9891-0a68fe7a2efb";
+//     let p = c.wait_for_proof(request_id).await.unwrap();
+//     println!("found proof: {:?}", p);
+//     assert_eq!(
+//         p.0,
+//         Uuid::from_str("3dcaeed9-b467-4d4f-bfb5-c22bac100527").unwrap()
+//     );
+// }
