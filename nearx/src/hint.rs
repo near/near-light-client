@@ -295,25 +295,18 @@ mod tests {
     };
 
     type Testnet = FixturesConfig<config::Testnet>;
-    type Mainnet = FixturesConfig<config::Mainnet>;
+    type _Mainnet = FixturesConfig<config::Mainnet>;
 
     #[test]
     fn test_fetch_header() {
         let (main_h, _, main_nb) = test_state();
         let (test_h, _, test_nb) = testnet_state();
 
-        let define = |b: &mut B| {
-            let header = b.read::<HeaderVariable>();
-            let trusted_header_hash = header.hash(b);
-            let (_header, _bps, next_block) =
-                InputFetcher::<Mainnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
-            b.write::<BlockVariable<{ Mainnet::BPS }>>(next_block);
+        type Mainnet = FixturesConfig<config::Mainnet, 102>;
 
-            let header = b.read::<HeaderVariable>();
-            let trusted_header_hash = header.hash(b);
-            let (_header, _bps, next_block) =
-                InputFetcher::<Testnet>(Default::default()).fetch_sync(b, &trusted_header_hash);
-            b.write::<BlockVariable<{ Testnet::BPS }>>(next_block);
+        let define = |b: &mut B| {
+            test_fetch_data::<Mainnet>(b);
+            test_fetch_data::<Testnet>(b);
         };
 
         let writer = |input: &mut PI| {
@@ -331,6 +324,22 @@ mod tests {
             pretty_assertions::assert_eq!(format!("{:#?}", inputs), format!("{:#?}", nbh));
         };
         builder_suite(define, writer, assertions);
+    }
+
+    // This is a compiler bug because we use the [();BPS] syntax to constrain the
+    // const generic
+    #[allow(unused)]
+    fn test_fetch_data<C>(b: &mut CircuitBuilder<DefaultParameters, 2>)
+    where
+        C: Config,
+        [(); C::BPS]:,
+    {
+        let header = b.read::<HeaderVariable>();
+        let trusted_header_hash = header.hash(b);
+
+        let (_header, _bps, next_block) =
+            InputFetcher::<C>(Default::default()).fetch_sync(b, &trusted_header_hash);
+        b.write::<BlockVariable<{ C::BPS }>>(next_block);
     }
 
     // TODO: turns out this resolved itself on live after 2 weeks without doing

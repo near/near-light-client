@@ -1,8 +1,6 @@
 #![allow(dead_code)] // Justification: Until we decide on test feature flags
-use std::str::FromStr;
 
 use nearx_operator::{config::Config, succinct::*, BaseConfig};
-use uuid::Uuid;
 
 async fn client() -> Client {
     let _ = tracing_subscriber::fmt::try_init();
