@@ -1,11 +1,13 @@
 .EXPORT_ALL_VARIABLES:
 -include .env
 
-TAG_PREFIX?=us-docker.pkg.dev/pagoda-solutions-dev/rollup-data-availability/
+TAG_PREFIX?=us-docker.pkg.dev/pagoda-solutions-dev/rollup-data-availability
 IMAGE_TAG?=dev
 
-docker:
+docker-offchain:
 	DOCKER_BUILDKIT=1 docker build --progress=plain -t $(TAG_PREFIX)/light-client:$(IMAGE_TAG) -f Dockerfile.offchain .
+
+docker-operator:
 	docker build -t $(TAG_PREFIX)/nearx-operator:$(IMAGE_TAG) -f Dockerfile.operator .
 
 test:
