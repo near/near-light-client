@@ -29,7 +29,7 @@ jobs:
         with:
           context: .
           push: true
-          file: Dockerfile
+          file: Dockerfile.offchain
           tags: |
             ghcr.io/near/near-light-client/light-client:${{ github.sha }}
             ghcr.io/near/near-light-client/light-client:latest
