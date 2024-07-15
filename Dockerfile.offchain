@@ -23,7 +23,11 @@ RUN cp target/release/near-light-client /near/near-light-client
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y openssl libssl-dev pkg-config ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /near/near-light-client /usr/local/bin
-COPY --from=build /near/default.toml /var/light-client.toml
+COPY --from=build /near/config.toml /var/near-light-client/config.toml
+
+ENV NEAR_LIGHT_CLIENT_DIR=/var/near-light-client
+ENV NEAR_LIGHT_CLIENT_CONFIG_FILE=/var/near-light-client/config.toml
+ENV NEAR_LIGHT_CLIENT_MODE=default
 
 RUN ldd /usr/local/bin/near-light-client
 ENTRYPOINT ["/usr/local/bin/near-light-client"]
